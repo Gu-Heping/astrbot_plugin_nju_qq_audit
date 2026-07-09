@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -222,6 +222,46 @@ class RequestsStore:
         async with self._lock:
             store = self._read_unlocked()
             return [self._to_request(data) for data in store["by_id"].values()]
+
+    @staticmethod
+    def _parse_created_at(iso_text: str) -> datetime | None:
+        try:
+            return datetime.fromisoformat(iso_text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    async def list_since(self, days: int = 7) -> list[PendingRequest]:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+        records = await self.list_all()
+        result: list[PendingRequest] = []
+        for req in records:
+            created = self._parse_created_at(req.created_at)
+            if created is None or created >= cutoff:
+                result.append(req)
+        result.sort(key=lambda r: r.created_at, reverse=True)
+        return result
+
+    async def list_unknown_samples(self, days: int = 7, limit: int = 5) -> list[PendingRequest]:
+        limit = max(1, min(int(limit), 30))
+        records = await self.list_since(days)
+        samples = [
+            r
+            for r in records
+            if r.decision == "manual_review" or (r.parsed and not any(r.parsed.values()))
+        ]
+        return samples[:limit]
+
+    async def count_today(self) -> int:
+        today = datetime.now(timezone.utc).date()
+        count = 0
+        for req in await self.list_all():
+            created = self._parse_created_at(req.created_at)
+            if created and created.date() == today:
+                count += 1
+        return count
+
+    async def count_processed(self) -> int:
+        return sum(1 for r in await self.list_all() if r.status == "processed")
 
     async def clear_all(self) -> None:
         async with self._lock:

@@ -38,6 +38,13 @@ from admin.ux_formatter import (
 from admin.handlers import PluginContext
 from admin.ctx_compat import ensure_ctx_compat
 from admin.pending import fetch_pending_for_admin
+from admin.release import (
+    format_release_help,
+    format_release_preview,
+    format_release_result,
+    list_releasable,
+)
+from admin.report import build_report_data, format_report, format_unknown
 from admin.permissions import can_run_command
 from data_source.njutable_provider import load_students_for_audit
 from onebot.event_extract import extract_group_request, extract_raw_dict, is_notice_event
@@ -48,7 +55,7 @@ from probe.formatter import format_event_summary, format_raw_event, format_recen
 from probe.sanitizer import build_missing_raw_summary, classify_raw_message, sanitize
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
-PLUGIN_VERSION = "v0.3.2"
+PLUGIN_VERSION = "v0.3.3"
 
 
 @register(
@@ -105,6 +112,7 @@ class NjuQqAuditPlugin(Star):
         pending = await self.ctx.requests.list_pending(limit=1000)
         sync_state = self.ctx.cache.load_sync_state()
         adapter_probe = await self.ctx.get_adapter_probe()
+        releasable = await list_releasable(self.ctx.requests, self._settings())
         return format_home(
             self._settings(),
             effective_mode=mode,
@@ -112,7 +120,22 @@ class NjuQqAuditPlugin(Star):
             pending_count=len(pending),
             sync_state=sync_state,
             adapter_probe=adapter_probe,
+            releasable_count=len(releasable),
+            release_running=self.ctx.release_service.is_running,
         )
+
+    async def _run_release_batch(self, event: AstrMessageEvent, count: int | None) -> str:
+        result = await self.ctx.release_service.run_batch(
+            requests_store=self.ctx.requests,
+            pipeline=self.ctx.pipeline,
+            settings=self._settings(),
+            admin_user_id=event.get_sender_id(),
+            count=count,
+            audit_log=self.ctx.audit,
+        )
+        if result is None:
+            return "已有分批任务进行中，请稍后再试。"
+        return format_release_result(result, self._settings())
 
     def _probe_group_matches(self, group_id: str) -> bool:
         targets = self._settings().target_group_ids
@@ -398,14 +421,119 @@ class NjuQqAuditPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("sync")
-    async def audit_sync(self, event: AstrMessageEvent):
+    async def audit_sync(self, event: AstrMessageEvent, action: str = ""):
         allowed, message = can_run_command(self._settings(), "sync", event)
         if not allowed:
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
-        result = await self.ctx.run_sync()
+        if action == "status":
+            sync_state = self.ctx.cache.load_sync_state()
+            yield event.plain_result(
+                self.ctx.sync_scheduler.format_status(self._settings(), sync_state)
+            )
+            return
+        result = await self.ctx.run_sync(source="manual")
         yield event.plain_result(result)
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("release")
+    async def audit_release(
+        self, event: AstrMessageEvent, arg1: str = "", arg2: str = "", arg3: str = ""
+    ):
+        allowed, message = can_run_command(self._settings(), "release", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        settings = self._settings()
+        releasable = await list_releasable(self.ctx.requests, settings)
+        if not arg1:
+            yield event.plain_result(format_release_help(len(releasable), settings))
+            return
+        if arg1 == "preview":
+            preview = await self.ctx.release_service.preview(self.ctx.requests, settings)
+            yield event.plain_result(format_release_preview(preview, settings))
+            return
+        if arg2 != "confirm":
+            yield event.plain_result("请使用 /audit release <数量|all> confirm")
+            return
+        if arg1 == "all":
+            count = None
+        else:
+            try:
+                count = max(1, int(arg1))
+            except ValueError:
+                yield event.plain_result("数量无效，请使用数字或 all")
+                return
+        yield event.plain_result(await self._run_release_batch(event, count))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("batch")
+    async def audit_batch(
+        self, event: AstrMessageEvent, kind: str = "", count: str = "", confirm: str = ""
+    ):
+        allowed, message = can_run_command(self._settings(), "batch", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        if kind != "strong" or confirm != "confirm":
+            yield event.plain_result("请使用 /audit batch strong 10 confirm")
+            return
+        try:
+            batch_count = max(1, int(count))
+        except ValueError:
+            yield event.plain_result("请使用 /audit batch strong 10 confirm")
+            return
+        yield event.plain_result(await self._run_release_batch(event, batch_count))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("temp")
+    async def audit_temp(self, event: AstrMessageEvent, count: str = "", confirm: str = ""):
+        allowed, message = can_run_command(self._settings(), "temp", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        if confirm != "confirm":
+            yield event.plain_result("请使用 /audit temp 10 confirm")
+            return
+        try:
+            batch_count = max(1, int(count))
+        except ValueError:
+            yield event.plain_result("请使用 /audit temp 10 confirm")
+            return
+        yield event.plain_result(await self._run_release_batch(event, batch_count))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("unknown")
+    async def audit_unknown(self, event: AstrMessageEvent, limit: int = 5):
+        allowed, message = can_run_command(self._settings(), "unknown", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        data = await build_report_data(self.ctx.requests, self._settings(), days=7, sample_limit=limit)
+        yield event.plain_result(format_unknown(data, sample_limit=limit))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("report")
+    async def audit_report(self, event: AstrMessageEvent):
+        allowed, message = can_run_command(self._settings(), "report", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        data = await build_report_data(self.ctx.requests, self._settings(), days=7)
+        sync_state = self.ctx.cache.load_sync_state()
+        yield event.plain_result(
+            format_report(
+                data,
+                sync_state,
+                release_running=self.ctx.release_service.is_running,
+            )
+        )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("pending")
@@ -501,10 +629,11 @@ class NjuQqAuditPlugin(Star):
             return
         await self._record_admin_session(event)
         if kind != "strong" or confirm != "confirm":
-            yield event.plain_result("请使用 /audit process strong confirm")
+            yield event.plain_result(
+                "请使用 /audit process strong confirm（建议使用 /audit release 10 confirm）"
+            )
             return
-        results = await self.ctx.pipeline.process_strong_pending(event.get_sender_id())
-        yield event.plain_result("\n".join(results) if results else "没有可处理的 strong pending 请求。")
+        yield event.plain_result(await self._run_release_batch(event, None))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("stats")

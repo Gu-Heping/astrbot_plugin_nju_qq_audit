@@ -24,7 +24,10 @@ class DummyEvent:
 
 def test_non_admin_denied_for_new_commands():
     settings = load_settings(DummyConfig({"admin_qq_ids": "111"}))
-    for cmd in ("list", "view", "ok", "no", "auto", "manual", "record", "off"):
+    for cmd in (
+        "list", "view", "ok", "no", "auto", "manual", "record", "off",
+        "release", "unknown", "report", "batch", "temp",
+    ):
         allowed, msg = can_run_command(settings, cmd, DummyEvent("222"))
         assert not allowed, cmd
         assert msg == "无权限"

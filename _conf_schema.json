@@ -123,5 +123,40 @@
     "description": "探针内存中保留的最近事件数量上限",
     "type": "int",
     "default": 20
+  },
+  "batch_approve_interval_ms": {
+    "description": "分批通过时每次 approve 之间的间隔（毫秒），避免欢迎消息刷屏",
+    "type": "int",
+    "default": 3000
+  },
+  "batch_approve_max_count": {
+    "description": "单次分批通过最多处理多少条",
+    "type": "int",
+    "default": 20
+  },
+  "auto_sync_enabled": {
+    "description": "是否启用定时同步 NJUTable",
+    "type": "bool",
+    "default": false
+  },
+  "auto_sync_on_startup": {
+    "description": "插件启动时是否自动同步一次",
+    "type": "bool",
+    "default": false
+  },
+  "auto_sync_interval_minutes": {
+    "description": "定时同步间隔（分钟），不少于 10",
+    "type": "int",
+    "default": 360
+  },
+  "auto_sync_notify_admin": {
+    "description": "定时同步失败时是否通知管理员",
+    "type": "bool",
+    "default": false
+  },
+  "njutable_col_qq": {
+    "description": "列名：QQ（可选，仅辅助参考）",
+    "type": "string",
+    "default": "QQ"
   }
 }

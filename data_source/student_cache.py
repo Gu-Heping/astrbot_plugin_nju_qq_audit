@@ -20,6 +20,8 @@ class SyncState:
     row_count: int = 0
     filtered_count: int = 0
     source: str = "mock"
+    next_sync_at: str | None = None
+    last_sync_source: str | None = None
 
 
 class StudentCache:
@@ -60,6 +62,8 @@ class StudentCache:
                     row_count=int(raw.get("row_count", 0)),
                     filtered_count=int(raw.get("filtered_count", 0)),
                     source=str(raw.get("source", "mock")),
+                    next_sync_at=raw.get("next_sync_at"),
+                    last_sync_source=raw.get("last_sync_source"),
                 )
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             pass

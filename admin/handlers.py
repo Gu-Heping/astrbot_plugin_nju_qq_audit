@@ -6,9 +6,11 @@ from typing import Any
 import aiohttp
 
 from admin.notify import AdminNotifier
+from admin.release import ReleaseService
 from config import PluginSettings, load_settings
 from core.pipeline import AuditPipeline
 from data_source.student_cache import StudentCache
+from data_source.sync_scheduler import SyncScheduler
 from onebot.actions import ActionClient, create_action_client, create_http_notify_client
 from onebot.compat import invoke_probe_api
 from onebot.platform_cache import cache_event_platform
@@ -54,6 +56,8 @@ class PluginContext:
         self._http_session: aiohttp.ClientSession | None = None
         self._platform_id: str | None = None
         self._event_bot: Any | None = None
+        self.release_service = ReleaseService()
+        self.sync_scheduler = SyncScheduler()
 
     def reload_settings(self) -> None:
         self.settings = load_settings(self.config)
@@ -84,8 +88,23 @@ class PluginContext:
             await self._http_notify_client.start()
         self._http_session = aiohttp.ClientSession()
         await self._probe_adapter()
+        await self._start_sync_scheduler()
+
+    async def _start_sync_scheduler(self) -> None:
+        async def _notify(msg: str) -> None:
+            if self.settings.admin_notify:
+                await self.notifier._notify_admins(f"[audit] 定时同步失败\n{msg}")
+
+        await self.sync_scheduler.start(
+            self.settings,
+            self.cache,
+            self.run_sync,
+            notify_on_failure=_notify,
+        )
 
     async def stop(self) -> None:
+        self.release_service.request_cancel()
+        await self.sync_scheduler.stop()
         await self.actions.close()
         if self._http_notify_client is not None:
             await self._http_notify_client.close()
@@ -125,22 +144,27 @@ class PluginContext:
 
         return get_effective_mode(self.settings, self.runtime.get_mode_override())
 
-    async def run_sync(self) -> str:
+    async def run_sync(self, *, source: str = "manual") -> str:
         from data_source.njutable_provider import sync_students
 
-        session = self._http_session or aiohttp.ClientSession()
-        own = self._http_session is None
-        try:
-            state = await sync_students(self.settings, self.cache, session)
-            return (
-                f"同步成功: source={state.source}, rows={state.row_count}, "
-                f"filtered={state.filtered_count}"
-            )
-        except Exception as exc:
-            cached = self.cache.load_students()
-            return (
-                f"同步失败: {type(exc).__name__}。已保留旧缓存 {len(cached)} 条。"
-            )
-        finally:
-            if own:
-                await session.close()
+        async def _do_sync() -> str:
+            session = self._http_session or aiohttp.ClientSession()
+            own = self._http_session is None
+            try:
+                state = await sync_students(self.settings, self.cache, session)
+                state.last_sync_source = source
+                self.cache.save_sync_state(state)
+                return (
+                    f"同步成功: source={state.source}, rows={state.row_count}, "
+                    f"filtered={state.filtered_count}"
+                )
+            except Exception as exc:
+                cached = self.cache.load_students()
+                return (
+                    f"同步失败: {type(exc).__name__}。已保留旧缓存 {len(cached)} 条。"
+                )
+            finally:
+                if own:
+                    await session.close()
+
+        return await self.sync_scheduler.run_once(_do_sync, self.cache, source=source)

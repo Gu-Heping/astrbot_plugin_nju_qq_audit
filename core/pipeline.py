@@ -145,6 +145,7 @@ class AuditPipeline:
                 "notice_no": parsed.notice_no,
                 "major": parsed.major,
                 "academy": parsed.academy,
+                "notice_no_candidates": parsed.notice_no_candidates,
             },
             match={
                 "strength": match.strength,
@@ -152,6 +153,7 @@ class AuditPipeline:
                 "reason": match.reason,
                 "matched_by": match.matched_by,
                 "matched_student_key": match.matched_student_key,
+                "qq_match": match.qq_match,
             },
             decision=decision.decision,
             confidence=decision.confidence,
@@ -307,13 +309,21 @@ class AuditPipeline:
         return result
 
     async def process_strong_pending(self, admin_user_id: str) -> list[str]:
-        results: list[str] = []
-        pending_list = await self.requests.list_pending(limit=50)
-        for req in pending_list:
-            if req.decision != "approve" or req.match_strength != "strong":
-                continue
-            if req.processed_at:
-                continue
-            result = await self.admin_approve(req, admin_user_id)
-            results.append(f"{req.id}: {'ok' if result.ok else result.message}")
-        return results
+        from admin.release import ReleaseService
+
+        service = ReleaseService()
+        result = await service.run_batch(
+            requests_store=self.requests,
+            pipeline=self,
+            settings=self.settings,
+            admin_user_id=admin_user_id,
+            count=None,
+            audit_log=self.audit,
+        )
+        if result is None:
+            return ["已有分批任务进行中，请稍后再试。"]
+        if not result.lines:
+            return ["没有可处理的 strong pending 请求。"]
+        return [
+            f"{line.request_id}: {'ok' if line.ok else line.message}" for line in result.lines
+        ]
