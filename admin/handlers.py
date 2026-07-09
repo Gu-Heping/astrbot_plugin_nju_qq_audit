@@ -10,6 +10,7 @@ from config import PluginSettings, load_settings
 from core.pipeline import AuditPipeline
 from data_source.student_cache import StudentCache
 from onebot.actions import ActionClient, create_action_client, create_http_notify_client
+from onebot.compat import invoke_probe_api
 from onebot.platform_cache import cache_event_platform
 from storage.admin_session_store import AdminSessionStore
 from storage.audit_log import AuditLog
@@ -91,7 +92,7 @@ class PluginContext:
         from onebot.astrbot_adapter_actions import AstrBotAdapterActionClient
 
         if isinstance(self.actions, AstrBotAdapterActionClient):
-            self._adapter_probe = await self.actions.probe_api()
+            self._adapter_probe = await invoke_probe_api(self.actions)
         else:
             self._adapter_probe = {"adapter_action_available": "n/a"}
 

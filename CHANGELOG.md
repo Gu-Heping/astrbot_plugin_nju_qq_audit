@@ -2,6 +2,12 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.2.4] - 2026-07-09
+
+### 修复
+
+- `probe_api` 调用兼容旧签名（热重载新旧代码混用时不再因多传 `event` 崩溃）
+
 ## [v0.2.3] - 2026-07-09
 
 ### 修复

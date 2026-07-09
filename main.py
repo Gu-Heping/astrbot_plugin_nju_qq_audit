@@ -26,13 +26,14 @@ from admin.handlers import PluginContext
 from admin.permissions import can_run_command
 from data_source.njutable_provider import load_students_for_audit
 from onebot.event_extract import extract_group_request, extract_raw_dict, is_notice_event
+from onebot.compat import invoke_probe_api
 from onebot.platform_cache import cache_event_platform
 from probe.event_store import ProbeEventStore, utc_now_iso
 from probe.formatter import format_event_summary, format_raw_event, format_recent as format_probe_recent
 from probe.sanitizer import build_missing_raw_summary, classify_raw_message, sanitize
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
-PLUGIN_VERSION = "v0.2.3"
+PLUGIN_VERSION = "v0.2.4"
 
 
 @register(
@@ -345,10 +346,11 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
+        cache_event_platform(self.ctx, event)
         from onebot.astrbot_adapter_actions import AstrBotAdapterActionClient
 
         if isinstance(self.ctx.actions, AstrBotAdapterActionClient):
-            probe = await self.ctx.actions.probe_api(event)
+            probe = await invoke_probe_api(self.ctx.actions, event)
         else:
             probe = {
                 "adapter_found": "n/a",
