@@ -5,7 +5,6 @@ from typing import Any
 
 import aiohttp
 
-from admin.ctx_compat import ensure_ctx_compat
 from admin.notify import AdminNotifier
 from config import PluginSettings, load_settings
 from core.pipeline import AuditPipeline
@@ -18,16 +17,6 @@ from storage.audit_log import AuditLog
 from storage.list_cache import AdminListCacheStore
 from storage.requests_store import RequestsStore
 from storage.runtime_store import RuntimeStore
-
-
-async def list_pending_for_admin(
-    ctx: "PluginContext", admin_id: str, limit: int = 10
-) -> tuple[list, dict[int, str]]:
-    ensure_ctx_compat(ctx)
-    limit = max(1, min(int(limit), 50))
-    items = await ctx.requests.list_pending(limit=limit)
-    index_map = await ctx.list_cache.refresh(admin_id, [item.id for item in items])
-    return items, index_map
 
 
 class PluginContext:
@@ -124,7 +113,9 @@ class PluginContext:
         await self.admin_sessions.record(admin_qq, umo)
 
     async def list_pending_for_admin(self, admin_id: str, limit: int = 10) -> tuple[list, dict[int, str]]:
-        return await list_pending_for_admin(self, admin_id, limit)
+        from admin.pending import fetch_pending_for_admin
+
+        return await fetch_pending_for_admin(self, admin_id, limit)
 
     def remember_event_platform(self, event: Any) -> None:
         cache_event_platform(self, event)

@@ -2,6 +2,12 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.3.2] - 2026-07-09
+
+### 修复
+
+- 移除 `main.py` 对 `admin.handlers.list_pending_for_admin` 的导入，避免热重载/部分更新时文件版本不一致导致插件无法加载
+
 ## [v0.3.1] - 2026-07-09
 
 ### 修复
