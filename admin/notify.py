@@ -1,16 +1,42 @@
 from __future__ import annotations
 
+import logging
+from typing import Any, Callable
+
 from config import PluginSettings
-from onebot.http_actions import OneBotHttpActions
+from onebot.actions import ActionClient
+
+logger = logging.getLogger(__name__)
 
 
 class AdminNotifier:
-    def __init__(self, settings: PluginSettings, actions: OneBotHttpActions) -> None:
+    def __init__(
+        self,
+        settings: PluginSettings,
+        actions: ActionClient,
+        astrbot_context: Any,
+        admin_sessions: Any,
+        http_notify_client_getter: Callable[[], ActionClient | None],
+    ) -> None:
         self.settings = settings
         self.actions = actions
+        self.astrbot_context = astrbot_context
+        self.admin_sessions = admin_sessions
+        self._http_notify_client_getter = http_notify_client_getter
 
-    def reload_settings(self, settings: PluginSettings) -> None:
+    def reload_settings(
+        self,
+        settings: PluginSettings,
+        actions: ActionClient,
+        astrbot_context: Any,
+        admin_sessions: Any,
+        http_notify_client_getter: Callable[[], ActionClient | None],
+    ) -> None:
         self.settings = settings
+        self.actions = actions
+        self.astrbot_context = astrbot_context
+        self.admin_sessions = admin_sessions
+        self._http_notify_client_getter = http_notify_client_getter
 
     async def notify_manual_review(
         self,
@@ -64,4 +90,30 @@ class AdminNotifier:
         for admin_id in self.settings.admin_qq_ids:
             if exclude_user_id and admin_id == exclude_user_id:
                 continue
-            await self.actions.send_private_msg_safe(admin_id, message)
+            sent = await self._send_to_admin(admin_id, message)
+            if not sent:
+                logger.warning(
+                    "[audit] 无法通知管理员 %s：无 UMO 且 HTTP fallback 不可用。"
+                    "请管理员私聊 /audit status 建立通知通道。",
+                    admin_id,
+                )
+
+    async def _send_to_admin(self, admin_id: str, message: str) -> bool:
+        umo = self.admin_sessions.get_umo(admin_id)
+        if umo:
+            try:
+                from astrbot.api.event import MessageChain
+
+                ok = await self.astrbot_context.send_message(
+                    umo, MessageChain().message(message)
+                )
+                if ok:
+                    return True
+            except Exception as exc:
+                logger.warning("[audit] context.send_message 失败 admin=%s: %s", admin_id, exc)
+
+        http_client = self._http_notify_client_getter()
+        if http_client is not None:
+            result = await http_client.send_private_msg_safe(admin_id, message)
+            return result.ok
+        return False

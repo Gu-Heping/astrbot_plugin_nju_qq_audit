@@ -1,40 +1,42 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import aiohttp
 
-from admin.formatter import (
-    format_help,
-    format_pending_list,
-    format_probe_status,
-    format_request_detail,
-    format_stats,
-    format_status,
-)
 from admin.notify import AdminNotifier
-from admin.permissions import can_run_command
-from config import PluginSettings, get_effective_mode, load_settings
+from config import PluginSettings, load_settings
 from core.pipeline import AuditPipeline
-from data_source.njutable_provider import load_students_for_audit, sync_students
 from data_source.student_cache import StudentCache
-from onebot.http_actions import OneBotHttpActions
+from onebot.actions import ActionClient, create_action_client, create_http_notify_client
+from storage.admin_session_store import AdminSessionStore
 from storage.audit_log import AuditLog
 from storage.requests_store import RequestsStore
 from storage.runtime_store import RuntimeStore
 
 
 class PluginContext:
-    def __init__(self, data_dir: Path, config) -> None:
+    def __init__(self, data_dir: Path, config, astrbot_context: Any) -> None:
         self.data_dir = data_dir
         self.config = config
+        self.astrbot_context = astrbot_context
         self.settings = load_settings(config)
         self.cache = StudentCache(data_dir)
         self.requests = RequestsStore(data_dir / "requests.json")
         self.audit = AuditLog(data_dir / "audit.jsonl", self.settings)
         self.runtime = RuntimeStore(data_dir / "runtime.json")
-        self.actions = OneBotHttpActions(self.settings)
-        self.notifier = AdminNotifier(self.settings, self.actions)
+        self.admin_sessions = AdminSessionStore(data_dir / "admin_sessions.json")
+        self.actions: ActionClient = create_action_client(astrbot_context, self.settings)
+        self._http_notify_client: ActionClient | None = None
+        self._adapter_probe: dict[str, Any] = {}
+        self.notifier = AdminNotifier(
+            self.settings,
+            self.actions,
+            astrbot_context,
+            self.admin_sessions,
+            lambda: self._http_notify_client,
+        )
         self.pipeline = AuditPipeline(
             self.settings,
             self.requests,
@@ -49,23 +51,61 @@ class PluginContext:
     def reload_settings(self) -> None:
         self.settings = load_settings(self.config)
         self.audit.settings = self.settings
-        self.actions.settings = self.settings
-        self.notifier.reload_settings(self.settings)
-        self.pipeline.reload_settings(self.settings)
+        self.actions = create_action_client(self.astrbot_context, self.settings)
+        self._http_notify_client = create_http_notify_client(self.settings)
+        self.notifier.reload_settings(
+            self.settings,
+            self.actions,
+            self.astrbot_context,
+            self.admin_sessions,
+            lambda: self._http_notify_client,
+        )
+        self.pipeline.reload_settings(self.settings, self.actions, self.notifier)
+        self._adapter_probe = {}
 
     async def start(self) -> None:
         await self.actions.start()
+        self._http_notify_client = create_http_notify_client(self.settings)
+        if self._http_notify_client is not None:
+            await self._http_notify_client.start()
         self._http_session = aiohttp.ClientSession()
+        await self._probe_adapter()
 
     async def stop(self) -> None:
         await self.actions.close()
+        if self._http_notify_client is not None:
+            await self._http_notify_client.close()
         if self._http_session and not self._http_session.closed:
             await self._http_session.close()
 
+    async def _probe_adapter(self) -> None:
+        from onebot.astrbot_adapter_actions import AstrBotAdapterActionClient
+
+        if isinstance(self.actions, AstrBotAdapterActionClient):
+            self._adapter_probe = await self.actions.probe_api()
+        else:
+            self._adapter_probe = {"adapter_action_available": "n/a"}
+
+    async def get_adapter_probe(self) -> dict[str, Any]:
+        if not self._adapter_probe:
+            await self._probe_adapter()
+        return self._adapter_probe
+
+    async def record_admin_session(self, admin_qq: str, umo: str) -> None:
+        if not admin_qq or not umo:
+            return
+        if self.settings.admin_qq_ids and admin_qq not in self.settings.admin_qq_ids:
+            return
+        await self.admin_sessions.record(admin_qq, umo)
+
     def effective_mode(self) -> tuple[str, str]:
+        from config import get_effective_mode
+
         return get_effective_mode(self.settings, self.runtime.get_mode_override())
 
     async def run_sync(self) -> str:
+        from data_source.njutable_provider import sync_students
+
         session = self._http_session or aiohttp.ClientSession()
         own = self._http_session is None
         try:

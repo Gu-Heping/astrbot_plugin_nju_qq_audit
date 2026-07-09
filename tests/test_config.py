@@ -12,6 +12,8 @@ def test_load_settings_defaults():
     assert settings.mode == "record-only"
     assert settings.student_source == "mock"
     assert settings.njutable_page_size == 1000
+    assert settings.onebot_action_backend == "astrbot_adapter"
+    assert settings.onebot_http_url == ""
 
 
 def test_runtime_mode_override(tmp_path):

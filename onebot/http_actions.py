@@ -21,10 +21,13 @@ def _is_retryable_http_status(status: int) -> bool:
     return False
 
 
-class OneBotHttpActions:
+class HttpActionClient:
     def __init__(self, settings: PluginSettings) -> None:
         self.settings = settings
         self._session: aiohttp.ClientSession | None = None
+
+    def backend_name(self) -> str:
+        return "http"
 
     async def start(self) -> None:
         if self._session is None or self._session.closed:
@@ -38,6 +41,11 @@ class OneBotHttpActions:
     async def call_action(
         self, action: str, params: dict[str, Any]
     ) -> ActionResult:
+        if not self.settings.onebot_http_url:
+            return ActionResult(
+                ok=False,
+                message="HTTP backend enabled but onebot_http_url is empty",
+            )
         await self.start()
         assert self._session is not None
         last_result = ActionResult(ok=False, message="not attempted")
@@ -128,8 +136,12 @@ class OneBotHttpActions:
             },
         )
 
-    async def get_group_info(self, group_id: str) -> ActionResult:
-        return await self.call_action("get_group_info", {"group_id": int(group_id)})
+    async def get_login_info(self) -> ActionResult:
+        return await self.call_action("get_login_info", {})
 
     async def get_group_list(self) -> ActionResult:
         return await self.call_action("get_group_list", {})
+
+
+# Backward compatibility alias for tests/imports
+OneBotHttpActions = HttpActionClient

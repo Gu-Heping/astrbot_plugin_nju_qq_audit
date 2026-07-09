@@ -9,7 +9,8 @@
 - 模式：`record-only` / `manual` / `auto` / `off`
 - 默认 **record-only**，**不自动 reject**
 - `auto` 模式仅 **strong match**（姓名+学号 / 姓名+通知书编号）自动 approve
-- OneBot 主动操作统一走 **HTTP action**（`onebot/http_actions.py`）
+- OneBot 主动操作 **优先经 AstrBot aiocqhttp adapter**；HTTP 为可选 fallback
+- 管理员命令回复使用 AstrBot `event.plain_result(...)`；主动通知优先 `context.send_message`
 - 保留 OneBot 探针（`/audit probe *`）
 
 ## 安装
@@ -34,11 +35,19 @@ pip install -r astrbot_plugin_nju_qq_audit/requirements.txt
 |--------|------|
 | `target_group_ids` | 目标群号，逗号分隔。**为空时不处理任何入群申请** |
 | `admin_qq_ids` | 管理员 QQ，逗号分隔 |
-| `onebot_http_url` | SnowLuma OneBot HTTP 地址，如 `http://127.0.0.1:3000` |
-| `onebot_access_token` | OneBot token（如有） |
 | `student_source` | `mock` 或 `nju_table` |
 | `njutable_api_token` | SeaTable base API Token（`nju_table` 时） |
 | `njutable_table_name` | 表名，默认 `考生信息-校对表` |
+
+### 可选项（通常无需配置）
+
+| 配置项 | 说明 |
+|--------|------|
+| `onebot_action_backend` | 默认 `astrbot_adapter`；仅 adapter 无法调用 API 时改为 `http` |
+| `onebot_http_url` | HTTP fallback 地址。**通常不需要配置** |
+| `onebot_access_token` | HTTP fallback token（如有） |
+
+> 通常不需要配置 `onebot_http_url`；SnowLuma 只需通过 OneBot v11 连接 AstrBot。仅当 `/audit probe api` 显示 adapter 不可用、需启用 HTTP fallback 时，设置 `onebot_action_backend=http` 并填写 URL。
 
 ### 配置优先级
 
@@ -50,6 +59,7 @@ pip install -r astrbot_plugin_nju_qq_audit/requirements.txt
 ### 安全默认值
 
 - 默认 `mode=record-only`
+- 默认 `onebot_action_backend=astrbot_adapter`
 - 不自动 reject
 - 专业/书院 weak match 不能自动通过
 - `flag` 必须来自原始 OneBot 事件，不可自造
@@ -71,7 +81,7 @@ pip install -r astrbot_plugin_nju_qq_audit/requirements.txt
 | `/audit reject <id> confirm` | 人工拒绝 |
 | `/audit process strong confirm` | 批量处理 strong pending |
 | `/audit stats` | 统计 |
-| `/audit probe status\|last\|recent\|raw` | 探针 |
+| `/audit probe status\|last\|recent\|raw\|api` | 探针 |
 
 兼容旧命令：`/audit_probe status|last|recent`
 
@@ -79,13 +89,15 @@ pip install -r astrbot_plugin_nju_qq_audit/requirements.txt
 
 ## 真实环境测试流程
 
-1. 配置 `target_group_ids`、`admin_qq_ids`、`onebot_http_url`
-2. `/audit status` 确认 mode 与群号
-3. `/audit sync` 同步学生缓存
-4. 保持 `record-only`，用小号申请入群
-5. `/audit pending` → `/audit request <id>`
-6. 确认无误后 `/audit mode auto confirm`
-7. `/audit probe last` 确认插件层收到 `request.group.add`
+1. SnowLuma 通过 OneBot v11 连接 AstrBot（无需额外配置 HTTP 端口）
+2. 在 AstrBot 插件面板配置 `target_group_ids`、`admin_qq_ids`、NJUTable
+3. `/audit status` 确认 mode、backend 与群号
+4. `/audit probe api` 确认 adapter 可调用 OneBot API
+5. `/audit sync` 同步学生缓存
+6. 保持 `record-only`，用小号申请入群
+7. `/audit pending` → `/audit request <id>`
+8. 确认无误后 `/audit mode auto confirm`
+9. `/audit probe last` 确认插件层收到 `request.group.add`
 
 ## NJUTable / SeaTable
 
@@ -111,6 +123,7 @@ data/plugin_data/astrbot_plugin_nju_qq_audit/
 ├── requests.json
 ├── audit.jsonl
 ├── runtime.json          # 仅 mode override
+├── admin_sessions.json   # 管理员 UMO 缓存
 ├── students.cache.json
 ├── sync_state.json
 ├── probe_events.jsonl

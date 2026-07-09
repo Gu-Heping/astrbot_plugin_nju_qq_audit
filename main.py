@@ -16,6 +16,7 @@ from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 from admin.formatter import (
     format_help,
     format_pending_list,
+    format_probe_api,
     format_probe_status,
     format_request_detail,
     format_stats,
@@ -30,7 +31,7 @@ from probe.formatter import format_event_summary, format_raw_event, format_recen
 from probe.sanitizer import build_missing_raw_summary, classify_raw_message, sanitize
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
-PLUGIN_VERSION = "v0.2.0"
+PLUGIN_VERSION = "v0.2.1"
 
 
 @register(
@@ -44,7 +45,7 @@ class NjuQqAuditPlugin(Star):
         super().__init__(context)
         self.config = config
         self.data_dir = Path(get_astrbot_data_path()) / "plugin_data" / PLUGIN_NAME
-        self.ctx = PluginContext(self.data_dir, config)
+        self.ctx = PluginContext(self.data_dir, config, context)
         self.probe_store = ProbeEventStore(
             self.data_dir,
             max_recent_events=int(config.get("max_recent_events", 20)),
@@ -66,6 +67,11 @@ class NjuQqAuditPlugin(Star):
 
     def _settings(self):
         return self.ctx.settings
+
+    async def _record_admin_session(self, event: AstrMessageEvent) -> None:
+        umo = getattr(event, "unified_msg_origin", None)
+        if umo:
+            await self.ctx.record_admin_session(event.get_sender_id(), umo)
 
     def _probe_group_matches(self, group_id: str) -> bool:
         targets = self._settings().target_group_ids
@@ -121,6 +127,7 @@ class NjuQqAuditPlugin(Star):
         if not allowed:
             yield event.plain_result(message)
             return
+        await self._record_admin_session(event)
         yield event.plain_result(format_help())
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
@@ -130,10 +137,13 @@ class NjuQqAuditPlugin(Star):
         if not allowed:
             yield event.plain_result(message)
             return
+        await self._record_admin_session(event)
         mode, source = self.ctx.effective_mode()
         students = load_students_for_audit(self._settings(), self.ctx.cache)
         pending = await self.ctx.requests.list_pending(limit=1000)
         sync_state = self.ctx.cache.load_sync_state()
+        adapter_probe = await self.ctx.get_adapter_probe()
+        admin_session_stats = self.ctx.admin_sessions.stats(self._settings().admin_qq_ids)
         yield event.plain_result(
             format_status(
                 self._settings(),
@@ -144,6 +154,8 @@ class NjuQqAuditPlugin(Star):
                 sync_state=sync_state,
                 probe_count=self.probe_store.count(),
                 data_dir=str(self.data_dir),
+                adapter_probe=adapter_probe,
+                admin_session_stats=admin_session_stats,
             )
         )
 
@@ -154,6 +166,7 @@ class NjuQqAuditPlugin(Star):
         if not allowed:
             yield event.plain_result(message)
             return
+        await self._record_admin_session(event)
         if not arg:
             mode, source = self.ctx.effective_mode()
             yield event.plain_result(f"effective_mode: {mode}\nmode_source: {source}")
@@ -183,6 +196,7 @@ class NjuQqAuditPlugin(Star):
         if not allowed:
             yield event.plain_result(message)
             return
+        await self._record_admin_session(event)
         result = await self.ctx.run_sync()
         yield event.plain_result(result)
 
@@ -193,6 +207,7 @@ class NjuQqAuditPlugin(Star):
         if not allowed:
             yield event.plain_result(message)
             return
+        await self._record_admin_session(event)
         limit = max(1, min(int(limit), 50))
         items = await self.ctx.requests.list_pending(limit=limit)
         yield event.plain_result(format_pending_list(items))
@@ -204,6 +219,7 @@ class NjuQqAuditPlugin(Star):
         if not allowed:
             yield event.plain_result(message)
             return
+        await self._record_admin_session(event)
         req = await self.ctx.requests.resolve_by_id_or_prefix(req_id)
         if not req:
             yield event.plain_result(f"未找到请求: {req_id}")
@@ -217,6 +233,7 @@ class NjuQqAuditPlugin(Star):
         if not allowed:
             yield event.plain_result(message)
             return
+        await self._record_admin_session(event)
         if confirm != "confirm":
             yield event.plain_result("请使用 /audit approve <id> confirm")
             return
@@ -234,6 +251,7 @@ class NjuQqAuditPlugin(Star):
         if not allowed:
             yield event.plain_result(message)
             return
+        await self._record_admin_session(event)
         if confirm != "confirm":
             yield event.plain_result("请使用 /audit reject <id> confirm")
             return
@@ -251,6 +269,7 @@ class NjuQqAuditPlugin(Star):
         if not allowed:
             yield event.plain_result(message)
             return
+        await self._record_admin_session(event)
         if kind != "strong" or confirm != "confirm":
             yield event.plain_result("请使用 /audit process strong confirm")
             return
@@ -264,6 +283,7 @@ class NjuQqAuditPlugin(Star):
         if not allowed:
             yield event.plain_result(message)
             return
+        await self._record_admin_session(event)
         stats = await self.ctx.requests.get_stats()
         yield event.plain_result(format_stats(stats))
 
@@ -309,6 +329,28 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(message)
             return
         yield event.plain_result(format_probe_recent(self.probe_store.get_recent(10)))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit_probe.command("api")
+    async def audit_probe_api(self, event: AstrMessageEvent):
+        allowed, message = can_run_command(self._settings(), "probe_api", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        from onebot.astrbot_adapter_actions import AstrBotAdapterActionClient
+
+        if isinstance(self.ctx.actions, AstrBotAdapterActionClient):
+            probe = await self.ctx.actions.probe_api()
+        else:
+            probe = {
+                "adapter_found": "n/a",
+                "adapter_action_available": "n/a",
+                "test_action": "",
+                "result": "skipped",
+                "message": f"action_backend={self._settings().onebot_action_backend}",
+            }
+        yield event.plain_result(format_probe_api(probe))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit_probe.command("raw")

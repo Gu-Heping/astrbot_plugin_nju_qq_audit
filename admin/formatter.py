@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from config import PluginSettings, mask_secret
+from config import PluginSettings, mask_http_url
 from data_source.student_cache import SyncState
 
 
@@ -19,9 +19,25 @@ def format_help() -> str:
             "/audit reject <id> confirm - 人工拒绝",
             "/audit process strong confirm - 批量处理 strong match",
             "/audit stats - 统计信息",
-            "/audit probe status|last|recent - 探针命令",
+            "/audit probe status|last|recent|api - 探针命令",
         ]
     )
+
+
+def format_probe_api(probe: dict) -> str:
+    lines = ["probe api"]
+    for key in (
+        "adapter_found",
+        "adapter_action_available",
+        "test_action",
+        "result",
+        "message",
+        "user_id",
+        "nickname",
+    ):
+        if key in probe and probe[key] not in (None, ""):
+            lines.append(f"{key}: {probe[key]}")
+    return "\n".join(lines)
 
 
 def format_status(
@@ -34,29 +50,40 @@ def format_status(
     sync_state: SyncState,
     probe_count: int,
     data_dir: str,
+    adapter_probe: dict | None = None,
+    admin_session_stats: dict | None = None,
 ) -> str:
+    adapter_probe = adapter_probe or {}
+    admin_session_stats = admin_session_stats or {"cached": 0, "total": 0}
+    adapter_available = adapter_probe.get("adapter_action_available", "unknown")
     lines = [
         "NJU QQ Audit 状态",
         f"effective_mode: {effective_mode}",
         f"mode_source: {mode_source}",
+        "event_source: astrbot_adapter",
+        f"action_backend: {settings.onebot_action_backend}",
+        f"adapter_action_available: {adapter_available}",
         f"student_source: {settings.student_source}",
         f"target_group_ids: {', '.join(sorted(settings.target_group_ids)) or '(未配置)'}",
         "target_group_ids_source: plugin_config",
         f"admin_notify: {settings.admin_notify}",
+        f"admin_notify_channels: {admin_session_stats['cached']}/{admin_session_stats['total']}",
         f"students_cache_count: {student_count}",
         f"pending_count: {pending_count}",
         f"last_sync_at: {sync_state.last_sync_at or '(无)'}",
         f"last_sync_result: {sync_state.last_sync_result or '(无)'}",
-        f"onebot_http_url: {settings.onebot_http_url}",
-        f"onebot_access_token: {mask_secret(settings.onebot_access_token) or '(未设置)'}",
         f"probe_enabled: {settings.probe_enabled}",
         f"probe_recent_count: {probe_count}",
         f"data_dir: {data_dir}",
     ]
+    if settings.onebot_action_backend == "http":
+        lines.append(f"http_url: {mask_http_url(settings.onebot_http_url)}")
     if not settings.target_group_ids:
         lines.append("警告: target_group_ids 为空，不会处理任何入群申请。")
     if not admin_configured(settings):
         lines.append("admin_qq_ids: (未配置，仅 help/status/probe 调试开放)")
+    elif settings.admin_notify and admin_session_stats["cached"] < admin_session_stats["total"]:
+        lines.append("提示: 部分管理员尚未私聊 /audit status，主动通知可能无法送达。")
     return "\n".join(lines)
 
 

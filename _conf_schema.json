@@ -27,19 +27,26 @@
     "type": "bool",
     "default": true
   },
-  "onebot_http_url": {
-    "description": "SnowLuma OneBot HTTP action 地址",
+  "onebot_action_backend": {
+    "description": "OneBot 主动操作后端。优先使用 AstrBot aiocqhttp adapter；仅当 adapter 无法调用 set_group_add_request 时改用 http",
     "type": "string",
-    "default": "http://127.0.0.1:3000"
+    "default": "astrbot_adapter",
+    "options": ["astrbot_adapter", "http"]
   },
-  "onebot_access_token": {
-    "description": "OneBot access token",
+  "onebot_http_url": {
+    "description": "OneBot HTTP fallback 地址。通常无需配置；SnowLuma 只需连接 AstrBot",
     "type": "string",
     "default": "",
-    "hint": "不得写入日志、缓存或管理员回复"
+    "hint": "仅 onebot_action_backend=http 或管理员通知 HTTP fallback 时使用"
+  },
+  "onebot_access_token": {
+    "description": "OneBot HTTP access token（可选）",
+    "type": "string",
+    "default": "",
+    "hint": "仅 HTTP fallback 时使用；不得写入日志、缓存或管理员回复"
   },
   "http_timeout_ms": {
-    "description": "HTTP 超时（毫秒）",
+    "description": "HTTP fallback 超时（毫秒）",
     "type": "int",
     "default": 10000
   },

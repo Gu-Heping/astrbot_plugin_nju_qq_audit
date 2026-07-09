@@ -18,7 +18,7 @@ from storage.requests_store import RequestsStore, new_request_id
 if TYPE_CHECKING:
     from admin.notify import AdminNotifier
     from data_source.student_cache import StudentCache
-    from onebot.http_actions import OneBotHttpActions
+    from onebot.actions import ActionClient
     from storage.audit_log import AuditLog
     from storage.runtime_store import RuntimeStore
 
@@ -31,7 +31,7 @@ class AuditPipeline:
         audit: AuditLog,
         runtime: RuntimeStore,
         cache: StudentCache,
-        actions: OneBotHttpActions,
+        actions: ActionClient,
         notifier: AdminNotifier,
     ) -> None:
         self.settings = settings
@@ -42,8 +42,17 @@ class AuditPipeline:
         self.actions = actions
         self.notifier = notifier
 
-    def reload_settings(self, settings: PluginSettings) -> None:
+    def reload_settings(
+        self,
+        settings: PluginSettings,
+        actions: ActionClient | None = None,
+        notifier: AdminNotifier | None = None,
+    ) -> None:
         self.settings = settings
+        if actions is not None:
+            self.actions = actions
+        if notifier is not None:
+            self.notifier = notifier
 
     def _effective_mode(self) -> tuple[str, str]:
         return get_effective_mode(self.settings, self.runtime.get_mode_override())

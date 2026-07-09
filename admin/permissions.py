@@ -33,6 +33,7 @@ def can_run_command(settings: PluginSettings, command: str, event) -> tuple[bool
         "probe",
         "probe_status",
         "probe_last",
+        "probe_api",
     }
     if not admin_configured(settings) and command in debug_commands:
         return True, ""

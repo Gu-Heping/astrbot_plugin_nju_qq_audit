@@ -91,6 +91,7 @@ class ActionResult:
     ok: bool
     retcode: int | None = None
     message: str | None = None
+    data: dict[str, Any] | None = None
 
 
 @dataclass

@@ -1,11 +1,10 @@
 import asyncio
-from unittest.mock import AsyncMock, patch
 
 import aiohttp
 from aiohttp import web
 
 from config import load_settings
-from onebot.http_actions import OneBotHttpActions, build_action_url
+from onebot.http_actions import HttpActionClient, OneBotHttpActions, build_action_url
 
 
 class DummyConfig(dict):
@@ -49,11 +48,28 @@ def test_call_action_success():
                     }
                 )
             )
-            actions = OneBotHttpActions(settings)
+            actions = HttpActionClient(settings)
             await actions.start()
             result = await actions.send_private_msg("123456", "hello")
             assert result.ok
         finally:
             await runner.cleanup()
+
+    asyncio.run(_test())
+
+
+def test_http_client_alias():
+    assert OneBotHttpActions is HttpActionClient
+
+
+def test_empty_http_url_returns_error():
+    async def _test():
+        settings = load_settings(
+            DummyConfig({"onebot_action_backend": "http", "onebot_http_url": ""})
+        )
+        actions = HttpActionClient(settings)
+        result = await actions.set_group_add_request("f", "add", True)
+        assert not result.ok
+        assert "empty" in (result.message or "").lower()
 
     asyncio.run(_test())

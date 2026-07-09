@@ -9,7 +9,9 @@ logger = logging.getLogger(__name__)
 
 VALID_MODES = frozenset({"off", "record-only", "manual", "auto"})
 VALID_STUDENT_SOURCES = frozenset({"mock", "nju_table"})
+VALID_ACTION_BACKENDS = frozenset({"astrbot_adapter", "http"})
 DEFAULT_MODE = "record-only"
+DEFAULT_ACTION_BACKEND = "astrbot_adapter"
 SECRET_KEYS = frozenset(
     {
         "onebot_access_token",
@@ -49,7 +51,8 @@ class PluginSettings:
     target_group_ids: frozenset[str] = frozenset()
     admin_qq_ids: frozenset[str] = frozenset()
     admin_notify: bool = True
-    onebot_http_url: str = "http://127.0.0.1:3000"
+    onebot_action_backend: str = DEFAULT_ACTION_BACKEND
+    onebot_http_url: str = ""
     onebot_access_token: str = ""
     http_timeout_ms: int = 10000
     http_retries: int = 2
@@ -126,6 +129,30 @@ def _normalize_student_source(value: Any) -> str:
     return source
 
 
+def _normalize_action_backend(value: Any) -> str:
+    backend = str(value or DEFAULT_ACTION_BACKEND).strip()
+    if backend not in VALID_ACTION_BACKENDS:
+        logger.warning(
+            "Invalid onebot_action_backend %r, fallback to %s",
+            backend,
+            DEFAULT_ACTION_BACKEND,
+        )
+        return DEFAULT_ACTION_BACKEND
+    return backend
+
+
+def mask_http_url(url: str) -> str:
+    if not url:
+        return "(未设置)"
+    if "://" in url:
+        scheme, rest = url.split("://", 1)
+        if "@" in rest:
+            _, host_part = rest.rsplit("@", 1)
+            return f"{scheme}://***@{host_part.split('/')[0]}"
+        return f"{scheme}://{rest.split('/')[0]}"
+    return url.split("/")[0]
+
+
 def _clamp_int(value: Any, default: int, minimum: int = 0, maximum: int | None = None) -> int:
     try:
         num = int(value)
@@ -162,7 +189,10 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         ),
         admin_qq_ids=parse_numeric_ids(str(config.get("admin_qq_ids", "")), "admin_qq_ids"),
         admin_notify=bool(config.get("admin_notify", True)),
-        onebot_http_url=str(config.get("onebot_http_url", "http://127.0.0.1:3000")).strip(),
+        onebot_action_backend=_normalize_action_backend(
+            config.get("onebot_action_backend", DEFAULT_ACTION_BACKEND)
+        ),
+        onebot_http_url=str(config.get("onebot_http_url", "")).strip(),
         onebot_access_token=str(config.get("onebot_access_token", "")).strip(),
         http_timeout_ms=_clamp_int(config.get("http_timeout_ms"), 10000, minimum=1),
         http_retries=_clamp_int(config.get("http_retries"), 2, minimum=0),
@@ -185,6 +215,15 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
     )
 
 
+def validate_settings(settings: PluginSettings) -> list[str]:
+    warnings: list[str] = []
+    if settings.onebot_action_backend == "http" and not settings.onebot_http_url:
+        warnings.append(
+            "onebot_action_backend=http 但未配置 onebot_http_url，HTTP action 不可用"
+        )
+    return warnings
+
+
 def get_effective_mode(settings: PluginSettings, runtime_mode: str | None) -> tuple[str, str]:
     if runtime_mode and runtime_mode in VALID_MODES:
         return runtime_mode, "runtime"
@@ -192,14 +231,13 @@ def get_effective_mode(settings: PluginSettings, runtime_mode: str | None) -> tu
 
 
 def sanitize_config_for_display(settings: PluginSettings) -> dict[str, Any]:
-    return {
+    result: dict[str, Any] = {
         "mode": settings.mode,
         "student_source": settings.student_source,
         "target_group_ids": sorted(settings.target_group_ids),
         "admin_qq_ids": sorted(settings.admin_qq_ids),
         "admin_notify": settings.admin_notify,
-        "onebot_http_url": settings.onebot_http_url,
-        "onebot_access_token": mask_secret(settings.onebot_access_token),
+        "onebot_action_backend": settings.onebot_action_backend,
         "njutable_server_url": settings.njutable_server_url,
         "njutable_api_token": mask_secret(settings.njutable_api_token),
         "njutable_table_name": settings.njutable_table_name,
@@ -207,3 +245,7 @@ def sanitize_config_for_display(settings: PluginSettings) -> dict[str, Any]:
         "probe_enabled": settings.probe_enabled,
         "log_raw_event": settings.log_raw_event,
     }
+    if settings.onebot_action_backend == "http":
+        result["onebot_http_url"] = mask_http_url(settings.onebot_http_url)
+        result["onebot_access_token"] = mask_secret(settings.onebot_access_token) or "(未设置)"
+    return result
