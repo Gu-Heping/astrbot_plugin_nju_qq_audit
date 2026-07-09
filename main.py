@@ -31,7 +31,7 @@ from probe.formatter import format_event_summary, format_raw_event, format_recen
 from probe.sanitizer import build_missing_raw_summary, classify_raw_message, sanitize
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
-PLUGIN_VERSION = "v0.2.1"
+PLUGIN_VERSION = "v0.2.2"
 
 
 @register(
@@ -69,6 +69,7 @@ class NjuQqAuditPlugin(Star):
         return self.ctx.settings
 
     async def _record_admin_session(self, event: AstrMessageEvent) -> None:
+        self.ctx.remember_event_platform(event)
         umo = getattr(event, "unified_msg_origin", None)
         if umo:
             await self.ctx.record_admin_session(event.get_sender_id(), umo)
@@ -108,6 +109,7 @@ class NjuQqAuditPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_all_events(self, event: AstrMessageEvent):
+        self.ctx.remember_event_platform(event)
         raw = extract_raw_dict(event.message_obj)
         await self._handle_probe(event, raw)
         if raw and is_notice_event(raw):
@@ -341,7 +343,7 @@ class NjuQqAuditPlugin(Star):
         from onebot.astrbot_adapter_actions import AstrBotAdapterActionClient
 
         if isinstance(self.ctx.actions, AstrBotAdapterActionClient):
-            probe = await self.ctx.actions.probe_api()
+            probe = await self.ctx.actions.probe_api(event)
         else:
             probe = {
                 "adapter_found": "n/a",

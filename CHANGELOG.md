@@ -2,6 +2,15 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.2.2] - 2026-07-09
+
+### 修复
+
+- 修复 AstrBot 4.x 下 `adapter_found: no` / `aiocqhttp adapter not available` 问题
+- adapter 查找兼容 `get_platform_inst`、`event.bot`、遍历已加载平台实例
+- 收到任意事件或管理员命令时缓存 `platform_id` / bot client，供 approve/reject 使用
+- `/audit probe api` 在命令上下文中优先使用当前 `event.bot` 检测
+
 ## [v0.2.1] - 2026-07-09
 
 ### 变更

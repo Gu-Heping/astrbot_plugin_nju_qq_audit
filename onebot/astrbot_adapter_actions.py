@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from config import PluginSettings, redact_tokens_in_string
 from data_source.students import ActionResult
+
+logger = logging.getLogger(__name__)
+
+AIOHTTP_PLATFORM_NAMES = frozenset({"aiocqhttp", "onebot", "napcat", "lagrange"})
 
 
 class AstrBotAdapterActionClient:
@@ -11,6 +16,8 @@ class AstrBotAdapterActionClient:
         self.astrbot_context = astrbot_context
         self.settings = settings
         self._adapter_available: str | None = None
+        self._platform_id: str | None = None
+        self._event_bot: Any | None = None
 
     def backend_name(self) -> str:
         return "astrbot_adapter"
@@ -21,21 +28,89 @@ class AstrBotAdapterActionClient:
     async def close(self) -> None:
         return None
 
-    async def _get_bot_client(self) -> Any | None:
-        try:
-            from astrbot.api.event import filter as api_filter
-            from astrbot.api.platform import AiocqhttpAdapter
+    def remember_event(self, event: Any) -> None:
+        bot = getattr(event, "bot", None)
+        if bot is not None and hasattr(bot, "api"):
+            self._event_bot = bot
+        platform_id = _safe_call(event, "get_platform_id")
+        if platform_id:
+            self._platform_id = str(platform_id)
 
-            platform = self.astrbot_context.get_platform(
-                api_filter.PlatformAdapterType.AIOCQHTTP
-            )
-            if platform is None:
-                return None
-            if not isinstance(platform, AiocqhttpAdapter):
-                return None
-            return platform.get_client()
-        except Exception:
+    def restore_hints(self, *, platform_id: str | None = None, event_bot: Any | None = None) -> None:
+        if platform_id:
+            self._platform_id = platform_id
+        if event_bot is not None and hasattr(event_bot, "api"):
+            self._event_bot = event_bot
+
+    def _iter_platforms(self) -> list[Any]:
+        pm = getattr(self.astrbot_context, "platform_manager", None)
+        if pm is None:
+            return []
+        if hasattr(pm, "platform_insts"):
+            return list(pm.platform_insts)
+        if hasattr(pm, "get_insts"):
+            try:
+                return list(pm.get_insts())
+            except Exception:
+                return []
+        return []
+
+    def _platform_name(self, platform: Any) -> str:
+        meta = platform.meta() if hasattr(platform, "meta") else None
+        if meta is None:
+            return ""
+        return str(getattr(meta, "name", "") or getattr(meta, "id", "") or "").lower()
+
+    def _client_from_platform(self, platform: Any) -> Any | None:
+        if not hasattr(platform, "get_client"):
             return None
+        try:
+            client = platform.get_client()
+            if client is not None and hasattr(client, "api"):
+                return client
+        except Exception as exc:
+            logger.debug("[audit] platform.get_client failed: %s", exc)
+        return None
+
+    async def _get_bot_client(self, event: Any | None = None) -> Any | None:
+        if event is not None:
+            self.remember_event(event)
+
+        if self._event_bot is not None and hasattr(self._event_bot, "api"):
+            return self._event_bot
+
+        if self._platform_id and hasattr(self.astrbot_context, "get_platform_inst"):
+            try:
+                platform = self.astrbot_context.get_platform_inst(self._platform_id)
+                client = self._client_from_platform(platform) if platform else None
+                if client is not None:
+                    return client
+            except Exception as exc:
+                logger.debug("[audit] get_platform_inst(%s) failed: %s", self._platform_id, exc)
+
+        for platform in self._iter_platforms():
+            name = self._platform_name(platform)
+            if name in AIOHTTP_PLATFORM_NAMES or "cq" in name or "onebot" in name:
+                client = self._client_from_platform(platform)
+                if client is not None:
+                    return client
+
+        for platform in self._iter_platforms():
+            client = self._client_from_platform(platform)
+            if client is not None:
+                return client
+
+        if hasattr(self.astrbot_context, "get_platform"):
+            for lookup in _legacy_platform_lookups():
+                try:
+                    platform = self.astrbot_context.get_platform(lookup)
+                except Exception:
+                    platform = None
+                client = self._client_from_platform(platform) if platform else None
+                if client is not None:
+                    return client
+
+        return None
 
     def _normalize_response(self, action: str, response: Any) -> ActionResult:
         if isinstance(response, dict):
@@ -61,8 +136,10 @@ class AstrBotAdapterActionClient:
             )
         return ActionResult(ok=True, retcode=0, message="ok")
 
-    async def call_action(self, action: str, params: dict[str, Any]) -> ActionResult:
-        client = await self._get_bot_client()
+    async def call_action(
+        self, action: str, params: dict[str, Any], event: Any | None = None
+    ) -> ActionResult:
+        client = await self._get_bot_client(event)
         if client is None:
             return ActionResult(
                 ok=False,
@@ -83,6 +160,7 @@ class AstrBotAdapterActionClient:
         sub_type: str,
         approve: bool,
         reason: str = "",
+        event: Any | None = None,
     ) -> ActionResult:
         return await self.call_action(
             "set_group_add_request",
@@ -92,13 +170,14 @@ class AstrBotAdapterActionClient:
                 "approve": approve,
                 "reason": reason,
             },
+            event=event,
         )
 
-    async def get_login_info(self) -> ActionResult:
-        return await self.call_action("get_login_info", {})
+    async def get_login_info(self, event: Any | None = None) -> ActionResult:
+        return await self.call_action("get_login_info", {}, event=event)
 
-    async def get_group_list(self) -> ActionResult:
-        return await self.call_action("get_group_list", {})
+    async def get_group_list(self, event: Any | None = None) -> ActionResult:
+        return await self.call_action("get_group_list", {}, event=event)
 
     async def send_private_msg_safe(self, user_id: str, message: str) -> ActionResult:
         return ActionResult(
@@ -106,19 +185,22 @@ class AstrBotAdapterActionClient:
             message="send_private_msg not supported on astrbot_adapter backend; use context.send_message",
         )
 
-    async def probe_api(self) -> dict[str, Any]:
-        client = await self._get_bot_client()
+    async def probe_api(self, event: Any | None = None) -> dict[str, Any]:
+        client = await self._get_bot_client(event)
         if client is None:
+            platforms = [self._platform_name(p) for p in self._iter_platforms()]
+            detail = f"aiocqhttp adapter not found; platforms={platforms or '(none)'}"
             return {
                 "adapter_found": "no",
                 "adapter_action_available": "no",
                 "test_action": "",
                 "result": "failed",
-                "message": "aiocqhttp adapter not found",
+                "message": detail,
+                "platform_id": self._platform_id or "(unset)",
             }
 
         for action in ("get_login_info", "get_group_list"):
-            result = await self.call_action(action, {})
+            result = await self.call_action(action, {}, event=event)
             if result.ok:
                 self._adapter_available = "yes"
                 probe: dict[str, Any] = {
@@ -127,6 +209,7 @@ class AstrBotAdapterActionClient:
                     "test_action": action,
                     "result": "ok",
                     "message": result.message or "ok",
+                    "platform_id": self._platform_id or "(from event/platform scan)",
                 }
                 if action == "get_login_info" and isinstance(result.data, dict):
                     if result.data.get("user_id") is not None:
@@ -144,7 +227,29 @@ class AstrBotAdapterActionClient:
             "message": redact_tokens_in_string(
                 "get_login_info and get_group_list both failed", self.settings
             ),
+            "platform_id": self._platform_id or "(from event/platform scan)",
         }
 
     def cached_adapter_available(self) -> str:
         return self._adapter_available or "unknown"
+
+
+def _safe_call(obj: Any, method: str) -> Any | None:
+    fn = getattr(obj, method, None)
+    if not callable(fn):
+        return None
+    try:
+        return fn()
+    except Exception:
+        return None
+
+
+def _legacy_platform_lookups() -> list[Any]:
+    lookups: list[Any] = ["aiocqhttp"]
+    try:
+        from astrbot.api.event import filter as api_filter
+
+        lookups.append(api_filter.PlatformAdapterType.AIOCQHTTP)
+    except Exception:
+        pass
+    return lookups

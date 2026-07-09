@@ -47,11 +47,19 @@ class PluginContext:
             self.notifier,
         )
         self._http_session: aiohttp.ClientSession | None = None
+        self._platform_id: str | None = None
+        self._event_bot: Any | None = None
 
     def reload_settings(self) -> None:
         self.settings = load_settings(self.config)
         self.audit.settings = self.settings
+        old_platform_id = self._platform_id
+        old_event_bot = self._event_bot
         self.actions = create_action_client(self.astrbot_context, self.settings)
+        from onebot.astrbot_adapter_actions import AstrBotAdapterActionClient
+
+        if isinstance(self.actions, AstrBotAdapterActionClient):
+            self.actions.restore_hints(platform_id=old_platform_id, event_bot=old_event_bot)
         self._http_notify_client = create_http_notify_client(self.settings)
         self.notifier.reload_settings(
             self.settings,
@@ -97,6 +105,23 @@ class PluginContext:
         if self.settings.admin_qq_ids and admin_qq not in self.settings.admin_qq_ids:
             return
         await self.admin_sessions.record(admin_qq, umo)
+
+    def remember_event_platform(self, event: Any) -> None:
+        from onebot.astrbot_adapter_actions import AstrBotAdapterActionClient
+
+        platform_id = None
+        if hasattr(event, "get_platform_id"):
+            try:
+                platform_id = event.get_platform_id()
+            except Exception:
+                platform_id = None
+        if platform_id:
+            self._platform_id = str(platform_id)
+        bot = getattr(event, "bot", None)
+        if bot is not None and hasattr(bot, "api"):
+            self._event_bot = bot
+        if isinstance(self.actions, AstrBotAdapterActionClient):
+            self.actions.remember_event(event)
 
     def effective_mode(self) -> tuple[str, str]:
         from config import get_effective_mode

@@ -34,6 +34,7 @@ def format_probe_api(probe: dict) -> str:
         "message",
         "user_id",
         "nickname",
+        "platform_id",
     ):
         if key in probe and probe[key] not in (None, ""):
             lines.append(f"{key}: {probe[key]}")
