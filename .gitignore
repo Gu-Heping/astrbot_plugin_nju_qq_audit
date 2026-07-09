@@ -205,3 +205,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Plugin probe data (do not commit)
+probe_events.jsonl
+probe_state.json
+**/plugin_data/astrbot_plugin_nju_qq_audit/

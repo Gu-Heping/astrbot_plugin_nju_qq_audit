@@ -1,0 +1,30 @@
+{
+  "probe_enabled": {
+    "description": "是否启用 OneBot 事件探针",
+    "type": "bool",
+    "default": true
+  },
+  "log_raw_event": {
+    "description": "是否在记录中保存脱敏后的 raw event（默认关闭）",
+    "type": "bool",
+    "default": false,
+    "hint": "即使开启也会脱敏 flag/token 等敏感字段"
+  },
+  "admin_qq_ids": {
+    "description": "管理员 QQ 号，逗号分隔",
+    "type": "string",
+    "default": "",
+    "hint": "留空时仅允许私聊执行 status/last 命令"
+  },
+  "target_group_ids": {
+    "description": "目标群号，逗号分隔",
+    "type": "string",
+    "default": "",
+    "hint": "留空则记录所有群相关 request/notice 事件"
+  },
+  "max_recent_events": {
+    "description": "内存中保留的最近事件数量上限",
+    "type": "int",
+    "default": 20
+  }
+}
