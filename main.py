@@ -204,7 +204,17 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
-        yield event.plain_result(format_help())
+        ensure_ctx_compat(self.ctx)
+        mode, _ = self.ctx.effective_mode()
+        pending = await self.ctx.requests.list_pending(limit=1000)
+        releasable = await list_releasable(self.ctx.requests, self._settings())
+        yield event.plain_result(
+            format_help(
+                effective_mode=mode,
+                pending_count=len(pending),
+                releasable_count=len(releasable),
+            )
+        )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("status")

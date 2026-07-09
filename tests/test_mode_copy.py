@@ -18,6 +18,16 @@ def test_help_includes_release_and_report():
     assert "/audit release preview" in text
     assert "/audit unknown" in text
     assert "/audit report" in text
+    assert "推荐流程" in text
+    assert "batch strong" in text
     list_pos = text.index("/audit list")
     pending_pos = text.index("/audit pending")
     assert list_pos < pending_pos
+
+
+def test_help_shows_context_when_provided():
+    text = format_help(effective_mode="record-only", pending_count=3, releasable_count=2)
+    assert "当前：" in text
+    assert "record-only" in text
+    assert "待处理 3" in text
+    assert "可分批 2" in text

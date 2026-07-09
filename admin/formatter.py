@@ -4,38 +4,75 @@ from config import PluginSettings, mask_http_url
 from data_source.student_cache import SyncState
 
 
-def format_help() -> str:
-    return "\n".join(
+def format_help(
+    *,
+    effective_mode: str | None = None,
+    pending_count: int | None = None,
+    releasable_count: int | None = None,
+) -> str:
+    lines = [
+        "NJU QQ Audit v0.3.3 管理命令（私聊）",
+        "",
+        "推荐流程：",
+        "1. /audit record          日常只记录（默认，勿用 off）",
+        "2. /audit sync              同步学生数据",
+        "3. /audit list              看待处理（短编号 1/2/3，30 分钟有效）",
+        "4. /audit release preview   预览可分批 strong",
+        "   /audit release 10 confirm 分批通过（不改当前模式）",
+        "5. /audit ok/no <n>         弱匹配逐条处理",
+        "6. /audit report            定期复盘",
+    ]
+
+    if effective_mode is not None:
+        context_bits = [f"模式 {effective_mode}"]
+        if pending_count is not None:
+            context_bits.append(f"待处理 {pending_count}")
+        if releasable_count is not None:
+            context_bits.append(f"可分批 {releasable_count}")
+        lines.extend(["", "当前：" + " | ".join(context_bits)])
+
+    lines.extend(
         [
-            "NJU QQ Audit 管理命令（仅私聊）",
             "",
-            "常用：",
-            "/audit                 查看状态",
-            "/audit list            查看待处理",
-            "/audit view 1          查看第 1 条",
-            "/audit ok 1            同意第 1 条",
-            "/audit no 1            拒绝第 1 条",
-            "/audit sync            同步学生数据",
-            "/audit release preview 预览可分批通过",
-            "/audit release 10 confirm 分批通过",
+            "审批：",
+            "/audit                      首页状态",
+            "/audit list [n]             待处理列表",
+            "/audit view <n>             查看详情",
+            "/audit ok <n>               同意（无需 confirm）",
+            "/audit no <n> [理由]        拒绝，可附理由",
             "",
-            "复盘：",
-            "/audit unknown         未识别汇总",
-            "/audit report          运营报告",
-            "/audit sync status     同步状态",
+            "分批放人（仅 strong 26 级 pending，不改变 mode）：",
+            "/audit release              帮助 + 当前可释放数",
+            "/audit release preview      预览摘要（无 flag）",
+            "/audit release 10 confirm   通过最多 10 条",
+            "/audit release all confirm  受单次上限限制",
+            "别名：/audit batch strong N confirm",
+            "      /audit temp N confirm",
+            "      /audit process strong confirm（兼容）",
+            "",
+            "复盘与同步：",
+            "/audit unknown [n]          近 7 天未识别汇总 + 样例",
+            "/audit report               运营统计（今日/原因分布）",
+            "/audit sync                 手动同步 NJUTable / mock",
+            "/audit sync status          定时同步状态",
             "",
             "模式：",
-            "/audit record          只记录（推荐日常）",
-            "/audit manual          人工审核",
-            "/audit auto            自动强匹配",
-            "/audit off             完全停用（不推荐日常）",
+            "/audit record               只记录，不自动放人（推荐日常）",
+            "/audit manual               每条需人工处理",
+            "/audit auto confirm         自动通过 strong 26 级",
+            "/audit off confirm          完全停用且不记录（慎用）",
             "",
             "排查：",
-            "/audit probe last      查看最近原始事件",
-            "/audit probe api       测试审批接口",
-            "/audit debug           查看技术状态",
+            "/audit probe api            测试审批接口",
+            "/audit probe last           最近原始入群事件",
+            "/audit debug                技术状态",
             "",
-            "旧命令：",
+            "说明：",
+            "- 短编号来自最近一次 /audit list 或入群通知",
+            "- 弱匹配、非 26 级、QQ 辅助不会 auto approve",
+            "- 修改目标群请编辑 target_group_ids 后重启",
+            "",
+            "旧命令（仍可用）：",
             "/audit pending",
             "/audit request <id>",
             "/audit approve <id> confirm",
@@ -43,6 +80,7 @@ def format_help() -> str:
             "/audit mode ...",
         ]
     )
+    return "\n".join(lines)
 
 
 def format_probe_api(probe: dict) -> str:
