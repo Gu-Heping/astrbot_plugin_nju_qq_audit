@@ -2,6 +2,12 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.3.1] - 2026-07-09
+
+### 修复
+
+- 热重载后旧版 `PluginContext` 缺少 `list_pending_for_admin`/`list_cache` 导致 `/audit list` 崩溃；命令执行前自动补齐兼容
+
 ## [v0.3.0] - 2026-07-09
 
 ### 新增

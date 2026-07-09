@@ -35,7 +35,8 @@ from admin.ux_formatter import (
     format_ok_result,
     format_view,
 )
-from admin.handlers import PluginContext
+from admin.handlers import PluginContext, list_pending_for_admin
+from admin.ctx_compat import ensure_ctx_compat
 from admin.permissions import can_run_command
 from data_source.njutable_provider import load_students_for_audit
 from onebot.event_extract import extract_group_request, extract_raw_dict, is_notice_event
@@ -46,7 +47,7 @@ from probe.formatter import format_event_summary, format_raw_event, format_recen
 from probe.sanitizer import build_missing_raw_summary, classify_raw_message, sanitize
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
-PLUGIN_VERSION = "v0.3.0"
+PLUGIN_VERSION = "v0.3.1"
 
 
 @register(
@@ -87,7 +88,11 @@ class NjuQqAuditPlugin(Star):
     def _remember_event_platform(self, event: AstrMessageEvent) -> None:
         cache_event_platform(self.ctx, event)
 
+    async def _ensure_ctx_compat(self) -> None:
+        ensure_ctx_compat(self.ctx)
+
     async def _record_admin_session(self, event: AstrMessageEvent) -> None:
+        await self._ensure_ctx_compat()
         self._remember_event_platform(event)
         umo = getattr(event, "unified_msg_origin", None)
         if umo:
@@ -224,7 +229,7 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
-        items, index_map = await self.ctx.list_pending_for_admin(event.get_sender_id(), limit)
+        items, index_map = await list_pending_for_admin(self.ctx, event.get_sender_id(), limit)
         yield event.plain_result(format_list(items, index_map))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
@@ -410,7 +415,7 @@ class NjuQqAuditPlugin(Star):
             return
         await self._record_admin_session(event)
         limit = max(1, min(int(limit), 50))
-        items, index_map = await self.ctx.list_pending_for_admin(event.get_sender_id(), limit)
+        items, index_map = await list_pending_for_admin(self.ctx, event.get_sender_id(), limit)
         yield event.plain_result(format_list(items, index_map))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
