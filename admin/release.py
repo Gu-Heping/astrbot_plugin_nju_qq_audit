@@ -49,9 +49,18 @@ def _effective_student_id(req: PendingRequest) -> str | None:
     sid = parsed.get("student_id")
     if sid:
         return str(sid)
-    if req.matched_student_key and req.match:
-        return None
+    match = req.match or {}
+    matched = match.get("matched_student_id")
+    if matched:
+        return str(matched)
     return None
+
+
+def _is_grade26_releasable(req: PendingRequest) -> bool:
+    sid = _effective_student_id(req)
+    if not sid:
+        return False
+    return is_grade26_student_id(sid)
 
 
 def is_releasable(req: PendingRequest, settings: PluginSettings) -> bool:
@@ -70,9 +79,7 @@ def is_releasable(req: PendingRequest, settings: PluginSettings) -> bool:
     if has_non_grade26_keyword(req.comment or ""):
         return False
 
-    parsed = req.parsed or {}
-    student_id = parsed.get("student_id")
-    if student_id and not is_grade26_student_id(str(student_id)):
+    if not _is_grade26_releasable(req):
         return False
 
     return True
@@ -214,23 +221,31 @@ class ReleaseService:
         count: int | None,
         audit_log=None,
     ) -> ReleaseResult | None:
-        if self._running or self._lock.locked():
+        if not await self._try_begin():
             return None
+        try:
+            return await self._run_batch_unlocked(
+                requests_store=requests_store,
+                pipeline=pipeline,
+                settings=settings,
+                admin_user_id=admin_user_id,
+                count=count,
+                audit_log=audit_log,
+            )
+        finally:
+            await self._finish()
 
+    async def _try_begin(self) -> bool:
         async with self._lock:
+            if self._running:
+                return False
             self._running = True
             self._cancel.clear()
-            try:
-                return await self._run_batch_unlocked(
-                    requests_store=requests_store,
-                    pipeline=pipeline,
-                    settings=settings,
-                    admin_user_id=admin_user_id,
-                    count=count,
-                    audit_log=audit_log,
-                )
-            finally:
-                self._running = False
+            return True
+
+    async def _finish(self) -> None:
+        async with self._lock:
+            self._running = False
 
     async def _run_batch_unlocked(
         self,

@@ -64,6 +64,28 @@ async def test_is_releasable_rejects_non26(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_is_releasable_rejects_notice_only_without_grade26_id(tmp_path):
+    settings = load_settings(DummyConfig({"target_group_ids": "796836121"}))
+    req = _strong_req(
+        comment="张三 通知书编号 20260001",
+        parsed={"name": "张三", "notice_no": "20260001"},
+        match={"strength": "strong"},
+    )
+    assert not is_releasable(req, settings)
+
+
+@pytest.mark.asyncio
+async def test_is_releasable_accepts_matched_student_id(tmp_path):
+    settings = load_settings(DummyConfig({"target_group_ids": "796836121"}))
+    req = _strong_req(
+        comment="张三 通知书编号 20260001",
+        parsed={"name": "张三", "notice_no": "20260001"},
+        match={"strength": "strong", "matched_student_id": "261220001"},
+    )
+    assert is_releasable(req, settings)
+
+
+@pytest.mark.asyncio
 async def test_is_releasable_rejects_invite(tmp_path):
     settings = load_settings(DummyConfig({"target_group_ids": "796836121"}))
     req = _strong_req(sub_type="invite")
@@ -132,18 +154,46 @@ async def test_release_fail_continue(tmp_path):
 
 @pytest.mark.asyncio
 async def test_release_concurrent_rejected(tmp_path):
-    settings = load_settings(DummyConfig({"target_group_ids": "796836121"}))
+    settings = load_settings(DummyConfig({"target_group_ids": "796836121", "batch_approve_interval_ms": 50}))
+    store = RequestsStore(tmp_path / "requests.json")
+    await store.upsert(_strong_req(id="REQ-1"))
+    await store.upsert(_strong_req(id="REQ-2", parsed={"name": "李四", "student_id": "261220002"}))
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_approve(req, admin_user_id):
+        started.set()
+        await release.wait()
+        return ActionResult(ok=True, retcode=0, message="ok")
+
+    pipeline = MagicMock()
+    pipeline.admin_approve = AsyncMock(side_effect=slow_approve)
     service = ReleaseService()
-    service._running = True
-    result = await service.run_batch(
-        requests_store=MagicMock(),
-        pipeline=MagicMock(),
+
+    first = asyncio.create_task(
+        service.run_batch(
+            requests_store=store,
+            pipeline=pipeline,
+            settings=settings,
+            admin_user_id="admin",
+            count=2,
+            audit_log=None,
+        )
+    )
+    await started.wait()
+    second = await service.run_batch(
+        requests_store=store,
+        pipeline=pipeline,
         settings=settings,
         admin_user_id="admin",
         count=1,
         audit_log=None,
     )
-    assert result is None
+    assert second is None
+    release.set()
+    result = await first
+    assert result is not None
 
 
 def test_format_release_result_no_flag():

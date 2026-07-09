@@ -92,7 +92,7 @@ class PluginContext:
 
     async def _start_sync_scheduler(self) -> None:
         async def _notify(msg: str) -> None:
-            if self.settings.admin_notify:
+            if self.settings.auto_sync_notify_admin:
                 await self.notifier._notify_admins(f"[audit] 定时同步失败\n{msg}")
 
         await self.sync_scheduler.start(

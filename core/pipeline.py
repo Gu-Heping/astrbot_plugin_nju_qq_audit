@@ -153,6 +153,9 @@ class AuditPipeline:
                 "reason": match.reason,
                 "matched_by": match.matched_by,
                 "matched_student_key": match.matched_student_key,
+                "matched_student_id": (
+                    match.matched_student.student_id if match.matched_student else None
+                ),
                 "qq_match": match.qq_match,
             },
             decision=decision.decision,

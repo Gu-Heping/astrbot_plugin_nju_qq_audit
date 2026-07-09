@@ -24,6 +24,13 @@ def test_loose_candidate_parsed():
     assert parsed.notice_no == "NJ2026ABC" or "NJ2026ABC" in parsed.notice_no_candidates
 
 
+def test_loose_token_skipped_when_student_id_present():
+    parsed = parse_application_comment("张三 261220001 CS2026ABC")
+    assert parsed.student_id == "261220001"
+    assert "CS2026ABC" not in (parsed.notice_no_candidates or [])
+    assert parsed.notice_no != "CS2026ABC"
+
+
 def test_name_notice_strong_match():
     students = [
         Student(

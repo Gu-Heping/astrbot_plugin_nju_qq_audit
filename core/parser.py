@@ -125,12 +125,19 @@ def parse_application_comment(raw: str) -> ParsedApplication:
         if notice_match and notice_match.group(1) != result.student_id:
             _add_notice_candidate(result, notice_match.group(1))
 
-    for loose in LOOSE_TOKEN_PATTERN.findall(text):
-        if STUDENT_ID_PATTERN.fullmatch(loose):
-            continue
-        if looks_like_qq_token(loose):
-            continue
-        _add_notice_candidate(result, loose)
+    if not result.student_id:
+        for loose in LOOSE_TOKEN_PATTERN.findall(text):
+            if STUDENT_ID_PATTERN.fullmatch(loose):
+                continue
+            if looks_like_qq_token(loose):
+                continue
+            norm = normalize_notice_no(loose)
+            if not norm:
+                continue
+            if NOTICE_NO_PATTERN.fullmatch(norm):
+                _add_notice_candidate(result, loose)
+            elif re.search(r"[A-Za-z]", loose):
+                _add_notice_candidate(result, loose)
 
     if not result.name or not result.major:
         _parse_by_tokens(text, result)

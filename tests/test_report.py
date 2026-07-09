@@ -63,3 +63,12 @@ async def test_report_includes_counts(tmp_path):
     text = format_report(data, SyncState(), release_running=False)
     assert "待处理" in text
     assert "专业弱匹配" in text or "需人工" in text
+
+
+@pytest.mark.asyncio
+async def test_list_since_skips_invalid_timestamp(tmp_path):
+    store = RequestsStore(tmp_path / "requests.json")
+    await store.upsert(_req(created_at="not-a-date"))
+    await store.upsert(_req(created_at="2026-07-09T12:00:00+00:00"))
+    records = await store.list_since(days=7)
+    assert len(records) == 1

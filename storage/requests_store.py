@@ -236,7 +236,9 @@ class RequestsStore:
         result: list[PendingRequest] = []
         for req in records:
             created = self._parse_created_at(req.created_at)
-            if created is None or created >= cutoff:
+            if created is None:
+                continue
+            if created >= cutoff:
                 result.append(req)
         result.sort(key=lambda r: r.created_at, reverse=True)
         return result
