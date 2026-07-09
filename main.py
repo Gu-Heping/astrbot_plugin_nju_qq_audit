@@ -52,6 +52,7 @@ class NjuQqAuditPlugin(Star):
         )
 
     async def initialize(self):
+        self.ctx = PluginContext(self.data_dir, self.config, self.context)
         self.ctx.reload_settings()
         self.probe_store.update_max_recent(int(self.config.get("max_recent_events", 20)))
         await self.ctx.start()
@@ -68,8 +69,18 @@ class NjuQqAuditPlugin(Star):
     def _settings(self):
         return self.ctx.settings
 
+    def _remember_event_platform(self, event: AstrMessageEvent) -> None:
+        remember = getattr(self.ctx, "remember_event_platform", None)
+        if callable(remember):
+            remember(event)
+            return
+        from onebot.astrbot_adapter_actions import AstrBotAdapterActionClient
+
+        if isinstance(self.ctx.actions, AstrBotAdapterActionClient):
+            self.ctx.actions.remember_event(event)
+
     async def _record_admin_session(self, event: AstrMessageEvent) -> None:
-        self.ctx.remember_event_platform(event)
+        self._remember_event_platform(event)
         umo = getattr(event, "unified_msg_origin", None)
         if umo:
             await self.ctx.record_admin_session(event.get_sender_id(), umo)
@@ -109,7 +120,7 @@ class NjuQqAuditPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_all_events(self, event: AstrMessageEvent):
-        self.ctx.remember_event_platform(event)
+        self._remember_event_platform(event)
         raw = extract_raw_dict(event.message_obj)
         await self._handle_probe(event, raw)
         if raw and is_notice_event(raw):

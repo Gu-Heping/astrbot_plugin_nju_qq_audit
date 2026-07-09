@@ -10,6 +10,7 @@
 - adapter 查找兼容 `get_platform_inst`、`event.bot`、遍历已加载平台实例
 - 收到任意事件或管理员命令时缓存 `platform_id` / bot client，供 approve/reject 使用
 - `/audit probe api` 在命令上下文中优先使用当前 `event.bot` 检测
+- 修复热重载后 `remember_event_platform` 缺失导致 `on_all_events` 崩溃；`initialize()` 重建 PluginContext
 
 ## [v0.2.1] - 2026-07-09
 
