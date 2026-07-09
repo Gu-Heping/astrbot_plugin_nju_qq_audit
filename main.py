@@ -204,17 +204,27 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
+        yield event.plain_result(await self._render_help())
+
+    async def _render_help(self) -> str:
         ensure_ctx_compat(self.ctx)
         mode, _ = self.ctx.effective_mode()
         pending = await self.ctx.requests.list_pending(limit=1000)
-        releasable = await list_releasable(self.ctx.requests, self._settings())
-        yield event.plain_result(
-            format_help(
+        releasable_count = 0
+        try:
+            releasable = await list_releasable(self.ctx.requests, self._settings())
+            releasable_count = len(releasable)
+        except Exception:
+            logger.debug("[audit] help: releasable count unavailable", exc_info=True)
+        try:
+            return format_help(
                 effective_mode=mode,
                 pending_count=len(pending),
-                releasable_count=len(releasable),
+                releasable_count=releasable_count,
             )
-        )
+        except TypeError:
+            # 热重载后 main.py / formatter.py 版本不一致时的兼容
+            return format_help()
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("status")
