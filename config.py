@@ -42,6 +42,7 @@ class NjuTableColMapping:
     middle_school: str = "中学名称"
     student_id: str = "学号"
     academy: str = "书院"
+    qq: str = "QQ"
 
 
 @dataclass
@@ -68,6 +69,12 @@ class PluginSettings:
     probe_enabled: bool = True
     log_raw_event: bool = False
     max_recent_events: int = 20
+    batch_approve_interval_ms: int = 3000
+    batch_approve_max_count: int = 20
+    auto_sync_enabled: bool = False
+    auto_sync_on_startup: bool = False
+    auto_sync_interval_minutes: int = 360
+    auto_sync_notify_admin: bool = False
 
     def __repr__(self) -> str:
         return f"PluginSettings(mode={self.mode!r}, student_source={self.student_source!r}, target_groups={len(self.target_group_ids)})"
@@ -180,6 +187,7 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         middle_school=str(config.get("njutable_col_middle_school", "中学名称")),
         student_id=str(config.get("njutable_col_student_id", "学号")),
         academy=str(config.get("njutable_col_academy", "书院")),
+        qq=str(config.get("njutable_col_qq", "QQ")),
     )
     return PluginSettings(
         mode=_normalize_mode(config.get("mode")),
@@ -212,6 +220,18 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         probe_enabled=bool(config.get("probe_enabled", True)),
         log_raw_event=bool(config.get("log_raw_event", False)),
         max_recent_events=_clamp_int(config.get("max_recent_events"), 20, minimum=1),
+        batch_approve_interval_ms=_clamp_int(
+            config.get("batch_approve_interval_ms"), 3000, minimum=0
+        ),
+        batch_approve_max_count=_clamp_int(
+            config.get("batch_approve_max_count"), 20, minimum=1, maximum=100
+        ),
+        auto_sync_enabled=bool(config.get("auto_sync_enabled", False)),
+        auto_sync_on_startup=bool(config.get("auto_sync_on_startup", False)),
+        auto_sync_interval_minutes=_clamp_int(
+            config.get("auto_sync_interval_minutes"), 360, minimum=10
+        ),
+        auto_sync_notify_admin=bool(config.get("auto_sync_notify_admin", False)),
     )
 
 

@@ -9,8 +9,15 @@ from data_source.mock_provider import generate_mock_students
 from data_source.njutable_client import NjuTableClient
 from data_source.student_cache import StudentCache, SyncState, utc_now_iso
 from data_source.students import Student, build_student_key, sanitize_student_for_cache
+from core.normalize import parse_qq_field
 
 HARD_EXCLUDED_STATUSES = frozenset({"有问题"})
+
+
+def _parse_qq_cell(value: str | None) -> str | None:
+    if not value:
+        return None
+    return parse_qq_field(value)
 
 
 def _cell_value(row: dict[str, Any], col_name: str) -> str | None:
@@ -51,6 +58,7 @@ def map_row_to_student(row: dict[str, Any], settings: PluginSettings) -> Student
         student_id=_cell_value(row, cols.student_id),
         academy=_cell_value(row, cols.academy),
         status=_cell_value(row, cols.status),
+        qq=_parse_qq_cell(_cell_value(row, cols.qq)),
         source_row_id=str(row.get("_id", "")) or None,
     )
     student.key = build_student_key(student)

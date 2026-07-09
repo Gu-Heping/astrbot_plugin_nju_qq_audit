@@ -17,3 +17,11 @@ def ensure_ctx_compat(ctx) -> None:
             return await fetch_pending_for_admin(ctx, admin_id, limit)
 
         ctx.list_pending_for_admin = _bound  # type: ignore[method-assign]
+    if not hasattr(ctx, "release_service"):
+        from admin.release import ReleaseService
+
+        ctx.release_service = ReleaseService()
+    if not hasattr(ctx, "sync_scheduler"):
+        from data_source.sync_scheduler import SyncScheduler
+
+        ctx.sync_scheduler = SyncScheduler()

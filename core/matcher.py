@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from core.aliases import majors_match
+from core.aliases import build_major_index, majors_match_fuzzy
 from core.normalize import (
-    is_grade26_student_id,
     names_match,
+    normalize_notice_no,
     notice_nos_match,
     student_ids_match,
+    student_qq_matches,
 )
 from core.parser import ParsedApplication
 from data_source.students import Student
@@ -31,6 +32,7 @@ class MatchResult:
     matched_student_key: str | None = None
     matched_student: Student | None = None
     matched_by: list[str] = field(default_factory=list)
+    qq_match: bool = False
 
 
 def _academies_match(a: str, b: str) -> bool:
@@ -61,6 +63,8 @@ def _build_result(
     matched_by: list[str],
     confidence: float,
     reason: str,
+    *,
+    qq_match: bool = False,
 ) -> MatchResult:
     return MatchResult(
         strength=strength,
@@ -69,6 +73,7 @@ def _build_result(
         matched_by=matched_by,
         confidence=confidence,
         reason=reason,
+        qq_match=qq_match,
     )
 
 
@@ -80,11 +85,54 @@ def _conflict_result() -> MatchResult:
     )
 
 
+def _notice_candidates(parsed: ParsedApplication) -> list[str]:
+    items = list(parsed.notice_no_candidates or [])
+    if parsed.notice_no:
+        norm = normalize_notice_no(parsed.notice_no)
+        if norm and norm not in items:
+            items.insert(0, norm)
+    return items
+
+
+def _match_by_notice_candidates(
+    parsed: ParsedApplication,
+    students: list[Student],
+) -> MatchResult | None:
+    if not parsed.name:
+        return None
+    candidates = _notice_candidates(parsed)
+    if not candidates:
+        return None
+    matched_students: list[Student] = []
+    for candidate in candidates:
+        for student in students:
+            if student.notice_no and notice_nos_match(candidate, student.notice_no):
+                if names_match(parsed.name, student.name):
+                    matched_students.append(student)
+    if not matched_students:
+        return None
+    unique = {s.key: s for s in matched_students}
+    if len(unique) > 1:
+        return MatchResult(
+            strength="none",
+            confidence=0,
+            reason="多个通知书编号候选匹配不同学生，需人工复核",
+        )
+    student = next(iter(unique.values()))
+    if has_credential_conflict(parsed, student):
+        return _conflict_result()
+    return _build_result(
+        "strong", student, ["name_noticeNo"], 0.95, "姓名+通知书编号强匹配"
+    )
+
+
 def match_student(
     parsed: ParsedApplication,
     students: list[Student],
     applicant_user_id: str | None = None,
 ) -> MatchResult:
+    known_majors = build_major_index(students)
+
     if parsed.name and parsed.student_id:
         for student in students:
             if (
@@ -94,8 +142,14 @@ def match_student(
             ):
                 if has_credential_conflict(parsed, student):
                     return _conflict_result()
+                qq_match = student_qq_matches(applicant_user_id, student.qq)
                 return _build_result(
-                    "strong", student, ["name_studentId"], 0.95, "姓名+学号强匹配"
+                    "strong",
+                    student,
+                    ["name_studentId"],
+                    0.95,
+                    "姓名+学号强匹配",
+                    qq_match=qq_match,
                 )
 
     if parsed.name and parsed.notice_no:
@@ -107,19 +161,41 @@ def match_student(
             ):
                 if has_credential_conflict(parsed, student):
                     return _conflict_result()
+                qq_match = student_qq_matches(applicant_user_id, student.qq)
                 return _build_result(
-                    "strong", student, ["name_noticeNo"], 0.95, "姓名+通知书编号强匹配"
+                    "strong",
+                    student,
+                    ["name_noticeNo"],
+                    0.95,
+                    "姓名+通知书编号强匹配",
+                    qq_match=qq_match,
                 )
+
+    notice_candidate_match = _match_by_notice_candidates(parsed, students)
+    if notice_candidate_match is not None:
+        if notice_candidate_match.strength == "strong" and notice_candidate_match.matched_student:
+            notice_candidate_match.qq_match = student_qq_matches(
+                applicant_user_id, notice_candidate_match.matched_student.qq
+            )
+        return notice_candidate_match
 
     if parsed.name and parsed.major:
         matches = [
             s
             for s in students
-            if s.major and names_match(parsed.name, s.name) and majors_match(parsed.major, s.major)
+            if s.major
+            and names_match(parsed.name, s.name)
+            and majors_match_fuzzy(parsed.major, s.major, known_majors)
         ]
         if len(matches) == 1:
+            qq_match = student_qq_matches(applicant_user_id, matches[0].qq)
             return _build_result(
-                "weak", matches[0], ["name_major"], 0.6, "姓名+专业弱匹配（需人工复核）"
+                "weak",
+                matches[0],
+                ["name_major"],
+                0.6,
+                "姓名+专业弱匹配（需人工复核）",
+                qq_match=qq_match,
             )
         if len(matches) > 1:
             return MatchResult(
@@ -137,8 +213,14 @@ def match_student(
             and _academies_match(parsed.academy, s.academy)
         ]
         if len(matches) == 1:
+            qq_match = student_qq_matches(applicant_user_id, matches[0].qq)
             return _build_result(
-                "weak", matches[0], ["name_academy"], 0.55, "姓名+书院弱匹配（需人工复核）"
+                "weak",
+                matches[0],
+                ["name_academy"],
+                0.55,
+                "姓名+书院弱匹配（需人工复核）",
+                qq_match=qq_match,
             )
         if len(matches) > 1:
             return MatchResult(
@@ -149,11 +231,16 @@ def match_student(
 
     if applicant_user_id and parsed.name:
         for student in students:
-            if student.qq and student.qq == str(applicant_user_id) and names_match(
+            if student_qq_matches(applicant_user_id, student.qq) and names_match(
                 parsed.name, student.name
             ):
                 return _build_result(
-                    "auxiliary", student, ["qq_aux"], 0.5, "QQ+姓名辅助匹配（需人工复核）"
+                    "auxiliary",
+                    student,
+                    ["qq_aux"],
+                    0.5,
+                    "QQ+姓名辅助匹配（需人工复核）",
+                    qq_match=True,
                 )
 
     if parsed.student_id:
@@ -197,6 +284,8 @@ def match_student(
 
 
 def is_non_grade26(match: MatchResult, parsed: ParsedApplication) -> bool:
+    from core.normalize import is_grade26_student_id
+
     if parsed.student_id and not is_grade26_student_id(parsed.student_id):
         return True
     if match.matched_student and match.matched_student.student_id:

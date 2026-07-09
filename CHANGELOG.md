@@ -2,6 +2,27 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.3.3] - 2026-07-09
+
+### 新增
+
+- **分批放人**：`/audit release [preview | N confirm | all confirm]`，别名 `batch strong` / `temp`；仅 strong 26 级 pending，间隔与 max_count 可配置，不改变 runtime mode
+- **运营复盘**：`/audit unknown [N]`、`/audit report`（近 7 天原因分布、样例、同步摘要）
+- **定时同步**：`auto_sync_*` 配置 + `SyncScheduler`；`/audit sync status` 查看状态
+- **解析增强**：通知书多标签 + `notice_no_candidates`；专业 fuzzy 匹配（difflib 0.85）；NJUTable QQ 列映射与 `qq_match` 展示
+- 首页显示可分批数量与 release 任务状态
+
+### 变更
+
+- `/audit off` / `/audit record` / `/audit auto` 文案区分 record-only 与完全停用
+- `/audit process strong confirm` 委托 `ReleaseService`（兼容保留）
+- help / README 运营手册导向更新
+
+### 安全（不变）
+
+- 不 auto reject；weak/auxiliary/非 26 级/关键词不批量通过
+- 输出不含 flag/token/敏感字段
+
 ## [v0.3.2] - 2026-07-09
 
 ### 修复

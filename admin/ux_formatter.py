@@ -51,6 +51,8 @@ def format_home(
     pending_count: int,
     sync_state: SyncState,
     adapter_probe: dict | None = None,
+    releasable_count: int = 0,
+    release_running: bool = False,
 ) -> str:
     lines: list[str] = []
     health = _home_health(settings, adapter_probe)
@@ -93,14 +95,17 @@ def format_home(
             f"目标群：{', '.join(sorted(settings.target_group_ids)) or '(未配置)'}",
             f"学生数据：{settings.student_source}，{student_count} 人",
             f"待处理：{pending_count} 条",
+            f"可分批通过：{releasable_count} 条",
+            f"分批任务：{'进行中' if release_running else '空闲'}",
             f"最近同步：{_format_local_time(sync_state.last_sync_at)}，"
             f"{sync_state.last_sync_result or '(无)'}",
             f"审批接口：{_adapter_status_text(adapter_probe)}",
             "",
             "下一步：",
             "- 看待处理：/audit list",
+            "- 分批通过：/audit release preview",
             "- 同步学生：/audit sync",
-            "- 切自动审核：/audit auto",
+            "- 复盘报告：/audit report",
         ]
     )
     return "\n".join(lines)
@@ -157,8 +162,19 @@ def format_view(item, index: int | None = None) -> str:
         f"结果：{human_judgement(item)}",
         f"原因：{public.get('reason') or human_judgement(item)}",
         "",
-        "可操作：",
     ]
+    qq_match = (public.get("match") or {}).get("qq_match")
+    if qq_match is True:
+        lines.append("QQ 匹配：是")
+    elif qq_match is False:
+        lines.append("QQ 匹配：否")
+    else:
+        lines.append("QQ 匹配：未记录")
+    lines.extend(
+        [
+        "可操作：",
+        ]
+    )
     if index is not None:
         lines.append(f"/audit ok {index}")
         lines.append(f"/audit no {index} 信息不完整")
@@ -202,8 +218,9 @@ def format_auto_warning() -> str:
         [
             "切换到自动审核前请确认：",
             "",
-            "- 仅「姓名+学号」或「姓名+通知书编号」强匹配会自动通过",
+            "- auto 只会自动通过姓名+学号或姓名+通知书编号的 26 级 strong match",
             "- 弱匹配、信息不足不会自动拒绝",
+            "- 日常暂停自动放人请用 /audit record，不是 off",
             "- 建议先完成 /audit sync 并人工抽查几条",
             "",
             "确认切换请发送：",
@@ -215,16 +232,22 @@ def format_auto_warning() -> str:
 def format_off_warning() -> str:
     return "\n".join(
         [
-            "切换到 off 后将不再处理新的入群申请。",
+            "off 会完全跳过入群申请，不会记录 pending。",
             "",
-            "确认切换请发送：",
+            "日常暂停自动审核建议使用：",
+            "/audit record",
+            "",
+            "确认完全停用请输入：",
             "/audit off confirm",
         ]
     )
 
 
 def format_mode_changed(mode: str) -> str:
-    return f"运行模式已切换为：{mode}（{mode_label(mode)}）"
+    base = f"运行模式已切换为：{mode}（{mode_label(mode)}）"
+    if mode == "record-only":
+        return base + "\n\n继续记录申请，但不会自动放人。之后可用 /audit release 10 confirm 分批通过强匹配申请。"
+    return base
 
 
 def format_manual_review_notice(
