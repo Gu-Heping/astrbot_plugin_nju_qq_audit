@@ -14,6 +14,7 @@ from onebot.compat import invoke_probe_api
 from onebot.platform_cache import cache_event_platform
 from storage.admin_session_store import AdminSessionStore
 from storage.audit_log import AuditLog
+from storage.list_cache import AdminListCacheStore
 from storage.requests_store import RequestsStore
 from storage.runtime_store import RuntimeStore
 
@@ -29,6 +30,7 @@ class PluginContext:
         self.audit = AuditLog(data_dir / "audit.jsonl", self.settings)
         self.runtime = RuntimeStore(data_dir / "runtime.json")
         self.admin_sessions = AdminSessionStore(data_dir / "admin_sessions.json")
+        self.list_cache = AdminListCacheStore(data_dir / "list_cache.json")
         self.actions: ActionClient = create_action_client(astrbot_context, self.settings)
         self._http_notify_client: ActionClient | None = None
         self._adapter_probe: dict[str, Any] = {}
@@ -38,6 +40,7 @@ class PluginContext:
             astrbot_context,
             self.admin_sessions,
             lambda: self._http_notify_client,
+            self.list_cache,
         )
         self.pipeline = AuditPipeline(
             self.settings,
@@ -69,6 +72,7 @@ class PluginContext:
             self.astrbot_context,
             self.admin_sessions,
             lambda: self._http_notify_client,
+            self.list_cache,
         )
         self.pipeline.reload_settings(self.settings, self.actions, self.notifier)
         self._adapter_probe = {}
@@ -107,6 +111,12 @@ class PluginContext:
         if self.settings.admin_qq_ids and admin_qq not in self.settings.admin_qq_ids:
             return
         await self.admin_sessions.record(admin_qq, umo)
+
+    async def list_pending_for_admin(self, admin_id: str, limit: int = 10) -> tuple[list, dict[int, str]]:
+        limit = max(1, min(int(limit), 50))
+        items = await self.requests.list_pending(limit=limit)
+        index_map = await self.list_cache.refresh(admin_id, [item.id for item in items])
+        return items, index_map
 
     def remember_event_platform(self, event: Any) -> None:
         cache_event_platform(self, event)

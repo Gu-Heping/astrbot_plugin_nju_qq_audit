@@ -13,14 +13,27 @@ from astrbot.api.platform import MessageType
 from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
+from admin.command_resolver import (
+    map_action_error,
+    parse_no_command_reason,
+    resolve_request_ref,
+)
 from admin.formatter import (
     format_help,
-    format_pending_list,
     format_probe_api,
     format_probe_status,
-    format_request_detail,
     format_stats,
-    format_status,
+)
+from admin.ux_formatter import (
+    format_auto_warning,
+    format_debug,
+    format_home,
+    format_list,
+    format_mode_changed,
+    format_no_result,
+    format_off_warning,
+    format_ok_result,
+    format_view,
 )
 from admin.handlers import PluginContext
 from admin.permissions import can_run_command
@@ -33,7 +46,7 @@ from probe.formatter import format_event_summary, format_raw_event, format_recen
 from probe.sanitizer import build_missing_raw_summary, classify_raw_message, sanitize
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
-PLUGIN_VERSION = "v0.2.4"
+PLUGIN_VERSION = "v0.3.0"
 
 
 @register(
@@ -79,6 +92,21 @@ class NjuQqAuditPlugin(Star):
         umo = getattr(event, "unified_msg_origin", None)
         if umo:
             await self.ctx.record_admin_session(event.get_sender_id(), umo)
+
+    async def _render_home(self, event: AstrMessageEvent) -> str:
+        mode, _ = self.ctx.effective_mode()
+        students = load_students_for_audit(self._settings(), self.ctx.cache)
+        pending = await self.ctx.requests.list_pending(limit=1000)
+        sync_state = self.ctx.cache.load_sync_state()
+        adapter_probe = await self.ctx.get_adapter_probe()
+        return format_home(
+            self._settings(),
+            effective_mode=mode,
+            student_count=len(students),
+            pending_count=len(pending),
+            sync_state=sync_state,
+            adapter_probe=adapter_probe,
+        )
 
     def _probe_group_matches(self, group_id: str) -> bool:
         targets = self._settings().target_group_ids
@@ -129,6 +157,17 @@ class NjuQqAuditPlugin(Star):
         pass
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    async def audit_root(self, event: AstrMessageEvent):
+        if (event.message_str or "").strip() != "/audit":
+            return
+        allowed, message = can_run_command(self._settings(), "home", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        yield event.plain_result(await self._render_home(event))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("help")
     async def audit_help(self, event: AstrMessageEvent):
         allowed, message = can_run_command(self._settings(), "help", event)
@@ -146,6 +185,16 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
+        yield event.plain_result(await self._render_home(event))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("debug")
+    async def audit_debug(self, event: AstrMessageEvent):
+        allowed, message = can_run_command(self._settings(), "debug", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
         mode, source = self.ctx.effective_mode()
         students = load_students_for_audit(self._settings(), self.ctx.cache)
         pending = await self.ctx.requests.list_pending(limit=1000)
@@ -153,7 +202,7 @@ class NjuQqAuditPlugin(Star):
         adapter_probe = await self.ctx.get_adapter_probe()
         admin_session_stats = self.ctx.admin_sessions.stats(self._settings().admin_qq_ids)
         yield event.plain_result(
-            format_status(
+            format_debug(
                 self._settings(),
                 effective_mode=mode,
                 mode_source=source,
@@ -166,6 +215,150 @@ class NjuQqAuditPlugin(Star):
                 admin_session_stats=admin_session_stats,
             )
         )
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("list")
+    async def audit_list(self, event: AstrMessageEvent, limit: int = 10):
+        allowed, message = can_run_command(self._settings(), "list", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        items, index_map = await self.ctx.list_pending_for_admin(event.get_sender_id(), limit)
+        yield event.plain_result(format_list(items, index_map))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("view")
+    async def audit_view(self, event: AstrMessageEvent, ref: str):
+        allowed, message = can_run_command(self._settings(), "view", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        resolved = await resolve_request_ref(
+            event.get_sender_id(),
+            ref,
+            list_cache=self.ctx.list_cache,
+            requests=self.ctx.requests,
+        )
+        if not resolved.ok:
+            yield event.plain_result(resolved.message)
+            return
+        yield event.plain_result(format_view(resolved.request, resolved.index))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("ok")
+    async def audit_ok(self, event: AstrMessageEvent, ref: str):
+        allowed, message = can_run_command(self._settings(), "ok", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        resolved = await resolve_request_ref(
+            event.get_sender_id(),
+            ref,
+            list_cache=self.ctx.list_cache,
+            requests=self.ctx.requests,
+        )
+        if not resolved.ok:
+            yield event.plain_result(resolved.message)
+            return
+        result = await self.ctx.pipeline.admin_approve(resolved.request, event.get_sender_id())
+        if result.ok:
+            yield event.plain_result(format_ok_result(resolved.request, resolved.index))
+        else:
+            yield event.plain_result(map_action_error(result.message))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("no")
+    async def audit_no(self, event: AstrMessageEvent, ref: str, reason: str = ""):
+        allowed, message = can_run_command(self._settings(), "no", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        reject_reason = reason.strip() or parse_no_command_reason(event.message_str or "", ref)
+        resolved = await resolve_request_ref(
+            event.get_sender_id(),
+            ref,
+            list_cache=self.ctx.list_cache,
+            requests=self.ctx.requests,
+        )
+        if not resolved.ok:
+            yield event.plain_result(resolved.message)
+            return
+        result = await self.ctx.pipeline.admin_reject(
+            resolved.request, event.get_sender_id(), reject_reason
+        )
+        if result.ok:
+            yield event.plain_result(format_no_result(resolved.request, resolved.index, reject_reason))
+        else:
+            yield event.plain_result(map_action_error(result.message))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("auto")
+    async def audit_auto(self, event: AstrMessageEvent, confirm: str = ""):
+        allowed, message = can_run_command(self._settings(), "auto", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        if confirm != "confirm":
+            yield event.plain_result(format_auto_warning())
+            return
+        await self.ctx.runtime.set_mode("auto", event.get_sender_id())
+        yield event.plain_result(format_mode_changed("auto"))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("manual")
+    async def audit_manual(self, event: AstrMessageEvent):
+        allowed, message = can_run_command(self._settings(), "manual", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        await self.ctx.runtime.set_mode("manual", event.get_sender_id())
+        yield event.plain_result(format_mode_changed("manual"))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("record")
+    async def audit_record(self, event: AstrMessageEvent):
+        allowed, message = can_run_command(self._settings(), "record", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        await self.ctx.runtime.set_mode("record-only", event.get_sender_id())
+        yield event.plain_result(format_mode_changed("record-only"))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("off")
+    async def audit_off(self, event: AstrMessageEvent, confirm: str = ""):
+        allowed, message = can_run_command(self._settings(), "off", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        if confirm != "confirm":
+            yield event.plain_result(format_off_warning())
+            return
+        await self.ctx.runtime.set_mode("off", event.get_sender_id())
+        yield event.plain_result(format_mode_changed("off"))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("reset-mode")
+    async def audit_reset_mode(self, event: AstrMessageEvent, confirm: str = ""):
+        allowed, message = can_run_command(self._settings(), "reset-mode", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        if confirm != "confirm":
+            yield event.plain_result("请使用 /audit reset-mode confirm")
+            return
+        await self.ctx.runtime.clear_mode()
+        mode, source = self.ctx.effective_mode()
+        yield event.plain_result(f"已恢复插件配置 mode: {mode} ({source})")
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("mode")
@@ -217,8 +410,8 @@ class NjuQqAuditPlugin(Star):
             return
         await self._record_admin_session(event)
         limit = max(1, min(int(limit), 50))
-        items = await self.ctx.requests.list_pending(limit=limit)
-        yield event.plain_result(format_pending_list(items))
+        items, index_map = await self.ctx.list_pending_for_admin(event.get_sender_id(), limit)
+        yield event.plain_result(format_list(items, index_map))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("request")
@@ -228,11 +421,16 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
-        req = await self.ctx.requests.resolve_by_id_or_prefix(req_id)
-        if not req:
-            yield event.plain_result(f"未找到请求: {req_id}")
+        resolved = await resolve_request_ref(
+            event.get_sender_id(),
+            req_id,
+            list_cache=self.ctx.list_cache,
+            requests=self.ctx.requests,
+        )
+        if not resolved.ok:
+            yield event.plain_result(resolved.message)
             return
-        yield event.plain_result(format_request_detail(req))
+        yield event.plain_result(format_view(resolved.request, resolved.index))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("approve")
@@ -245,12 +443,20 @@ class NjuQqAuditPlugin(Star):
         if confirm != "confirm":
             yield event.plain_result("请使用 /audit approve <id> confirm")
             return
-        req = await self.ctx.requests.resolve_by_id_or_prefix(req_id)
-        if not req:
-            yield event.plain_result(f"未找到请求: {req_id}")
+        resolved = await resolve_request_ref(
+            event.get_sender_id(),
+            req_id,
+            list_cache=self.ctx.list_cache,
+            requests=self.ctx.requests,
+        )
+        if not resolved.ok:
+            yield event.plain_result(resolved.message)
             return
-        result = await self.ctx.pipeline.admin_approve(req, event.get_sender_id())
-        yield event.plain_result("已通过" if result.ok else f"操作失败: {result.message}")
+        result = await self.ctx.pipeline.admin_approve(resolved.request, event.get_sender_id())
+        if result.ok:
+            yield event.plain_result(format_ok_result(resolved.request, resolved.index))
+        else:
+            yield event.plain_result(map_action_error(result.message))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("reject")
@@ -263,12 +469,22 @@ class NjuQqAuditPlugin(Star):
         if confirm != "confirm":
             yield event.plain_result("请使用 /audit reject <id> confirm")
             return
-        req = await self.ctx.requests.resolve_by_id_or_prefix(req_id)
-        if not req:
-            yield event.plain_result(f"未找到请求: {req_id}")
+        resolved = await resolve_request_ref(
+            event.get_sender_id(),
+            req_id,
+            list_cache=self.ctx.list_cache,
+            requests=self.ctx.requests,
+        )
+        if not resolved.ok:
+            yield event.plain_result(resolved.message)
             return
-        result = await self.ctx.pipeline.admin_reject(req, event.get_sender_id())
-        yield event.plain_result("已拒绝" if result.ok else f"操作失败: {result.message}")
+        result = await self.ctx.pipeline.admin_reject(
+            resolved.request, event.get_sender_id(), "管理员人工拒绝"
+        )
+        if result.ok:
+            yield event.plain_result(format_no_result(resolved.request, resolved.index, "管理员人工拒绝"))
+        else:
+            yield event.plain_result(map_action_error(result.message))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("process")

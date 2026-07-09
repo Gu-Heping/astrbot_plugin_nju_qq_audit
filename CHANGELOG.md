@@ -2,6 +2,21 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.3.0] - 2026-07-09
+
+### 新增
+
+- 管理员操作台：`/audit` 首页、`/audit list/view/ok/no` 短编号审批（无需 confirm、无需复制 REQ id）
+- 短编号缓存 `list_cache.json`：每管理员独立，30 分钟有效，最多 50 条
+- 模式快捷命令：`/audit auto|manual|record|off` 及 `reset-mode confirm`
+- `/audit debug` 保留技术状态；`/audit status` 与裸 `/audit` 改为人话首页
+- 入群待审通知含 `/audit view/ok/no` 指引与短编号
+
+### 变更
+
+- 分层帮助与 README 管理员手册风格
+- 旧命令 `pending/request/approve/reject/mode/probe/*` 全部保留兼容
+
 ## [v0.2.4] - 2026-07-09
 
 ### 修复

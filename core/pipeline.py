@@ -270,9 +270,14 @@ class AuditPipeline:
         )
         return result
 
-    async def admin_reject(self, req: PendingRequest, admin_user_id: str) -> ActionResult:
+    async def admin_reject(
+        self,
+        req: PendingRequest,
+        admin_user_id: str,
+        reason: str = "管理员人工拒绝",
+    ) -> ActionResult:
         result = await self.actions.set_group_add_request(
-            req.flag, req.sub_type, False, "管理员人工拒绝"
+            req.flag, req.sub_type, False, reason
         )
         await self.requests.update_by_id(
             req.id,

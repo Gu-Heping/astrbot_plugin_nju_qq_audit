@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
+from admin.ux_formatter import format_manual_review_notice
 from config import PluginSettings
 from onebot.actions import ActionClient
 
@@ -17,12 +18,14 @@ class AdminNotifier:
         astrbot_context: Any,
         admin_sessions: Any,
         http_notify_client_getter: Callable[[], ActionClient | None],
+        list_cache: Any | None = None,
     ) -> None:
         self.settings = settings
         self.actions = actions
         self.astrbot_context = astrbot_context
         self.admin_sessions = admin_sessions
         self._http_notify_client_getter = http_notify_client_getter
+        self.list_cache = list_cache
 
     def reload_settings(
         self,
@@ -31,12 +34,15 @@ class AdminNotifier:
         astrbot_context: Any,
         admin_sessions: Any,
         http_notify_client_getter: Callable[[], ActionClient | None],
+        list_cache: Any | None = None,
     ) -> None:
         self.settings = settings
         self.actions = actions
         self.astrbot_context = astrbot_context
         self.admin_sessions = admin_sessions
         self._http_notify_client_getter = http_notify_client_getter
+        if list_cache is not None:
+            self.list_cache = list_cache
 
     async def notify_manual_review(
         self,
@@ -50,19 +56,27 @@ class AdminNotifier:
     ) -> None:
         if not self.settings.admin_notify:
             return
-        summary = comment[:80]
-        message = "\n".join(
-            [
-                "[入群审核] 需人工复核",
-                f"request_id: {request_id}",
-                f"group_id: {group_id}",
-                f"user_id: {user_id}",
-                f"comment: {summary}",
-                f"parsed: {parsed}",
-                f"decision/reason: {reason}",
-            ]
-        )
-        await self._notify_admins(message, exclude_user_id=user_id)
+        judgement = reason or "需要人工确认"
+        for admin_id in self.settings.admin_qq_ids:
+            if user_id and admin_id == user_id:
+                continue
+            index = None
+            if self.list_cache is not None:
+                index = await self.list_cache.append(admin_id, request_id)
+            message = format_manual_review_notice(
+                index=index,
+                group_id=group_id,
+                user_id=user_id,
+                comment=comment,
+                judgement=judgement,
+            )
+            sent = await self._send_to_admin(admin_id, message)
+            if not sent:
+                logger.warning(
+                    "[audit] 无法通知管理员 %s：无 UMO 且 HTTP fallback 不可用。"
+                    "请管理员私聊 /audit 建立通知通道。",
+                    admin_id,
+                )
 
     async def notify_auto_result(
         self,
@@ -94,7 +108,7 @@ class AdminNotifier:
             if not sent:
                 logger.warning(
                     "[audit] 无法通知管理员 %s：无 UMO 且 HTTP fallback 不可用。"
-                    "请管理员私聊 /audit status 建立通知通道。",
+                    "请管理员私聊 /audit 建立通知通道。",
                     admin_id,
                 )
 

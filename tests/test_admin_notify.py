@@ -6,6 +6,7 @@ import pytest
 from admin.notify import AdminNotifier
 from config import load_settings
 from storage.admin_session_store import AdminSessionStore
+from storage.list_cache import AdminListCacheStore
 
 
 class DummyConfig(dict):
@@ -44,6 +45,35 @@ async def test_notify_uses_context_send_message_without_http(tmp_path):
     )
     context.send_message.assert_awaited_once()
     actions.send_private_msg_safe.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_manual_review_notice_includes_short_commands(tmp_path):
+    settings = load_settings(DummyConfig({"admin_qq_ids": "111", "onebot_http_url": ""}))
+    store = AdminSessionStore(tmp_path / "admin_sessions.json")
+    list_cache = AdminListCacheStore(tmp_path / "list_cache.json")
+    http_client = MagicMock()
+    http_client.send_private_msg_safe = AsyncMock(return_value=MagicMock(ok=True))
+    context = MagicMock()
+    context.send_message = AsyncMock(return_value=True)
+    notifier = AdminNotifier(
+        settings, MagicMock(), context, store, lambda: http_client, list_cache
+    )
+    await notifier.notify_manual_review(
+        request_id="REQ-test123",
+        group_id="796836121",
+        user_id="2492835361",
+        comment="李四 计算机类",
+        parsed={"name": "李四"},
+        reason="姓名+专业弱匹配",
+    )
+    message = http_client.send_private_msg_safe.await_args.args[1]
+    assert "/audit view 1" in message
+    assert "/audit ok 1" in message
+    assert "/audit no 1" in message
+    assert "flag" not in message
+    assert "REQ-test123" not in message
+    assert list_cache.resolve("111", 1) == "REQ-test123"
 
 
 @pytest.mark.asyncio
