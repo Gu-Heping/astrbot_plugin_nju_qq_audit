@@ -26,12 +26,13 @@ from admin.handlers import PluginContext
 from admin.permissions import can_run_command
 from data_source.njutable_provider import load_students_for_audit
 from onebot.event_extract import extract_group_request, extract_raw_dict, is_notice_event
+from onebot.platform_cache import cache_event_platform
 from probe.event_store import ProbeEventStore, utc_now_iso
 from probe.formatter import format_event_summary, format_raw_event, format_recent as format_probe_recent
 from probe.sanitizer import build_missing_raw_summary, classify_raw_message, sanitize
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
-PLUGIN_VERSION = "v0.2.2"
+PLUGIN_VERSION = "v0.2.3"
 
 
 @register(
@@ -70,14 +71,7 @@ class NjuQqAuditPlugin(Star):
         return self.ctx.settings
 
     def _remember_event_platform(self, event: AstrMessageEvent) -> None:
-        remember = getattr(self.ctx, "remember_event_platform", None)
-        if callable(remember):
-            remember(event)
-            return
-        from onebot.astrbot_adapter_actions import AstrBotAdapterActionClient
-
-        if isinstance(self.ctx.actions, AstrBotAdapterActionClient):
-            self.ctx.actions.remember_event(event)
+        cache_event_platform(self.ctx, event)
 
     async def _record_admin_session(self, event: AstrMessageEvent) -> None:
         self._remember_event_platform(event)

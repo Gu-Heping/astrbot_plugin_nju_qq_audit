@@ -2,6 +2,12 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.2.3] - 2026-07-09
+
+### 修复
+
+- 平台缓存改为 `onebot/platform_cache.py` 直接 setattr，避免热重载后 `remember_event` 方法缺失导致崩溃
+
 ## [v0.2.2] - 2026-07-09
 
 ### 修复

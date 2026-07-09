@@ -10,6 +10,7 @@ from config import PluginSettings, load_settings
 from core.pipeline import AuditPipeline
 from data_source.student_cache import StudentCache
 from onebot.actions import ActionClient, create_action_client, create_http_notify_client
+from onebot.platform_cache import cache_event_platform
 from storage.admin_session_store import AdminSessionStore
 from storage.audit_log import AuditLog
 from storage.requests_store import RequestsStore
@@ -107,21 +108,7 @@ class PluginContext:
         await self.admin_sessions.record(admin_qq, umo)
 
     def remember_event_platform(self, event: Any) -> None:
-        from onebot.astrbot_adapter_actions import AstrBotAdapterActionClient
-
-        platform_id = None
-        if hasattr(event, "get_platform_id"):
-            try:
-                platform_id = event.get_platform_id()
-            except Exception:
-                platform_id = None
-        if platform_id:
-            self._platform_id = str(platform_id)
-        bot = getattr(event, "bot", None)
-        if bot is not None and hasattr(bot, "api"):
-            self._event_bot = bot
-        if isinstance(self.actions, AstrBotAdapterActionClient):
-            self.actions.remember_event(event)
+        cache_event_platform(self, event)
 
     def effective_mode(self) -> tuple[str, str]:
         from config import get_effective_mode
