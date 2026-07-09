@@ -1,0 +1,263 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from data_source.students import ActionResult, PendingRequest
+
+REQUESTS_VERSION = 2
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def new_request_id() -> str:
+    return f"REQ-{uuid.uuid4().hex[:12]}"
+
+
+class RequestsStore:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._lock = asyncio.Lock()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.path.exists() or self.path.stat().st_size == 0:
+            self._write(self._empty())
+
+    def _empty(self) -> dict[str, Any]:
+        return {"version": REQUESTS_VERSION, "by_id": {}, "by_flag": {}}
+
+    def _read_unlocked(self) -> dict[str, Any]:
+        try:
+            raw = self.path.read_text(encoding="utf-8").strip()
+            if not raw:
+                return self._empty()
+            parsed = json.loads(raw)
+        except (OSError, json.JSONDecodeError):
+            return self._empty()
+        if isinstance(parsed, dict) and parsed.get("version") == REQUESTS_VERSION:
+            parsed.setdefault("by_id", {})
+            parsed.setdefault("by_flag", {})
+            return parsed
+        if isinstance(parsed, dict):
+            return self._migrate_v1(parsed)
+        return self._empty()
+
+    def _migrate_v1(self, v1: dict[str, Any]) -> dict[str, Any]:
+        store = self._empty()
+        for flag, req in v1.items():
+            if not isinstance(req, dict):
+                continue
+            req_id = str(req.get("id") or new_request_id())
+            pending = self._dict_to_request(req_id, req, flag)
+            store["by_id"][req_id] = self._request_to_dict(pending)
+            store["by_flag"][flag] = req_id
+        return store
+
+    def _write(self, data: dict[str, Any]) -> None:
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(self.path)
+
+    @staticmethod
+    def _dict_to_request(req_id: str, data: dict[str, Any], flag: str) -> PendingRequest:
+        action_result = data.get("action_result")
+        ar = None
+        if isinstance(action_result, dict):
+            ar = ActionResult(
+                ok=bool(action_result.get("ok")),
+                retcode=action_result.get("retcode"),
+                message=action_result.get("message"),
+            )
+        return PendingRequest(
+            id=req_id,
+            group_id=str(data.get("group_id", "")),
+            user_id=str(data.get("user_id", "")),
+            comment=str(data.get("comment", "")),
+            flag=str(data.get("flag", flag)),
+            sub_type=str(data.get("sub_type", "add")),
+            parsed=data.get("parsed") or {},
+            match=data.get("match") or {},
+            decision=data.get("decision", "manual_review"),
+            confidence=float(data.get("confidence", 0)),
+            reason=str(data.get("reason", "")),
+            mode=str(data.get("mode", "record-only")),
+            status=data.get("status", "pending"),
+            created_at=str(data.get("created_at", utc_now_iso())),
+            processed_at=data.get("processed_at"),
+            action_result=ar,
+            admin_override=bool(data.get("admin_override", False)),
+            admin_user_id=str(data.get("admin_user_id")) if data.get("admin_user_id") else None,
+            admin_command=data.get("admin_command"),
+            match_strength=data.get("match_strength", "none"),
+            matched_student_key=data.get("matched_student_key"),
+        )
+
+    @staticmethod
+    def _request_to_dict(req: PendingRequest) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "id": req.id,
+            "group_id": req.group_id,
+            "user_id": req.user_id,
+            "comment": req.comment,
+            "flag": req.flag,
+            "sub_type": req.sub_type,
+            "parsed": req.parsed,
+            "match": req.match,
+            "decision": req.decision,
+            "confidence": req.confidence,
+            "reason": req.reason,
+            "mode": req.mode,
+            "status": req.status,
+            "created_at": req.created_at,
+            "processed_at": req.processed_at,
+            "admin_override": req.admin_override,
+            "admin_user_id": req.admin_user_id,
+            "admin_command": req.admin_command,
+            "match_strength": req.match_strength,
+            "matched_student_key": req.matched_student_key,
+        }
+        if req.action_result:
+            data["action_result"] = {
+                "ok": req.action_result.ok,
+                "retcode": req.action_result.retcode,
+                "message": req.action_result.message,
+            }
+        return data
+
+    def _to_request(self, data: dict[str, Any]) -> PendingRequest:
+        return self._dict_to_request(str(data["id"]), data, str(data.get("flag", "")))
+
+    async def get_by_id(self, req_id: str) -> PendingRequest | None:
+        async with self._lock:
+            store = self._read_unlocked()
+            data = store["by_id"].get(req_id)
+            return self._to_request(data) if data else None
+
+    async def get_by_flag(self, flag: str) -> PendingRequest | None:
+        async with self._lock:
+            store = self._read_unlocked()
+            req_id = store["by_flag"].get(flag)
+            if not req_id:
+                return None
+            data = store["by_id"].get(req_id)
+            return self._to_request(data) if data else None
+
+    async def find_active_pending_by_user_group(
+        self, group_id: str, user_id: str
+    ) -> PendingRequest | None:
+        async with self._lock:
+            store = self._read_unlocked()
+            for data in store["by_id"].values():
+                if (
+                    str(data.get("group_id")) == group_id
+                    and str(data.get("user_id")) == user_id
+                    and data.get("status") == "pending"
+                    and not data.get("processed_at")
+                ):
+                    return self._to_request(data)
+            return None
+
+    async def upsert(self, req: PendingRequest) -> None:
+        async with self._lock:
+            store = self._read_unlocked()
+            store["by_id"][req.id] = self._request_to_dict(req)
+            store["by_flag"][req.flag] = req.id
+            self._write(store)
+
+    async def update_by_id(self, req_id: str, update: dict[str, Any]) -> PendingRequest | None:
+        async with self._lock:
+            store = self._read_unlocked()
+            data = store["by_id"].get(req_id)
+            if not data:
+                return None
+            data.update(update)
+            store["by_id"][req_id] = data
+            self._write(store)
+            return self._to_request(data)
+
+    async def update_by_flag(self, flag: str, update: dict[str, Any]) -> PendingRequest | None:
+        async with self._lock:
+            store = self._read_unlocked()
+            req_id = store["by_flag"].get(flag)
+            if not req_id:
+                return None
+            data = store["by_id"].get(req_id)
+            if not data:
+                return None
+            data.update(update)
+            store["by_id"][req_id] = data
+            self._write(store)
+            return self._to_request(data)
+
+    async def supersede_pending(self, flag: str, superseded_by_flag: str) -> None:
+        await self.update_by_flag(
+            flag,
+            {
+                "status": "ignored",
+                "processed_at": utc_now_iso(),
+                "action_result": {
+                    "ok": False,
+                    "message": f"superseded by new application ({superseded_by_flag})",
+                },
+            },
+        )
+
+    async def list_pending(self, limit: int = 10) -> list[PendingRequest]:
+        async with self._lock:
+            store = self._read_unlocked()
+            items = [
+                self._to_request(data)
+                for data in store["by_id"].values()
+                if data.get("status") == "pending"
+            ]
+        items.sort(key=lambda r: r.created_at, reverse=True)
+        return items[:limit]
+
+    async def list_all(self) -> list[PendingRequest]:
+        async with self._lock:
+            store = self._read_unlocked()
+            return [self._to_request(data) for data in store["by_id"].values()]
+
+    async def clear_all(self) -> None:
+        async with self._lock:
+            self._write(self._empty())
+
+    async def resolve_by_id_or_prefix(self, req_id: str) -> PendingRequest | None:
+        exact = await self.get_by_id(req_id)
+        if exact:
+            return exact
+        matches = [r for r in await self.list_all() if r.id.startswith(req_id)]
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
+    async def get_stats(self) -> dict[str, int]:
+        records = await self.list_all()
+        stats = {
+            "total": len(records),
+            "pending": 0,
+            "approve": 0,
+            "manual_review": 0,
+            "reject": 0,
+            "ignored": 0,
+            "auto_approved": 0,
+            "admin_approved": 0,
+            "failed": 0,
+        }
+        for req in records:
+            if req.status == "pending":
+                stats["pending"] += 1
+            stats[req.decision] = stats.get(req.decision, 0) + 1
+            if req.action_result and req.action_result.ok and req.decision == "approve":
+                if req.admin_override:
+                    stats["admin_approved"] += 1
+                elif req.mode == "auto":
+                    stats["auto_approved"] += 1
+            if req.status == "failed":
+                stats["failed"] += 1
+        return stats

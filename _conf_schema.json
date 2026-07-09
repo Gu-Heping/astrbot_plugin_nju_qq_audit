@@ -1,29 +1,119 @@
 {
+  "mode": {
+    "description": "默认运行模式。可被 /audit mode 运行时覆盖。",
+    "type": "string",
+    "default": "record-only",
+    "options": ["off", "record-only", "manual", "auto"]
+  },
+  "student_source": {
+    "description": "学生数据源",
+    "type": "string",
+    "default": "mock",
+    "options": ["mock", "nju_table"]
+  },
+  "target_group_ids": {
+    "description": "目标群号，逗号分隔。为空时不处理任何入群申请。",
+    "type": "string",
+    "default": "",
+    "hint": "部署级配置，仅可在 AstrBot 插件管理面板修改"
+  },
+  "admin_qq_ids": {
+    "description": "管理员 QQ 号，逗号分隔",
+    "type": "string",
+    "default": ""
+  },
+  "admin_notify": {
+    "description": "是否向管理员推送 manual_review 和 auto 结果",
+    "type": "bool",
+    "default": true
+  },
+  "onebot_http_url": {
+    "description": "SnowLuma OneBot HTTP action 地址",
+    "type": "string",
+    "default": "http://127.0.0.1:3000"
+  },
+  "onebot_access_token": {
+    "description": "OneBot access token",
+    "type": "string",
+    "default": "",
+    "hint": "不得写入日志、缓存或管理员回复"
+  },
+  "http_timeout_ms": {
+    "description": "HTTP 超时（毫秒）",
+    "type": "int",
+    "default": 10000
+  },
+  "http_retries": {
+    "description": "HTTP 重试次数",
+    "type": "int",
+    "default": 2
+  },
+  "http_retry_delay_ms": {
+    "description": "HTTP 重试间隔（毫秒）",
+    "type": "int",
+    "default": 500
+  },
+  "njutable_server_url": {
+    "description": "SeaTable 服务器地址",
+    "type": "string",
+    "default": "https://cloud.seatable.io"
+  },
+  "njutable_api_token": {
+    "description": "SeaTable base API Token",
+    "type": "string",
+    "default": "",
+    "hint": "不得写入日志、缓存或管理员回复"
+  },
+  "njutable_table_name": {
+    "description": "SeaTable 表名",
+    "type": "string",
+    "default": "考生信息-校对表"
+  },
+  "njutable_view_name": {
+    "description": "SeaTable 视图名（可选）",
+    "type": "string",
+    "default": ""
+  },
+  "njutable_allowed_statuses": {
+    "description": "允许同步的考生状态，逗号分隔",
+    "type": "string",
+    "default": "对外公布"
+  },
+  "njutable_page_size": {
+    "description": "SeaTable 分页大小（最大 1000）",
+    "type": "int",
+    "default": 1000
+  },
+  "njutable_timeout_ms": {
+    "description": "SeaTable 请求超时（毫秒）",
+    "type": "int",
+    "default": 10000
+  },
+  "njutable_col_status": { "description": "列名：考生状态", "type": "string", "default": "考生状态" },
+  "njutable_col_notice_no": { "description": "列名：通知书编号", "type": "string", "default": "通知书编号" },
+  "njutable_col_exam_no": { "description": "列名：考生号", "type": "string", "default": "考生号" },
+  "njutable_col_name": { "description": "列名：姓名", "type": "string", "default": "姓名" },
+  "njutable_col_gender": { "description": "列名：性别", "type": "string", "default": "性别" },
+  "njutable_col_origin": { "description": "列名：生源地", "type": "string", "default": "生源地" },
+  "njutable_col_subject": { "description": "列名：科类名称", "type": "string", "default": "科类名称" },
+  "njutable_col_batch": { "description": "列名：批次名称", "type": "string", "default": "批次名称" },
+  "njutable_col_major": { "description": "列名：通知书专业", "type": "string", "default": "通知书专业" },
+  "njutable_col_score": { "description": "列名：成绩", "type": "string", "default": "成绩" },
+  "njutable_col_middle_school": { "description": "列名：中学名称", "type": "string", "default": "中学名称" },
+  "njutable_col_student_id": { "description": "列名：学号", "type": "string", "default": "学号" },
+  "njutable_col_academy": { "description": "列名：书院", "type": "string", "default": "书院" },
   "probe_enabled": {
     "description": "是否启用 OneBot 事件探针",
     "type": "bool",
     "default": true
   },
   "log_raw_event": {
-    "description": "是否在记录中保存脱敏后的 raw event（默认关闭）",
+    "description": "是否在探针记录中保存脱敏后的 raw event",
     "type": "bool",
-    "default": false,
-    "hint": "即使开启也会脱敏 flag/token 等敏感字段"
-  },
-  "admin_qq_ids": {
-    "description": "管理员 QQ 号，逗号分隔",
-    "type": "string",
-    "default": "",
-    "hint": "留空时仅允许私聊执行 status/last 命令"
-  },
-  "target_group_ids": {
-    "description": "目标群号，逗号分隔",
-    "type": "string",
-    "default": "",
-    "hint": "留空则记录所有群相关 request/notice 事件"
+    "default": false
   },
   "max_recent_events": {
-    "description": "内存中保留的最近事件数量上限",
+    "description": "探针内存中保留的最近事件数量上限",
     "type": "int",
     "default": 20
   }

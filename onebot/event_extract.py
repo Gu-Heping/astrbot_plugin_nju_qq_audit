@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from probe.sanitizer import get_field, to_plain_dict
+
+
+@dataclass
+class GroupJoinRequest:
+    group_id: str
+    user_id: str
+    comment: str
+    flag: str
+    sub_type: str
+    self_id: str | None = None
+    raw_event: dict[str, Any] | None = None
+
+
+def extract_raw_dict(message_obj: Any) -> dict[str, Any] | None:
+    raw = getattr(message_obj, "raw_message", None)
+    if raw is None:
+        return None
+    plain = to_plain_dict(raw)
+    return plain
+
+
+def extract_group_request(raw: dict[str, Any] | None) -> GroupJoinRequest | None:
+    if not raw:
+        return None
+    if get_field(raw, "post_type") != "request":
+        return None
+    if get_field(raw, "request_type") != "group":
+        return None
+    sub_type = get_field(raw, "sub_type")
+    if sub_type not in {"add", "invite"}:
+        return None
+    flag = get_field(raw, "flag")
+    if not flag:
+        return None
+    group_id = get_field(raw, "group_id")
+    user_id = get_field(raw, "user_id")
+    if group_id is None or user_id is None:
+        return None
+    return GroupJoinRequest(
+        group_id=str(group_id),
+        user_id=str(user_id),
+        comment=str(get_field(raw, "comment", "") or ""),
+        flag=str(flag),
+        sub_type=str(sub_type),
+        self_id=str(get_field(raw, "self_id")) if get_field(raw, "self_id") is not None else None,
+        raw_event=raw,
+    )
+
+
+def is_notice_event(raw: dict[str, Any] | None) -> bool:
+    if not raw:
+        return False
+    return get_field(raw, "post_type") == "notice"

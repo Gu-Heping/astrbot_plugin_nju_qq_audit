@@ -1,144 +1,133 @@
 # astrbot_plugin_nju_qq_audit
 
-南京大学新生 QQ 群入群审核插件 — **当前仅为 Phase 0 探针**，不执行任何自动审核、approve/reject 操作。
+南京大学 26 级新生 QQ 群入群审核 **AstrBot 插件**（非独立 Node 服务）。
 
-## 当前阶段说明
+## 功能概览
 
-本插件 **不是正式审核插件**。它只做一件事：在 AstrBot 插件层监听 OneBot 原始事件，确认能否通过 `event.message_obj.raw_message` 拿到入群申请、群邀请、退群等 `request` / `notice` 事件。
-
-- 不调用 `set_group_add_request`
-- 不 approve / reject 任何入群请求
-- 不 `stop_event`，不影响其他插件
+- 通过 AstrBot aiocqhttp 适配器接收 `request.group.add/invite`（`event.message_obj.raw_message`）
+- 解析入群验证 comment，匹配 NJUTable / mock 学生缓存
+- 模式：`record-only` / `manual` / `auto` / `off`
+- 默认 **record-only**，**不自动 reject**
+- `auto` 模式仅 **strong match**（姓名+学号 / 姓名+通知书编号）自动 approve
+- OneBot 主动操作统一走 **HTTP action**（`onebot/http_actions.py`）
+- 保留 OneBot 探针（`/audit probe *`）
 
 ## 安装
 
-1. 克隆或下载本仓库
-2. 将整个目录放到 AstrBot 插件目录：
-
-```text
-<AstrBot 根目录>/data/plugins/astrbot_plugin_nju_qq_audit/
+```bash
+cd <AstrBot>/data/plugins
+git clone https://github.com/Gu-Heping/astrbot_plugin_nju_qq_audit.git astrbot_plugin_nju_qq_audit
+pip install -r astrbot_plugin_nju_qq_audit/requirements.txt
 ```
 
-目录结构示例：
-
-```text
-data/plugins/astrbot_plugin_nju_qq_audit/
-├── main.py
-├── metadata.yaml
-├── _conf_schema.json
-├── requirements.txt
-├── probe/
-│   ├── __init__.py
-│   ├── sanitizer.py
-│   ├── event_store.py
-│   └── formatter.py
-└── README.md
-```
-
-3. 重启 AstrBot，在 WebUI 或配置文件中确认插件已加载
+重启 AstrBot 或在 WebUI 重载插件。
 
 ## 配置
 
-插件配置保存在 `data/config/astrbot_plugin_nju_qq_audit_config.json`，也可在 AstrBot 管理面板中编辑。
+在 AstrBot 插件管理面板配置（写入 `data/config/astrbot_plugin_nju_qq_audit_config.json`）。
 
-| 配置项 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `probe_enabled` | bool | `true` | 是否启用事件探针 |
-| `log_raw_event` | bool | `false` | 是否保存脱敏后的 raw event |
-| `admin_qq_ids` | string | `""` | 管理员 QQ，逗号分隔 |
-| `target_group_ids` | string | `""` | 目标群号，逗号分隔；留空记录所有群 |
-| `max_recent_events` | int | `20` | 内存中保留的最近事件数 |
+**不再使用 `.env` 作为正式配置入口。**
 
-### 配置示例
+### 必配项（生产）
 
-```json
-{
-  "probe_enabled": true,
-  "log_raw_event": false,
-  "admin_qq_ids": "123456789",
-  "target_group_ids": "1093442531",
-  "max_recent_events": 20
-}
-```
+| 配置项 | 说明 |
+|--------|------|
+| `target_group_ids` | 目标群号，逗号分隔。**为空时不处理任何入群申请** |
+| `admin_qq_ids` | 管理员 QQ，逗号分隔 |
+| `onebot_http_url` | SnowLuma OneBot HTTP 地址，如 `http://127.0.0.1:3000` |
+| `onebot_access_token` | OneBot token（如有） |
+| `student_source` | `mock` 或 `nju_table` |
+| `njutable_api_token` | SeaTable base API Token（`nju_table` 时） |
+| `njutable_table_name` | 表名，默认 `考生信息-校对表` |
 
-### 权限说明
+### 配置优先级
 
-- 所有 `/audit_probe` 命令 **仅私聊可用**
-- `admin_qq_ids` 已配置时，仅管理员可执行全部命令
-- `admin_qq_ids` 为空时（首次调试）：
-  - 允许：`/audit_probe status`、`/audit_probe last`
-  - 拒绝：`/audit_probe recent`、`/audit_probe raw`、`/audit_probe clear`（并提示未配置管理员）
+| 项 | 优先级 |
+|----|--------|
+| `mode` | `runtime.json` > 插件配置 > 内置默认 `record-only` |
+| `target_group_ids` | **仅插件配置**（不提供 QQ 指令修改） |
 
-## 命令
+### 安全默认值
+
+- 默认 `mode=record-only`
+- 不自动 reject
+- 专业/书院 weak match 不能自动通过
+- `flag` 必须来自原始 OneBot 事件，不可自造
+- 管理员只能通过 **request id** 审批，不能传 flag
+
+## 命令（仅私聊）
 
 | 命令 | 说明 |
 |------|------|
-| `/audit_probe` | 显示命令树 / 帮助 |
-| `/audit_probe status` | 探针状态、最近事件数、数据目录等 |
-| `/audit_probe last` | 最近一条事件摘要 |
-| `/audit_probe recent` | 最近 10 条事件摘要 |
-| `/audit_probe raw` | 查看脱敏 raw（需 `log_raw_event=true`，仅管理员） |
-| `/audit_probe clear confirm` | 清空记录（仅管理员） |
+| `/audit help` | 帮助 |
+| `/audit status` | 运行状态 |
+| `/audit mode` | 查看/切换 runtime mode |
+| `/audit mode auto confirm` | 切换 auto（需 confirm） |
+| `/audit mode reset confirm` | 恢复插件配置 mode |
+| `/audit sync` | 同步学生数据 |
+| `/audit pending [n]` | pending 列表 |
+| `/audit request <id>` | 请求详情（不含 flag） |
+| `/audit approve <id> confirm` | 人工同意 |
+| `/audit reject <id> confirm` | 人工拒绝 |
+| `/audit process strong confirm` | 批量处理 strong pending |
+| `/audit stats` | 统计 |
+| `/audit probe status\|last\|recent\|raw` | 探针 |
 
-## 测试步骤
+兼容旧命令：`/audit_probe status|last|recent`
 
-1. 启动 **AstrBot** + **SnowLuma**（OneBot v11 反向 WS）
-2. 确认插件加载，必要时配置 `admin_qq_ids`
-3. 触发以下事件：
-   - 让机器人 **退群** → 期望 `notice_type=group_decrease`
-   - **邀请机器人入群** → 期望 `post_type=request`, `request_type=group`, `sub_type=invite`
-   - 用小号 **申请入群** → 期望 `post_type=request`, `request_type=group`, `sub_type=add`
-4. 私聊机器人发送：
-   - `/audit_probe last`
-   - `/audit_probe recent`
-5. 查看数据文件（可选）：
+**不提供** `/audit group *` 命令。修改目标群请编辑插件配置 `target_group_ids` 后重载。
 
-```text
-<AstrBot>/data/plugin_data/astrbot_plugin_nju_qq_audit/
+## 真实环境测试流程
+
+1. 配置 `target_group_ids`、`admin_qq_ids`、`onebot_http_url`
+2. `/audit status` 确认 mode 与群号
+3. `/audit sync` 同步学生缓存
+4. 保持 `record-only`，用小号申请入群
+5. `/audit pending` → `/audit request <id>`
+6. 确认无误后 `/audit mode auto confirm`
+7. `/audit probe last` 确认插件层收到 `request.group.add`
+
+## NJUTable / SeaTable
+
+1. API Token → Base Token（内存缓存，不落盘）
+2. Base Token → 分页读取 rows（limit ≤ 1000）
+3. 审核只读本地 `students.cache.json`
+4. 同步失败 **保留旧缓存**
+
+默认仅同步 `njutable_allowed_statuses` 中的状态（默认 `对外公布`）。`有问题` 硬排除。
+
+## 隐私
+
+以下字段 **不进入缓存、日志、管理员回复**：
+
+身份证号、收件人、家庭地址、邮政编码、联系电话、联系手机
+
+请勿提交 `data/plugin_data/astrbot_plugin_nju_qq_audit/` 下真实数据到 GitHub。
+
+## 数据文件
+
+```
+data/plugin_data/astrbot_plugin_nju_qq_audit/
+├── requests.json
+├── audit.jsonl
+├── runtime.json          # 仅 mode override
+├── students.cache.json
+├── sync_state.json
 ├── probe_events.jsonl
 └── probe_state.json
 ```
 
-## 如何判断结果
+## 开发测试
 
-### 成功（插件层可直接处理）
-
-`/audit_probe last` 显示：
-
-- `raw_message_present: yes`
-- `post_type=request`, `request_type=group`, `sub_type=add`（入群申请）
-
-说明 AstrBot 插件层能直接拿到 OneBot 入群申请，后续正式审核可在 AstrBot 插件内实现。
-
-### 失败（需 Phase 1 备选方案）
-
-- `message_str` 为空
-- `raw_message_present: no` 或 `raw_message_missing: true`
-
-说明插件层拿不到原始 payload，正式插件可能需要 **插件内直连 SnowLuma WebSocket 收事件 + HTTP action 发操作**。
-
-## 安全提示
-
-- 本探针 **不会** approve/reject 入群请求
-- **不会** 保存完整 `flag` / `token` / `access_token`
-- 默认 `log_raw_event=false`，不保存完整 raw event
-- `probe_events.jsonl` 含群事件摘要，**不要提交到 GitHub**
-- 生产环境请配置 `admin_qq_ids`
-
-## 数据文件
-
-| 文件 | 说明 |
-|------|------|
-| `probe_events.jsonl` | 脱敏事件摘要（JSONL，append-only） |
-| `probe_state.json` | 探针状态（最近 request.group 时间、累计条数） |
-
-## 依赖
-
-仅使用 Python 标准库，无额外 pip 依赖。
+```bash
+pip install aiohttp pytest pytest-asyncio
+pytest tests/
+```
 
 ## 要求版本
 
 - AstrBot: `>=4.16,<5`
+- Python: 3.10+
 
 ## 仓库
 
