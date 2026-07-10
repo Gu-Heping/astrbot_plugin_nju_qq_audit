@@ -19,6 +19,8 @@ class SyncState:
     last_sync_result: str | None = None
     row_count: int = 0
     filtered_count: int = 0
+    raw_row_count: int = 0
+    mapped_count: int = 0
     source: str = "mock"
     next_sync_at: str | None = None
     last_sync_source: str | None = None
@@ -61,6 +63,8 @@ class StudentCache:
                     last_sync_result=raw.get("last_sync_result"),
                     row_count=int(raw.get("row_count", 0)),
                     filtered_count=int(raw.get("filtered_count", 0)),
+                    raw_row_count=int(raw.get("raw_row_count", 0)),
+                    mapped_count=int(raw.get("mapped_count", 0)),
                     source=str(raw.get("source", "mock")),
                     next_sync_at=raw.get("next_sync_at"),
                     last_sync_source=raw.get("last_sync_source"),

@@ -209,4 +209,5 @@ __marimo__/
 # Plugin probe data (do not commit)
 probe_events.jsonl
 probe_state.json
+data/probe_sync_tmp/
 **/plugin_data/astrbot_plugin_nju_qq_audit/

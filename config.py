@@ -58,7 +58,7 @@ class PluginSettings:
     http_timeout_ms: int = 10000
     http_retries: int = 2
     http_retry_delay_ms: int = 500
-    njutable_server_url: str = "https://cloud.seatable.io"
+    njutable_server_url: str = "https://table.nju.edu.cn"
     njutable_api_token: str = ""
     njutable_table_name: str = "考生信息-校对表"
     njutable_view_name: str = ""
@@ -207,7 +207,7 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         http_retries=_clamp_int(config.get("http_retries"), 2, minimum=0),
         http_retry_delay_ms=_clamp_int(config.get("http_retry_delay_ms"), 500, minimum=0),
         njutable_server_url=str(
-            config.get("njutable_server_url", "https://cloud.seatable.io")
+            config.get("njutable_server_url", "https://table.nju.edu.cn")
         ).strip(),
         njutable_api_token=str(config.get("njutable_api_token", "")).strip(),
         njutable_table_name=str(config.get("njutable_table_name", "考生信息-校对表")).strip(),

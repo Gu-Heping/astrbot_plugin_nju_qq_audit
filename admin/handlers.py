@@ -155,8 +155,11 @@ class PluginContext:
                 state.last_sync_source = source
                 self.cache.save_sync_state(state)
                 return (
-                    f"同步成功: source={state.source}, rows={state.row_count}, "
+                    f"同步成功: source={state.source}, "
+                    f"raw={state.raw_row_count or state.row_count}, "
+                    f"mapped={state.mapped_count or state.row_count}, "
                     f"filtered={state.filtered_count}"
+                    f"{', ignore_status=on' if self.settings.njutable_ignore_status_filter else ''}"
                 )
             except Exception as exc:
                 cached = self.cache.load_students()

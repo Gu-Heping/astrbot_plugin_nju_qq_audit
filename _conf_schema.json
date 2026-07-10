@@ -61,9 +61,9 @@
     "default": 500
   },
   "njutable_server_url": {
-    "description": "SeaTable 服务器地址",
+    "description": "SeaTable 服务器地址（南大 NJUTable 默认 table.nju.edu.cn）",
     "type": "string",
-    "default": "https://cloud.seatable.io"
+    "default": "https://table.nju.edu.cn"
   },
   "njutable_api_token": {
     "description": "SeaTable base API Token",

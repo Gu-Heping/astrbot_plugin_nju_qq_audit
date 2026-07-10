@@ -129,6 +129,8 @@ async def sync_students(
         state = SyncState(
             last_sync_at=utc_now_iso(),
             last_sync_result="success",
+            raw_row_count=len(rows),
+            mapped_count=len(mapped),
             row_count=len(mapped),
             filtered_count=len(filtered),
             source="nju_table",
