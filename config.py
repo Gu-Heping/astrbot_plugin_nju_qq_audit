@@ -63,6 +63,7 @@ class PluginSettings:
     njutable_table_name: str = "考生信息-校对表"
     njutable_view_name: str = ""
     njutable_allowed_statuses: tuple[str, ...] = ("对外公布",)
+    njutable_ignore_status_filter: bool = False
     njutable_page_size: int = 1000
     njutable_timeout_ms: int = 10000
     njutable_cols: NjuTableColMapping = field(default_factory=NjuTableColMapping)
@@ -214,6 +215,7 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         njutable_allowed_statuses=parse_csv(
             str(config.get("njutable_allowed_statuses", "对外公布"))
         ) or ("对外公布",),
+        njutable_ignore_status_filter=bool(config.get("njutable_ignore_status_filter", False)),
         njutable_page_size=_clamp_int(config.get("njutable_page_size"), 1000, minimum=1, maximum=1000),
         njutable_timeout_ms=_clamp_int(config.get("njutable_timeout_ms"), 10000, minimum=1),
         njutable_cols=cols,

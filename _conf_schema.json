@@ -86,6 +86,11 @@
     "type": "string",
     "default": "对外公布"
   },
+  "njutable_ignore_status_filter": {
+    "description": "忽略考生状态筛选（表内状态列为空或未启用时使用；仍会排除「有问题」）",
+    "type": "bool",
+    "default": false
+  },
   "njutable_page_size": {
     "description": "SeaTable 分页大小（最大 1000）",
     "type": "int",

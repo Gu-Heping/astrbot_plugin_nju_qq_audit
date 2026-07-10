@@ -79,6 +79,15 @@ def filter_students_by_status(
     return [s for s in students if is_status_allowed(s.status, allowed_statuses)]
 
 
+def filter_students_for_sync(
+    students: list[Student],
+    settings: PluginSettings,
+) -> list[Student]:
+    if settings.njutable_ignore_status_filter:
+        return [s for s in students if s.status not in HARD_EXCLUDED_STATUSES]
+    return filter_students_by_status(students, settings.njutable_allowed_statuses)
+
+
 async def sync_students(
     settings: PluginSettings,
     cache: StudentCache,
@@ -114,7 +123,7 @@ async def sync_students(
         ]
         filtered = [
             sanitize_student_for_cache(s)
-            for s in filter_students_by_status(mapped, settings.njutable_allowed_statuses)
+            for s in filter_students_for_sync(mapped, settings)
         ]
         cache.save_students(filtered)
         state = SyncState(
