@@ -330,3 +330,56 @@ class AuditPipeline:
         return [
             f"{line.request_id}: {'ok' if line.ok else line.message}" for line in result.lines
         ]
+
+    async def reconcile_external_join(
+        self,
+        group_id: str,
+        user_id: str,
+        *,
+        notice_sub_type: str | None = None,
+        operator_id: str | None = None,
+    ) -> bool:
+        if not self.settings.target_group_ids:
+            return False
+        if group_id not in self.settings.target_group_ids:
+            return False
+        if notice_sub_type == "invite":
+            return False
+
+        pending = await self.requests.find_active_pending_by_user_group(group_id, user_id)
+        if not pending or pending.sub_type != "add":
+            return False
+
+        message = "QQ 侧已入群（非 bot 审批）"
+        if operator_id:
+            message = f"{message}，操作者 QQ：{operator_id}"
+
+        await self.requests.update_by_id(
+            pending.id,
+            {
+                "processed_at": utc_now_iso(),
+                "status": "external",
+                "action_result": {
+                    "ok": True,
+                    "message": message,
+                },
+            },
+        )
+        await self.audit.append(
+            {
+                "type": "external_handled",
+                "request_id": pending.id,
+                "group_id": group_id,
+                "user_id": user_id,
+                "operator_id": operator_id,
+                "notice_sub_type": notice_sub_type,
+                "message": message,
+            }
+        )
+        logger.info(
+            "[audit] external join reconciled request=%s group=%s user=%s",
+            pending.id,
+            group_id,
+            user_id,
+        )
+        return True

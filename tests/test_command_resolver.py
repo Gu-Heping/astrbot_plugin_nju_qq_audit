@@ -98,6 +98,7 @@ async def test_already_processed(tmp_path):
 def test_map_action_error_hides_raw():
     assert "adapter" not in map_action_error("aiocqhttp adapter not available")
     assert "审批接口" in map_action_error("aiocqhttp adapter not available")
+    assert "其他管理员" in map_action_error("flag expired")
 
 
 def test_parse_no_command_reason():

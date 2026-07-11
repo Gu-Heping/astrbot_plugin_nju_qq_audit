@@ -53,6 +53,37 @@ def extract_group_request(raw: dict[str, Any] | None) -> GroupJoinRequest | None
     )
 
 
+@dataclass
+class GroupMemberIncrease:
+    group_id: str
+    user_id: str
+    sub_type: str | None = None
+    operator_id: str | None = None
+    raw_event: dict[str, Any] | None = None
+
+
+def extract_group_increase(raw: dict[str, Any] | None) -> GroupMemberIncrease | None:
+    if not raw:
+        return None
+    if get_field(raw, "post_type") != "notice":
+        return None
+    if get_field(raw, "notice_type") != "group_increase":
+        return None
+    group_id = get_field(raw, "group_id")
+    user_id = get_field(raw, "user_id")
+    if group_id is None or user_id is None:
+        return None
+    sub_type = get_field(raw, "sub_type")
+    operator_id = get_field(raw, "operator_id")
+    return GroupMemberIncrease(
+        group_id=str(group_id),
+        user_id=str(user_id),
+        sub_type=str(sub_type) if sub_type is not None else None,
+        operator_id=str(operator_id) if operator_id is not None else None,
+        raw_event=raw,
+    )
+
+
 def is_notice_event(raw: dict[str, Any] | None) -> bool:
     if not raw:
         return False

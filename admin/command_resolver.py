@@ -38,15 +38,32 @@ class ResolveResult:
         return ""
 
 
+_EXTERNAL_HANDLED_HINT = (
+    "也可能已被其他管理员在 QQ 客户端处理，请核对群成员列表。"
+)
+
+
 def map_action_error(raw_message: str | None) -> str:
     text = (raw_message or "").lower()
     if not text:
-        return "调用 QQ 审批接口失败，申请可能已过期、被撤回，或机器人没有管理员权限。"
+        return (
+            "调用 QQ 审批接口失败，申请可能已过期、被撤回，或机器人没有管理员权限。"
+            + _EXTERNAL_HANDLED_HINT
+        )
     if "expired" in text or "flag" in text or "凭证" in text:
-        return "这条申请的审批凭证可能已经过期，请到 QQ 群管理后台确认。"
+        return (
+            "这条申请的审批凭证可能已经过期，请到 QQ 群管理后台确认。"
+            + _EXTERNAL_HANDLED_HINT
+        )
     if "adapter" in text or "permission" in text or "权限" in text:
-        return "调用 QQ 审批接口失败，申请可能已过期、被撤回，或机器人没有管理员权限。"
-    return "调用 QQ 审批接口失败，申请可能已过期、被撤回，或机器人没有管理员权限。"
+        return (
+            "调用 QQ 审批接口失败，申请可能已过期、被撤回，或机器人没有管理员权限。"
+            + _EXTERNAL_HANDLED_HINT
+        )
+    return (
+        "调用 QQ 审批接口失败，申请可能已过期、被撤回，或机器人没有管理员权限。"
+        + _EXTERNAL_HANDLED_HINT
+    )
 
 
 async def resolve_request_ref(

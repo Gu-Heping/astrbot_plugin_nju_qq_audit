@@ -47,7 +47,12 @@ from admin.release import (
 from admin.report import build_report_data, format_report, format_unknown
 from admin.permissions import can_run_command
 from data_source.njutable_provider import load_students_for_audit
-from onebot.event_extract import extract_group_request, extract_raw_dict, is_notice_event
+from onebot.event_extract import (
+    extract_group_increase,
+    extract_group_request,
+    extract_raw_dict,
+    is_notice_event,
+)
 from onebot.compat import invoke_probe_api
 from onebot.platform_cache import cache_event_platform
 from probe.event_store import ProbeEventStore, utc_now_iso
@@ -176,6 +181,14 @@ class NjuQqAuditPlugin(Star):
         raw = extract_raw_dict(event.message_obj)
         await self._handle_probe(event, raw)
         if raw and is_notice_event(raw):
+            increase = extract_group_increase(raw)
+            if increase:
+                await self.ctx.pipeline.reconcile_external_join(
+                    increase.group_id,
+                    increase.user_id,
+                    notice_sub_type=increase.sub_type,
+                    operator_id=increase.operator_id,
+                )
             return
         join_req = extract_group_request(raw)
         if join_req:

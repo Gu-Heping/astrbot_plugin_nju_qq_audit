@@ -1,4 +1,4 @@
-from onebot.event_extract import extract_group_request
+from onebot.event_extract import extract_group_increase, extract_group_request
 
 
 def test_extract_group_add():
@@ -20,3 +20,16 @@ def test_extract_group_add():
 def test_notice_not_request():
     raw = {"post_type": "notice", "notice_type": "group_decrease", "group_id": 1}
     assert extract_group_request(raw) is None
+
+
+def test_extract_group_increase():
+    raw = {
+        "post_type": "notice",
+        "notice_type": "group_increase",
+        "group_id": 796836121,
+        "user_id": 2492835361,
+        "sub_type": "approve",
+    }
+    increase = extract_group_increase(raw)
+    assert increase is not None
+    assert increase.user_id == "2492835361"

@@ -78,6 +78,7 @@ class ReportData:
     manual_review: int
     ignored: int
     failed: int
+    external: int
     releasable: int
     reason_counts: dict[str, int] = field(default_factory=dict)
     samples: list[PendingRequest] = field(default_factory=list)
@@ -112,6 +113,7 @@ async def build_report_data(
         manual_review=stats.get("manual_review", 0),
         ignored=stats.get("ignored", 0),
         failed=stats.get("failed", 0),
+        external=stats.get("external", 0),
         releasable=len(releasable),
         reason_counts=dict(reason_counter),
         samples=samples,
@@ -179,6 +181,7 @@ def format_report(
         f"- 需人工：{data.manual_review}",
         f"- 已忽略：{data.ignored}",
         f"- 失败：{data.failed}",
+        f"- 外部处理：{data.external}",
         f"- 可分批通过（strong）：{data.releasable}",
         f"- 分批任务进行中：{'是' if release_running else '否'}",
         "",

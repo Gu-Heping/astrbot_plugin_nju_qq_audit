@@ -290,6 +290,7 @@ class RequestsStore:
             "auto_approved": 0,
             "admin_approved": 0,
             "failed": 0,
+            "external": 0,
         }
         for req in records:
             if req.status == "pending":
@@ -302,4 +303,6 @@ class RequestsStore:
                     stats["auto_approved"] += 1
             if req.status == "failed":
                 stats["failed"] += 1
+            if req.status == "external":
+                stats["external"] += 1
         return stats
