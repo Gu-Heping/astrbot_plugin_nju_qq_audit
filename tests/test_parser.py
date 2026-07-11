@@ -22,3 +22,14 @@ def test_notice_no():
 def test_empty_comment():
     parsed = parse_application_comment("")
     assert parsed.parse_errors
+
+
+def test_grade_prefix_on_name():
+    parsed = parse_application_comment("26刘津娴 马理论专业")
+    assert parsed.name == "刘津娴"
+    assert parsed.major == "马理论专业"
+
+
+def test_grade_prefix_with_level_suffix():
+    parsed = parse_application_comment("26级刘津娴 计算机类")
+    assert parsed.name == "刘津娴"

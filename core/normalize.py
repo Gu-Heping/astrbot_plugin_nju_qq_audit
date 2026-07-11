@@ -34,8 +34,13 @@ def to_halfwidth(text: str) -> str:
     return text.translate(_FULLWIDTH_TRANS)
 
 
+_GRADE_PREFIX_ON_NAME = re.compile(r"^(?:202[56]|2[0-9])级?(?=[\u4e00-\u9fa5·])")
+
+
 def normalize_name(name: str) -> str:
-    return normalize_whitespace(to_halfwidth(name)).replace(" ", "")
+    value = normalize_whitespace(to_halfwidth(name)).replace(" ", "")
+    value = _GRADE_PREFIX_ON_NAME.sub("", value)
+    return value
 
 
 def normalize_student_id(student_id: str) -> str:

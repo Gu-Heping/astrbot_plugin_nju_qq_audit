@@ -69,3 +69,11 @@ def test_multiple_major_candidates():
     match = match_student(parsed, students)
     assert match.strength == "weak"
     assert match.confidence == 0.4
+
+
+def test_grade_prefix_name_with_marxism_major():
+    students = [_student("刘津娴", "马克思主义理论", student_id="261010001")]
+    parsed = parse_application_comment("26刘津娴 马理论专业")
+    match = match_student(parsed, students)
+    assert match.strength == "weak"
+    assert "专业" in match.reason
