@@ -7,6 +7,7 @@ from core.aliases import build_major_index, majors_match_fuzzy
 from core.normalize import (
     names_match,
     normalize_notice_no,
+    normalize_student_id,
     notice_nos_match,
     student_ids_match,
     student_qq_matches,
@@ -134,23 +135,51 @@ def match_student(
     known_majors = build_major_index(students)
 
     if parsed.name and parsed.student_id:
+        sid_norm = normalize_student_id(parsed.student_id)
+        candidates: list[Student] = []
         for student in students:
+            if not student.student_id or not names_match(parsed.name, student.name):
+                continue
+            if student_ids_match(parsed.student_id, student.student_id):
+                candidates.append(student)
+                continue
             if (
-                student.student_id
-                and names_match(parsed.name, student.name)
-                and student_ids_match(parsed.student_id, student.student_id)
+                len(sid_norm) == 8
+                and sid_norm.startswith("261")
+                and normalize_student_id(student.student_id).startswith(sid_norm)
             ):
-                if has_credential_conflict(parsed, student):
-                    return _conflict_result()
-                qq_match = student_qq_matches(applicant_user_id, student.qq)
-                return _build_result(
-                    "strong",
-                    student,
-                    ["name_studentId"],
-                    0.95,
-                    "姓名+学号强匹配",
-                    qq_match=qq_match,
-                )
+                candidates.append(student)
+        if len(candidates) == 1:
+            student = candidates[0]
+            exact_sid = student_ids_match(parsed.student_id, student.student_id)
+            if exact_sid and has_credential_conflict(parsed, student):
+                return _conflict_result()
+            if not exact_sid and (
+                parsed.notice_no
+                and student.notice_no
+                and not notice_nos_match(parsed.notice_no, student.notice_no)
+            ):
+                return _conflict_result()
+            qq_match = student_qq_matches(applicant_user_id, student.qq)
+            reason = (
+                "姓名+学号强匹配"
+                if exact_sid
+                else "姓名+学号前缀强匹配（申请学号位数偏短，需人工确认）"
+            )
+            return _build_result(
+                "strong",
+                student,
+                ["name_studentId"],
+                0.9 if reason.startswith("姓名+学号前缀") else 0.95,
+                reason,
+                qq_match=qq_match,
+            )
+        if len(candidates) > 1:
+            return MatchResult(
+                strength="none",
+                confidence=0,
+                reason="姓名+学号前缀匹配多条记录，需人工复核",
+            )
 
     if parsed.name and parsed.notice_no:
         for student in students:

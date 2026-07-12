@@ -27,3 +27,23 @@ def test_non_grade26():
     from core.matcher import is_non_grade26
 
     assert is_non_grade26(match, parsed)
+
+
+def test_short_student_id_prefix_match():
+    from data_source.students import Student
+
+    students = [
+        Student(
+            name="刘骐铭",
+            updated_at="t",
+            student_id="261150020",
+            major="地质学类",
+        )
+    ]
+    students[0].key = "刘骐铭"
+    parsed = parse_application_comment(
+        "问题：姓名 学号/录取号 专业 答案：刘骐铭 26115002 地质学类"
+    )
+    match = match_student(parsed, students)
+    assert match.strength == "strong"
+    assert "前缀" in match.reason

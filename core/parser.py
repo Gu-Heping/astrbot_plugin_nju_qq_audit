@@ -12,7 +12,9 @@ from core.normalize import (
     normalize_whitespace,
 )
 
-STUDENT_ID_PATTERN = re.compile(r"\b(2[0-9]1\d{6})\b")
+STUDENT_ID_PATTERN = re.compile(r"\b(261\d{6})\b")
+STUDENT_ID_SHORT_PATTERN = re.compile(r"\b(261\d{5})\b")
+STUDENT_ID_LEGACY_PATTERN = re.compile(r"\b(2[0-9]1\d{6})\b")
 NOTICE_NO_PATTERN = re.compile(r"\b(202[56]\d{4})\b")
 LOOSE_TOKEN_PATTERN = re.compile(r"\b([A-Za-z0-9][A-Za-z0-9\-_/]{3,31})\b")
 NAME_LABEL_PATTERN = re.compile(
@@ -38,6 +40,14 @@ ACADEMY_LABEL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 CHINESE_NAME_PATTERN = re.compile(r"^[\u4e00-\u9fa5·]{2,4}$")
+QUESTION_ANSWER_PATTERN = re.compile(
+    r"问题[：:][\s\S]*?答(?:案)?[：:\s]+(.+)$",
+    re.IGNORECASE,
+)
+ANSWER_ONLY_PATTERN = re.compile(
+    r"(?:^|\n)\s*答(?:案)?[：:\s]+(.+)$",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -82,9 +92,38 @@ def _finalize_notice_candidates(result: ParsedApplication) -> None:
             result.parse_errors.append("multiple notice_no candidates")
 
 
+def _extract_answer_text(text: str) -> str:
+    """QQ 入群验证常带「问题：… 答案：…」模板，只解析答案段。"""
+    inline = QUESTION_ANSWER_PATTERN.search(text)
+    if inline:
+        return normalize_whitespace(inline.group(1).strip())
+    line = ANSWER_ONLY_PATTERN.search(text)
+    if line:
+        return normalize_whitespace(line.group(1).strip())
+    return text
+
+
+def _assign_student_id(result: ParsedApplication, value: str) -> None:
+    normalized = normalize_student_id(value)
+    if not normalized:
+        return
+    if result.student_id:
+        return
+    result.student_id = normalized
+
+
+def _find_student_id_in_text(text: str) -> str | None:
+    for pattern in (STUDENT_ID_PATTERN, STUDENT_ID_SHORT_PATTERN, STUDENT_ID_LEGACY_PATTERN):
+        match = pattern.search(text)
+        if match:
+            return match.group(1)
+    return None
+
+
 def parse_application_comment(raw: str) -> ParsedApplication:
-    text = normalize_whitespace(raw)
-    result = ParsedApplication(raw=text)
+    full = normalize_whitespace(raw)
+    text = _extract_answer_text(full)
+    result = ParsedApplication(raw=full)
     if not text:
         result.parse_errors.append("empty comment")
         return result
@@ -116,9 +155,9 @@ def parse_application_comment(raw: str) -> ParsedApplication:
         result.academy = academy_label.group(1).strip()
 
     if not result.student_id:
-        sid_match = STUDENT_ID_PATTERN.search(text)
-        if sid_match:
-            result.student_id = sid_match.group(1)
+        sid = _find_student_id_in_text(text)
+        if sid:
+            _assign_student_id(result, sid)
 
     if not result.notice_no:
         notice_match = NOTICE_NO_PATTERN.search(text)
@@ -167,6 +206,9 @@ def _extract_compact_credentials(text: str, result: ParsedApplication) -> None:
 
 
 def _split_mixed_token(token: str) -> dict[str, str]:
+    sid_match = re.match(r"^([\u4e00-\u9fa5·]{2,4})(261\d{5,6})$", token)
+    if sid_match:
+        return {"name": normalize_name(sid_match.group(1)), "student_id": sid_match.group(2)}
     sid_match = re.match(r"^([\u4e00-\u9fa5·]{2,4})(2[0-9]1\d{6})$", token)
     if sid_match:
         return {"name": normalize_name(sid_match.group(1)), "student_id": sid_match.group(2)}
@@ -195,9 +237,9 @@ def _parse_by_tokens(text: str, result: ParsedApplication) -> None:
             continue
 
         if not result.student_id:
-            sid_match = STUDENT_ID_PATTERN.search(token)
-            if sid_match:
-                result.student_id = sid_match.group(1)
+            sid = _find_student_id_in_text(token)
+            if sid:
+                _assign_student_id(result, sid)
                 continue
         if not result.notice_no:
             notice_match = NOTICE_NO_PATTERN.search(token)

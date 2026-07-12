@@ -95,6 +95,20 @@ async def test_already_processed(tmp_path):
     assert result.error == "already_processed"
 
 
+@pytest.mark.asyncio
+async def test_failed_request_shows_action_hint(tmp_path):
+    req_id = new_request_id()
+    requests, cache, _ = await _setup(
+        tmp_path,
+        req_id,
+        status="failed",
+        processed_at="2026-07-09T01:00:00+00:00",
+    )
+    result = await resolve_request_ref("111", "1", list_cache=cache, requests=requests)
+    assert not result.ok
+    assert "审批接口调用已失败" in result.message
+
+
 def test_map_action_error_hides_raw():
     assert "adapter" not in map_action_error("aiocqhttp adapter not available")
     assert "审批接口" in map_action_error("aiocqhttp adapter not available")

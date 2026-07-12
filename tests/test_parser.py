@@ -33,3 +33,20 @@ def test_grade_prefix_on_name():
 def test_grade_prefix_with_level_suffix():
     parsed = parse_application_comment("26级刘津娴 计算机类")
     assert parsed.name == "刘津娴"
+
+
+def test_qq_questionnaire_answer_section():
+    parsed = parse_application_comment(
+        "问题：姓名 学号/录取号 专业 答案：刘骐铭 26115002 地质学类"
+    )
+    assert parsed.name == "刘骐铭"
+    assert parsed.student_id == "26115002"
+    assert parsed.major == "地质学类"
+
+
+def test_qq_questionnaire_multiline():
+    parsed = parse_application_comment(
+        "问题：姓名 学号/录取号 专业\n答案：刘雯婷 26级马理论新生"
+    )
+    assert parsed.name == "刘雯婷"
+    assert "马理论" in (parsed.major or "")

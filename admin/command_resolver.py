@@ -21,11 +21,23 @@ ERROR_MESSAGES = {
 }
 
 
+def processed_request_message(request: PendingRequest) -> str:
+    if request.status == "failed":
+        return (
+            "这条申请上次审批接口调用已失败（凭证可能已失效或机器人无权限）。"
+            "请到 QQ 群管理后台确认是否已处理，勿重复操作。"
+        )
+    if request.status == "external":
+        return "这条申请已在 QQ 客户端被其他管理员处理，不能重复操作。"
+    return ERROR_MESSAGES["already_processed"]
+
+
 @dataclass
 class ResolveResult:
     request: PendingRequest | None = None
     index: int | None = None
     error: ResolveError | None = None
+    detail_message: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -33,6 +45,8 @@ class ResolveResult:
 
     @property
     def message(self) -> str:
+        if self.detail_message:
+            return self.detail_message
         if self.error:
             return ERROR_MESSAGES[self.error]
         return ""
@@ -97,7 +111,12 @@ async def resolve_request_ref(
         index = list_cache.find_index(admin_id, request.id)
 
     if request.status != "pending" or request.processed_at:
-        return ResolveResult(request=request, index=index, error="already_processed")
+        return ResolveResult(
+            request=request,
+            index=index,
+            error="already_processed",
+            detail_message=processed_request_message(request),
+        )
 
     return ResolveResult(request=request, index=index)
 
