@@ -2,6 +2,135 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.3.18] - 2026-07-13
+
+### 修复
+
+- **`processed + approve` / `external` 退群再申请**：与 reject 一样支持事件指纹 reapply，新建 attempt 并通知管理员
+- 修复全局 `seen_fingerprint` 在 reapply 判定前抢先拦截，导致同 flag 再申请不进 list、不发通知
+- 旧 attempt 指纹冲突时使用 `#a{attempt_no}` 后缀登记，不复活旧记录
+
+### 变更
+
+- `duplicate_policy_version` 升至 `v7-terminal-reapply-fingerprint`
+- 永久忽略同 flag 的终态仅剩 **`stale` / `ignored`**
+
+## [v0.3.17] - 2026-07-13
+
+### 新增
+
+- **事件指纹**（`core/event_fingerprint.py`）：从 `raw_event.time` 提取事件时间，生成稳定指纹（group/user/flag/time/comment_hash/sub_type）
+- **`processed + reject` 再申请**：同 flag 允许新建 attempt（`reapply_of` / `attempt_no` / `received_event_time`），旧拒绝记录不变
+- 存储 v3：`seen_fingerprints` 索引；`by_flag` 指向最新 attempt，`by_id` 保留全部历史
+- 配置项 `reapply_debounce_seconds`（默认 120）：无 event_time 时同 comment 防抖
+
+### 变更
+
+- `duplicate_policy_version` 升至 `v6-reject-reapply-fingerprint`
+- 审计事件：`reapplication_created`、`duplicate_event_replayed`
+
+## [v0.3.16] - 2026-07-13
+
+### 修复
+
+- 管理员通知双发：adapter 报失败但消息已送达时不再回退 UMO；**有 UMO 会话时只走 UMO**
+
+## [v0.3.15] - 2026-07-13
+
+### 新增
+
+- **pending comment 原地更新**：同 flag + pending + comment 变化时保留 id/flag/created_at，更新解析与审核字段
+- 通知「入群申请内容已更新」；审计 `duplicate_pending_comment_updated`
+- `/audit list` / `view` 显示新内容与「历史填写：N 次」
+
+### 修复
+
+- **external reconcile** 遍历全部 `admin_qq_ids` 通知，不因申请人与管理员同号跳过
+
+## [v0.3.14] - 2026-07-13
+
+### 变更
+
+- **简化重复请求状态机**：`processed` / `external` / `ignored` / `stale` 同 flag 一律 `duplicate_request_ignored`，不 release_flag、不复活 pending
+- `duplicate_policy_version: v5-terminal-never-reapply`
+
+## [v0.3.13] - 2026-07-09
+
+### 修复
+
+- 管理员通知优先 **adapter `send_private_msg`**，再 UMO、再 HTTP fallback
+
+## [v0.3.12] - 2026-07-09
+
+### 修复
+
+- UMO 不可用时通过 adapter 发送管理员私聊通知
+
+## [v0.3.11] - 2026-07-09
+
+### 修复
+
+- `manual_review` 通知在管理员列表仅含申请人时仍发送（fallback 到全部 admin）
+
+## [v0.3.10] - 2026-07-09
+
+### 变更
+
+- external 同 flag 收到 group_request 允许重新审核（后被 v0.3.14 收回）
+
+## [v0.3.9] - 2026-07-09
+
+### 修复
+
+- 退群后同 flag 重新申请可创建新 pending（后被 v0.3.14 调整）
+
+## [v0.3.8] - 2026-07-09
+
+### 变更
+
+- 终态同 flag 禁止复活 pending；`/audit debug` 输出 reconcile / duplicate 逻辑版本
+
+## [v0.3.7] - 2026-07-09
+
+### 新增
+
+- **external 对账**：`group_increase`（invite/approve/add）匹配 pending add 时标记 external、清 list_cache、通知管理员
+- 无 pending 的 invite notice 忽略（`invite_notice_no_pending`）
+- `/audit mark-external` 命令
+
+### 修复
+
+- v0.3.7.1：澄清 external 通知中 invite 为 OneBot 事件类型，不代表实际入群路径
+
+## [v0.3.6] - 2026-07-09
+
+### 新增
+
+- **stale 状态**：QQ 侧申请已失效时对账与 `/audit stale` / `restore` / `mark-external`
+- 完善 external / stale 管理员通知
+
+### 修复
+
+- v0.3.6.1 / v0.3.6.2：热重载下 stale 列表格式化导入兼容
+
+## [v0.3.5] - 2026-07-09
+
+### 修复
+
+- `reconcile_external_join` 兼容 `list_cache`；事件处理异常隔离
+
+## [v0.3.4] - 2026-07-09
+
+### 新增
+
+- **QQ 问答模板解析**（`extract_answer_segment`、token 黑名单）
+- 审批失败可重试状态机（`failed` → pending retry）
+- 8 位学号前缀匹配；剥离姓名前「26级」前缀；马理论专业别名
+
+### 修复
+
+- 管理员 approve/reject 失败时状态与 resolve/view/list 一致
+
 ## [v0.3.3] - 2026-07-09
 
 ### 新增
