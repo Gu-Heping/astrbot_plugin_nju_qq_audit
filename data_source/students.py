@@ -121,6 +121,9 @@ class PendingRequest:
     admin_user_id: str | None = None
     admin_command: str | None = None
     matched_student_key: str | None = None
+    updated_at: str | None = None
+    comment_revision: int = 0
+    previous_comments: list[str] = field(default_factory=list)
 
     @staticmethod
     def _public_action_result(result: ActionResult | None) -> dict[str, Any] | None:
@@ -155,6 +158,9 @@ class PendingRequest:
             },
             "admin_override": self.admin_override,
             "matched_student_key": self.matched_student_key,
+            "updated_at": self.updated_at,
+            "comment_revision": self.comment_revision,
+            "previous_comments": list(self.previous_comments),
         }
 
 

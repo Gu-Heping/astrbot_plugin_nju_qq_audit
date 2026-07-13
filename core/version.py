@@ -3,9 +3,10 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-PLUGIN_VERSION = "v0.3.14"
+PLUGIN_VERSION = "v0.3.15"
 RECONCILE_LOGIC_VERSION = "v2-invite-matches-pending"
 DUPLICATE_POLICY_VERSION = "v5-terminal-never-reapply"
+PENDING_UPDATE_POLICY_VERSION = "v1-update-pending-on-comment-change"
 
 # 同 flag 重复 group_request：终态一律忽略，不 release_flag、不复活 pending
 TERMINAL_DUPLICATE_STATUSES = frozenset({"processed", "external", "ignored", "stale"})

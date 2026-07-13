@@ -156,19 +156,26 @@ def format_view(item, index: int | None = None) -> str:
         f"验证：{public.get('comment', '')[:120]}",
         f"时间：{_format_local_time(public.get('created_at'))}",
         f"状态：{status}",
-        "",
-        "解析结果：",
-        _parsed_line("姓名", parsed.get("name")),
-        _parsed_line("学号", parsed.get("student_id")),
-        _parsed_line("通知书编号", parsed.get("notice_no")),
-        _parsed_line("专业", parsed.get("major")),
-        _parsed_line("书院", parsed.get("academy")),
-        "",
-        "判断：",
-        f"结果：{human_judgement(item)}",
-        f"原因：{public.get('reason') or human_judgement(item)}",
-        "",
     ]
+    revision = int(public.get("comment_revision") or 0)
+    if revision > 0:
+        lines.append(f"历史填写：{revision} 次")
+    lines.extend(
+        [
+            "",
+            "解析结果：",
+            _parsed_line("姓名", parsed.get("name")),
+            _parsed_line("学号", parsed.get("student_id")),
+            _parsed_line("通知书编号", parsed.get("notice_no")),
+            _parsed_line("专业", parsed.get("major")),
+            _parsed_line("书院", parsed.get("academy")),
+            "",
+            "判断：",
+            f"结果：{human_judgement(item)}",
+            f"原因：{public.get('reason') or human_judgement(item)}",
+            "",
+        ]
+    )
     last_action = public.get("last_action_result") or {}
     action_result = public.get("action_result") or {}
     if status == "external":
@@ -333,6 +340,48 @@ def format_manual_review_notice(
     return "\n".join(lines)
 
 
+def format_pending_comment_updated_notice(
+    *,
+    index: int | None,
+    group_id: str,
+    user_id: str,
+    comment: str,
+    judgement: str,
+) -> str:
+    lines = [
+        "入群申请内容已更新，需要重新确认",
+        "",
+    ]
+    if index is not None:
+        lines.append(f"[{index}] 用户：{user_id}")
+    else:
+        lines.append(f"用户：{user_id}")
+    lines.extend(
+        [
+            f"群：{group_id}",
+            f"验证：{(comment or '')[:80]}",
+            f"判断：{judgement}",
+            "",
+        ]
+    )
+    if index is not None:
+        lines.extend(
+            [
+                f"/audit view {index}",
+                f"/audit ok {index}",
+                f"/audit no {index} 信息不完整",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "若编号无效，请先发送：",
+            "/audit list",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def format_debug(
     settings: PluginSettings,
     *,
@@ -348,6 +397,7 @@ def format_debug(
     plugin_version: str | None = None,
     reconcile_logic_version: str | None = None,
     duplicate_policy_version: str | None = None,
+    pending_update_policy_version: str | None = None,
     git_commit: str | None = None,
 ) -> str:
     return format_status(
@@ -364,5 +414,6 @@ def format_debug(
         plugin_version=plugin_version,
         reconcile_logic_version=reconcile_logic_version,
         duplicate_policy_version=duplicate_policy_version,
+        pending_update_policy_version=pending_update_policy_version,
         git_commit=git_commit,
     )

@@ -153,7 +153,7 @@ async def test_pending_same_flag_same_comment_noop(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_pending_same_flag_changed_comment_logged_not_updated(tmp_path):
+async def test_pending_same_flag_changed_comment_updates_pending(tmp_path):
     pipe, requests, audit = _pipeline(tmp_path)
     req = _pending(comment="张三", retry_count=2)
     await requests.upsert(req)
@@ -162,9 +162,10 @@ async def test_pending_same_flag_changed_comment_logged_not_updated(tmp_path):
 
     updated = await requests.get_by_id(req.id)
     assert updated.status == "pending"
-    assert updated.comment == "张三"
+    assert updated.comment == "张三20260002"
     assert updated.retry_count == 2
-    assert any(r.get("type") == "duplicate_pending_comment_changed" for r in audit.read_all())
+    assert updated.comment_revision == 1
+    assert any(r.get("type") == "duplicate_pending_comment_updated" for r in audit.read_all())
 
 
 @pytest.mark.asyncio

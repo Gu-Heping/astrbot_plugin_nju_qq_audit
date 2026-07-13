@@ -118,6 +118,7 @@ def format_status(
     plugin_version: str | None = None,
     reconcile_logic_version: str | None = None,
     duplicate_policy_version: str | None = None,
+    pending_update_policy_version: str | None = None,
     git_commit: str | None = None,
 ) -> str:
     adapter_probe = adapter_probe or {}
@@ -132,6 +133,8 @@ def format_status(
         lines.append(f"reconcile_logic_version: {reconcile_logic_version}")
     if duplicate_policy_version:
         lines.append(f"duplicate_policy_version: {duplicate_policy_version}")
+    if pending_update_policy_version:
+        lines.append(f"pending_update_policy_version: {pending_update_policy_version}")
     if git_commit:
         lines.append(f"git_commit: {git_commit}")
     lines.extend(

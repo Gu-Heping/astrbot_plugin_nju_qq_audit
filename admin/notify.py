@@ -9,7 +9,7 @@ except ImportError:  # pragma: no cover - unit tests without astrbot
 
     logger = logging.getLogger(__name__)
 
-from admin.ux_formatter import format_manual_review_notice
+from admin.ux_formatter import format_manual_review_notice, format_pending_comment_updated_notice
 from config import PluginSettings
 from onebot.actions import ActionClient
 
@@ -110,6 +110,54 @@ class AdminNotifier:
             len(targets),
         )
 
+    async def notify_pending_comment_updated(
+        self,
+        *,
+        request_id: str,
+        group_id: str,
+        user_id: str,
+        comment: str,
+        reason: str,
+    ) -> None:
+        if not self.settings.admin_notify:
+            return
+        admin_ids = list(self.settings.admin_qq_ids)
+        if not admin_ids:
+            logger.warning("[audit] pending update notify skipped: admin_qq_ids empty")
+            return
+        targets = list(admin_ids)
+        judgement = reason or "需要人工确认"
+        sent_count = 0
+        logger.info(
+            "[audit] pending update notify request=%s targets=%s",
+            request_id,
+            targets,
+        )
+        for admin_id in targets:
+            index = None
+            if self.list_cache is not None:
+                index = await self.list_cache.append(admin_id, request_id)
+            message = format_pending_comment_updated_notice(
+                index=index,
+                group_id=group_id,
+                user_id=user_id,
+                comment=comment,
+                judgement=judgement,
+            )
+            if await self._send_to_admin(admin_id, message):
+                sent_count += 1
+            else:
+                logger.warning(
+                    "[audit] 无法通知管理员 %s：adapter/UMO/HTTP 均失败。",
+                    admin_id,
+                )
+        logger.info(
+            "[audit] pending update notify request=%s sent=%s/%s",
+            request_id,
+            sent_count,
+            len(targets),
+        )
+
     async def notify_auto_result(
         self,
         *,
@@ -164,7 +212,31 @@ class AdminNotifier:
             )
         if operator_id:
             lines.append(f"操作者 QQ：{operator_id}")
-        await self._notify_admins("\n".join(lines), exclude_user_id=None)
+        message = "\n".join(lines)
+        admin_ids = list(self.settings.admin_qq_ids)
+        if not admin_ids:
+            logger.warning("[audit] external notify skipped: admin_qq_ids empty")
+            return
+        sent_count = 0
+        logger.info(
+            "[audit] external notify request=%s targets=%s",
+            short_id,
+            admin_ids,
+        )
+        for admin_id in admin_ids:
+            if await self._send_to_admin(admin_id, message):
+                sent_count += 1
+            else:
+                logger.warning(
+                    "[audit] 无法通知管理员 %s：adapter/UMO/HTTP 均失败。",
+                    admin_id,
+                )
+        logger.info(
+            "[audit] external notify request=%s sent=%s/%s",
+            short_id,
+            sent_count,
+            len(admin_ids),
+        )
 
     async def notify_stale_request(
         self,

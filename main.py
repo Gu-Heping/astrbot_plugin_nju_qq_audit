@@ -63,6 +63,7 @@ from probe.sanitizer import build_missing_raw_summary, classify_raw_message, san
 
 from core.version import (
     DUPLICATE_POLICY_VERSION,
+    PENDING_UPDATE_POLICY_VERSION,
     PLUGIN_VERSION,
     RECONCILE_LOGIC_VERSION,
     get_git_commit,
@@ -374,6 +375,7 @@ class NjuQqAuditPlugin(Star):
                 plugin_version=PLUGIN_VERSION,
                 reconcile_logic_version=RECONCILE_LOGIC_VERSION,
                 duplicate_policy_version=DUPLICATE_POLICY_VERSION,
+                pending_update_policy_version=PENDING_UPDATE_POLICY_VERSION,
                 git_commit=get_git_commit(),
             )
         )

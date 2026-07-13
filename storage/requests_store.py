@@ -106,6 +106,11 @@ class RequestsStore:
             admin_command=data.get("admin_command"),
             match_strength=data.get("match_strength", "none"),
             matched_student_key=data.get("matched_student_key"),
+            updated_at=data.get("updated_at"),
+            comment_revision=int(data.get("comment_revision") or 0),
+            previous_comments=[
+                str(c) for c in (data.get("previous_comments") or []) if c
+            ][-5:],
         )
 
     @staticmethod
@@ -133,6 +138,9 @@ class RequestsStore:
             "admin_command": req.admin_command,
             "match_strength": req.match_strength,
             "matched_student_key": req.matched_student_key,
+            "updated_at": req.updated_at,
+            "comment_revision": req.comment_revision,
+            "previous_comments": list(req.previous_comments)[-5:],
         }
         if req.action_result:
             data["action_result"] = {

@@ -46,6 +46,34 @@ def _external_join_message(
     return f"QQ 侧已入群（{inner}）"
 
 
+def _parsed_to_dict(parsed) -> dict:
+    return {
+        "name": parsed.name,
+        "student_id": parsed.student_id,
+        "notice_no": parsed.notice_no,
+        "major": parsed.major,
+        "academy": parsed.academy,
+        "notice_no_candidates": parsed.notice_no_candidates,
+    }
+
+
+def _match_to_dict(match) -> dict:
+    return {
+        "strength": match.strength,
+        "confidence": match.confidence,
+        "reason": match.reason,
+        "matched_by": match.matched_by,
+        "matched_student_key": match.matched_student_key,
+        "matched_student_id": (
+            match.matched_student.student_id if match.matched_student else None
+        ),
+        "qq_match": match.qq_match,
+    }
+
+
+_MAX_PREVIOUS_COMMENTS = 5
+
+
 class AuditPipeline:
     def __init__(
         self,
@@ -140,20 +168,7 @@ class AuditPipeline:
             if existing.status == "pending" and not existing.processed_at:
                 if existing.comment == comment_text:
                     return
-                logger.info(
-                    "[audit] duplicate pending comment changed request=%s",
-                    existing.id,
-                )
-                await self.audit.append(
-                    {
-                        "type": "duplicate_pending_comment_changed",
-                        "request_id": existing.id,
-                        "group_id": event.group_id,
-                        "user_id": event.user_id,
-                        "old_comment": (existing.comment or "")[:200],
-                        "new_comment": comment_text[:200],
-                    }
-                )
+                await self._audit_and_update_pending(event, existing)
                 return
 
             if existing.status == "failed":
@@ -178,6 +193,79 @@ class AuditPipeline:
 
         await self._audit_and_act(event)
 
+    def _evaluate_request(self, event: GroupJoinRequest):
+        mode, _ = self._effective_mode()
+        students = load_students_for_audit(self.settings, self.cache)
+        parsed = parse_application_comment(event.comment or "")
+        match = match_student(parsed, students, applicant_user_id=event.user_id)
+        decision = make_decision(parsed, match, is_target_group=True)
+        decision = apply_auto_approve_flag(decision, mode, match)
+        return mode, parsed, match, decision
+
+    async def _audit_and_update_pending(
+        self, event: GroupJoinRequest, existing: PendingRequest
+    ) -> None:
+        old_comment = existing.comment or ""
+        new_comment = event.comment or ""
+        mode, parsed, match, decision = self._evaluate_request(event)
+        now = utc_now_iso()
+
+        previous = list(existing.previous_comments or [])
+        if old_comment and old_comment != new_comment:
+            previous.append(old_comment[:200])
+            previous = previous[-_MAX_PREVIOUS_COMMENTS:]
+
+        update = {
+            "comment": new_comment,
+            "sub_type": event.sub_type,
+            "parsed": _parsed_to_dict(parsed),
+            "match": _match_to_dict(match),
+            "decision": decision.decision,
+            "confidence": decision.confidence,
+            "reason": decision.reason,
+            "mode": mode,
+            "status": "pending",
+            "processed_at": None,
+            "match_strength": match.strength,
+            "matched_student_key": decision.matched_student_key,
+            "updated_at": now,
+            "comment_revision": int(existing.comment_revision or 0) + 1,
+            "previous_comments": previous,
+        }
+        pending = await self.requests.update_by_id(existing.id, update)
+        if pending is None:
+            logger.warning("[audit] pending comment update failed request=%s", existing.id)
+            return
+
+        await self.audit.append(
+            {
+                "type": "duplicate_pending_comment_updated",
+                "request_id": existing.id,
+                "group_id": event.group_id,
+                "user_id": event.user_id,
+                "old_comment": old_comment[:200],
+                "new_comment": new_comment[:200],
+                "comment_revision": pending.comment_revision,
+                "decision": decision.decision,
+                "reason": decision.reason,
+                "match_strength": match.strength,
+            }
+        )
+        logger.info(
+            "[audit] pending comment updated request=%s revision=%s decision=%s",
+            existing.id,
+            pending.comment_revision,
+            decision.decision,
+        )
+        await self._finish_after_decision(
+            pending,
+            event,
+            decision,
+            match,
+            mode,
+            notify_update=True,
+        )
+
     async def _audit_and_act(
         self,
         event: GroupJoinRequest,
@@ -185,12 +273,7 @@ class AuditPipeline:
         resubmit: bool = False,
         request_id: str | None = None,
     ) -> None:
-        mode, _ = self._effective_mode()
-        students = load_students_for_audit(self.settings, self.cache)
-        parsed = parse_application_comment(event.comment or "")
-        match = match_student(parsed, students, applicant_user_id=event.user_id)
-        decision = make_decision(parsed, match, is_target_group=True)
-        decision = apply_auto_approve_flag(decision, mode, match)
+        mode, parsed, match, decision = self._evaluate_request(event)
 
         req_id = request_id or new_request_id()
         pending = PendingRequest(
@@ -200,25 +283,8 @@ class AuditPipeline:
             comment=event.comment or "",
             flag=event.flag,
             sub_type=event.sub_type,
-            parsed={
-                "name": parsed.name,
-                "student_id": parsed.student_id,
-                "notice_no": parsed.notice_no,
-                "major": parsed.major,
-                "academy": parsed.academy,
-                "notice_no_candidates": parsed.notice_no_candidates,
-            },
-            match={
-                "strength": match.strength,
-                "confidence": match.confidence,
-                "reason": match.reason,
-                "matched_by": match.matched_by,
-                "matched_student_key": match.matched_student_key,
-                "matched_student_id": (
-                    match.matched_student.student_id if match.matched_student else None
-                ),
-                "qq_match": match.qq_match,
-            },
+            parsed=_parsed_to_dict(parsed),
+            match=_match_to_dict(match),
             decision=decision.decision,
             confidence=decision.confidence,
             reason=decision.reason,
@@ -263,8 +329,42 @@ class AuditPipeline:
             decision.reason,
         )
 
+        await self._finish_after_decision(
+            pending, event, decision, match, mode, notify_update=False
+        )
+
+    async def _finish_after_decision(
+        self,
+        pending: PendingRequest,
+        event: GroupJoinRequest,
+        decision,
+        match: MatchResult,
+        mode: str,
+        *,
+        notify_update: bool,
+    ) -> None:
+        req_id = pending.id
+        if notify_update and self.settings.admin_notify:
+            try:
+                await self.notifier.notify_pending_comment_updated(
+                    request_id=req_id,
+                    group_id=event.group_id,
+                    user_id=event.user_id,
+                    comment=event.comment or "",
+                    reason=decision.reason,
+                )
+            except Exception:
+                logger.exception(
+                    "[audit] pending update notify failed request=%s",
+                    req_id,
+                )
+
         if mode in {"manual", "record-only"} or decision.decision == "manual_review":
-            if self.settings.admin_notify and decision.decision == "manual_review":
+            if (
+                not notify_update
+                and self.settings.admin_notify
+                and decision.decision == "manual_review"
+            ):
                 try:
                     await self.notifier.notify_manual_review(
                         request_id=req_id,
