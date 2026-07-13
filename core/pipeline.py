@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from astrbot.api import logger
 
@@ -984,6 +984,74 @@ class AuditPipeline:
                 "message": message,
             }
         )
+
+    async def dismiss_pending(
+        self,
+        req: PendingRequest,
+        admin_user_id: str,
+        reason: str,
+        *,
+        list_cache: AdminListCacheStore | None = None,
+    ) -> dict[str, Any]:
+        """Locally close an invalid pending request without calling QQ APIs.
+
+        Returns a result dict:
+          - ok / idempotent / already_terminal
+          - request (latest)
+        """
+        reason = (reason or "").strip()
+        if not reason:
+            return {"ok": False, "error": "empty_reason", "request": req}
+
+        latest = await self.requests.get_by_id(req.id) or req
+        if latest.status == "dismissed":
+            return {"ok": True, "idempotent": True, "request": latest}
+        if latest.status != "pending" or latest.processed_at:
+            return {
+                "ok": False,
+                "already_terminal": True,
+                "request": latest,
+            }
+
+        now = utc_now_iso()
+        message = f"本地关闭：{reason}"
+        updated = await self.requests.update_by_id(
+            latest.id,
+            {
+                "status": "dismissed",
+                "processed_at": now,
+                "dismissed_at": now,
+                "dismissed_by": admin_user_id,
+                "dismiss_reason": reason,
+                "admin_user_id": admin_user_id,
+                "admin_command": "dismiss",
+                "admin_override": True,
+                "action_result": {"ok": True, "message": message},
+                "last_action_result": {"ok": True, "message": message},
+                "last_action_at": now,
+            },
+        )
+        await self.runtime.set_pending_absence_state(latest.id, None)
+        if list_cache is not None:
+            try:
+                await list_cache.remove_request_id(latest.id)
+            except Exception:
+                logger.warning(
+                    "[audit] list_cache cleanup failed for dismiss request=%s",
+                    latest.id,
+                    exc_info=True,
+                )
+        await self.audit.append(
+            {
+                "type": "admin_command",
+                "command": "dismiss",
+                "admin_user_id": admin_user_id,
+                "affected_request_id": latest.id,
+                "result": "ok",
+                "reason": reason,
+            }
+        )
+        return {"ok": True, "idempotent": False, "request": updated or latest}
 
     async def process_strong_pending(self, admin_user_id: str) -> list[str]:
         from admin.release import ReleaseService

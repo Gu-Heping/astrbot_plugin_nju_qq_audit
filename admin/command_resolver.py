@@ -35,6 +35,9 @@ def processed_request_message(request: PendingRequest) -> str:
         return ERROR_MESSAGES["already_processed"]
     if request.status == "ignored":
         return "这条申请已被新申请取代或忽略，不能重复操作。"
+    if request.status == "dismissed":
+        reason = (request.dismiss_reason or "").strip() or "无原因"
+        return f"这条申请已本地关闭（dismissed），原因：{reason}。"
     return ERROR_MESSAGES["already_processed"]
 
 
@@ -206,3 +209,26 @@ def parse_no_command_reason(message_str: str, ref: str) -> str:
         rest = text[len(prefix) :].strip()
         return normalize_reject_reason(rest)
     return DEFAULT_REJECT_REASON
+
+
+def parse_dismiss_command(message_str: str, ref: str) -> tuple[bool, str]:
+    """Parse `/audit dismiss <ref> confirm <reason>`.
+
+    Returns (has_confirm, reason). Reason may be empty when missing.
+    """
+    text = (message_str or "").strip()
+    ref = (ref or "").strip()
+    if not text or not ref:
+        return False, ""
+    prefix = f"/audit dismiss {ref}"
+    if text.startswith(prefix):
+        rest = text[len(prefix) :].strip()
+    else:
+        alt = f"dismiss {ref}"
+        idx = text.find(alt)
+        if idx < 0:
+            return False, ""
+        rest = text[idx + len(alt) :].strip()
+    if not rest.startswith("confirm"):
+        return False, ""
+    return True, rest[len("confirm") :].strip()

@@ -127,6 +127,9 @@ class RequestsStore:
             attempt_no=int(data.get("attempt_no") or 1),
             received_event_time=data.get("received_event_time"),
             event_fingerprint=data.get("event_fingerprint"),
+            dismissed_at=data.get("dismissed_at"),
+            dismissed_by=str(data["dismissed_by"]) if data.get("dismissed_by") else None,
+            dismiss_reason=str(data["dismiss_reason"]) if data.get("dismiss_reason") else None,
         )
 
     @staticmethod
@@ -161,6 +164,9 @@ class RequestsStore:
             "attempt_no": req.attempt_no,
             "received_event_time": req.received_event_time,
             "event_fingerprint": req.event_fingerprint,
+            "dismissed_at": req.dismissed_at,
+            "dismissed_by": req.dismissed_by,
+            "dismiss_reason": req.dismiss_reason,
         }
         if req.action_result:
             data["action_result"] = {
@@ -431,6 +437,7 @@ class RequestsStore:
             "failed": 0,
             "external": 0,
             "stale": 0,
+            "dismissed": 0,
         }
         for req in records:
             if req.status == "pending":
@@ -447,4 +454,6 @@ class RequestsStore:
                 stats["external"] += 1
             if req.status == "stale":
                 stats["stale"] += 1
+            if req.status == "dismissed":
+                stats["dismissed"] += 1
         return stats

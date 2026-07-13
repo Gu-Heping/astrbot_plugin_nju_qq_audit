@@ -42,6 +42,10 @@ class PendingReconcileSummary:
             lines.append(
                 "SnowLuma 返回达到 20 条上限，未对缺失申请进行拒绝推断。"
             )
+            lines.append(
+                "SnowLuma 待处理列表达到 20 条上限，部分申请无法自动确认是否失效。"
+            )
+            lines.append("请先在 QQ 中核实，再手动 mark-external 或 dismiss。")
         if self.snowluma_empty_ambiguity:
             lines.append(
                 "说明：SnowLuma 空列表无法区分查询失败与真实无申请，拒绝仅在多次确认后推断。"

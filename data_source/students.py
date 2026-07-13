@@ -4,8 +4,18 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 Decision = Literal["approve", "manual_review", "reject", "ignored"]
-PendingStatus = Literal["pending", "processed", "failed", "ignored", "external", "stale"]
-TERMINAL_REQUEST_STATUSES = frozenset({"processed", "external", "ignored", "stale"})
+PendingStatus = Literal[
+    "pending",
+    "processed",
+    "failed",
+    "ignored",
+    "dismissed",
+    "external",
+    "stale",
+]
+TERMINAL_REQUEST_STATUSES = frozenset(
+    {"processed", "external", "ignored", "dismissed", "stale"}
+)
 MatchStrength = Literal["strong", "weak", "none", "auxiliary"]
 
 SENSITIVE_FIELD_NAMES = frozenset(
@@ -128,6 +138,9 @@ class PendingRequest:
     attempt_no: int = 1
     received_event_time: str | None = None
     event_fingerprint: str | None = None
+    dismissed_at: str | None = None
+    dismissed_by: str | None = None
+    dismiss_reason: str | None = None
 
     @staticmethod
     def _public_action_result(result: ActionResult | None) -> dict[str, Any] | None:
@@ -161,6 +174,8 @@ class PendingRequest:
                 if k not in {"flag"}
             },
             "admin_override": self.admin_override,
+            "admin_user_id": self.admin_user_id,
+            "admin_command": self.admin_command,
             "matched_student_key": self.matched_student_key,
             "updated_at": self.updated_at,
             "comment_revision": self.comment_revision,
@@ -169,6 +184,9 @@ class PendingRequest:
             "attempt_no": self.attempt_no,
             "received_event_time": self.received_event_time,
             "event_fingerprint": self.event_fingerprint,
+            "dismissed_at": self.dismissed_at,
+            "dismissed_by": self.dismissed_by,
+            "dismiss_reason": self.dismiss_reason,
         }
 
 

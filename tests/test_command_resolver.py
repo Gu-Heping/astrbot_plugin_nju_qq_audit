@@ -4,6 +4,7 @@ import pytest
 
 from admin.command_resolver import (
     map_action_error,
+    parse_dismiss_command,
     parse_no_command_reason,
     resolve_request_ref,
 )
@@ -123,3 +124,14 @@ def test_parse_no_command_reason():
 def test_parse_no_command_default_reason():
     reason = parse_no_command_reason("/audit no 2", "2")
     assert "学号" in reason
+
+
+def test_parse_dismiss_command():
+    ok, reason = parse_dismiss_command("/audit dismiss 3 confirm 过期申请", "3")
+    assert ok is True
+    assert reason == "过期申请"
+    ok, reason = parse_dismiss_command("/audit dismiss 3 过期申请", "3")
+    assert ok is False
+    ok, reason = parse_dismiss_command("/audit dismiss 3 confirm", "3")
+    assert ok is True
+    assert reason == ""

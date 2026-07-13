@@ -15,6 +15,7 @@ from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from admin.action_error import format_action_outcome_message
 from admin.command_resolver import (
+    parse_dismiss_command,
     parse_no_command_reason,
     resolve_request_ref,
     sanitize_action_message,
@@ -541,6 +542,64 @@ class NjuQqAuditPlugin(Star):
         )
         label = f"[{resolved.index}]" if resolved.index is not None else resolved.request.id
         yield event.plain_result(f"已将申请 {label} 标记为 external（QQ 侧已处理）。")
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("dismiss")
+    async def audit_dismiss(
+        self, event: AstrMessageEvent, ref: str, confirm: str = "", reason: str = ""
+    ):
+        allowed, message = can_run_command(self._settings(), "dismiss", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        has_confirm, parsed_reason = parse_dismiss_command(event.message_str or "", ref)
+        if confirm == "confirm":
+            has_confirm = True
+        if not has_confirm:
+            yield event.plain_result("请使用 /audit dismiss <编号> confirm <原因>")
+            return
+        dismiss_reason = (parsed_reason or reason or "").strip()
+        if not dismiss_reason:
+            yield event.plain_result("原因不能为空。请使用 /audit dismiss <编号> confirm <原因>")
+            return
+        resolved = await resolve_request_ref(
+            event.get_sender_id(),
+            ref,
+            list_cache=self.ctx.list_cache,
+            requests=self.ctx.requests,
+            for_view=True,
+        )
+        if not resolved.ok:
+            yield event.plain_result(resolved.message)
+            return
+        result = await self.ctx.pipeline.dismiss_pending(
+            resolved.request,
+            event.get_sender_id(),
+            dismiss_reason,
+            list_cache=self.ctx.list_cache,
+        )
+        latest = result.get("request") or resolved.request
+        label = f"[{resolved.index}]" if resolved.index is not None else latest.id
+        if result.get("already_terminal"):
+            yield event.plain_result(
+                f"申请 {label} 当前状态为 {latest.status}，未修改。"
+            )
+            return
+        if result.get("idempotent"):
+            yield event.plain_result(
+                f"申请 {label} 已是 dismissed（幂等，未重复修改）。"
+            )
+            return
+        if not result.get("ok"):
+            yield event.plain_result(
+                result.get("error") or "关闭失败。"
+            )
+            return
+        yield event.plain_result(
+            f"已本地关闭申请 {label}（dismissed，未调用 QQ 拒绝接口）。\n"
+            f"原因：{dismiss_reason}"
+        )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("stale")

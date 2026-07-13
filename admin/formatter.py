@@ -43,6 +43,7 @@ def format_help(
             "/audit stale [n]            查看 stale 队列（QQ 侧已失效）",
             "/audit restore <n> confirm  将 stale 恢复 pending",
             "/audit mark-external <n> confirm  确认 QQ 侧已处理",
+            "/audit dismiss <n> confirm <原因>  本地关闭无效申请（不调 QQ）",
             "",
             "分批放人（仅 strong 26 级 pending，不改变 mode）：",
             "/audit release              帮助 + 当前可释放数",

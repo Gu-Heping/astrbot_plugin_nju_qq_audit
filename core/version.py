@@ -8,9 +8,9 @@ RECONCILE_LOGIC_VERSION = "v2-invite-matches-pending"
 DUPLICATE_POLICY_VERSION = "v7-terminal-reapply-fingerprint"
 PENDING_UPDATE_POLICY_VERSION = "v1-update-pending-on-comment-change"
 
-# 同 flag 永久忽略：stale、ignored
+# 同 flag 永久忽略：stale、ignored、dismissed
 # processed(approve/reject)、external 允许新 attempt（事件指纹 + 时间/防抖判定）
-PERMANENT_IGNORE_STATUSES = frozenset({"ignored", "stale"})
+PERMANENT_IGNORE_STATUSES = frozenset({"ignored", "stale", "dismissed"})
 
 
 def is_reapply_eligible_terminal(req) -> bool:
@@ -30,7 +30,9 @@ def is_permanent_terminal(req) -> bool:
 
 
 # 兼容旧 import
-TERMINAL_DUPLICATE_STATUSES = frozenset({"processed", "external", "ignored", "stale"})
+TERMINAL_DUPLICATE_STATUSES = frozenset(
+    {"processed", "external", "ignored", "dismissed", "stale"}
+)
 
 
 def get_git_commit() -> str | None:

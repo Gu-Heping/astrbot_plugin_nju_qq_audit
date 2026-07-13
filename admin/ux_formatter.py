@@ -138,6 +138,10 @@ def format_list(
             if last_action and last_action.get("ok") is False:
                 lines.append("提示：上次操作失败，可重试或到 QQ 侧确认。")
             lines.append(list_action_hint(item).replace("编号", str(idx)))
+            lines.append("若已被其他管理员在 QQ 侧处理：")
+            lines.append(f"/audit mark-external {idx} confirm")
+            lines.append("若申请已过期、重复或为测试数据：")
+            lines.append(f"/audit dismiss {idx} confirm <原因>")
             lines.append("")
         lines.append("编号来自本次列表，30 分钟内有效。无需复制长 request id。")
         body = "\n".join(lines)
@@ -194,6 +198,11 @@ def format_view(item, index: int | None = None) -> str:
         msg = sanitize_action_message((action_result or last_action).get("message"))
         if msg and msg != "（无详情）":
             lines.append(f"说明：{msg}")
+    elif status == "dismissed":
+        lines.append("已本地关闭（dismissed），未向 QQ 发起拒绝。")
+        lines.append(f"管理员：{public.get('dismissed_by') or public.get('admin_user_id') or '（未知）'}")
+        lines.append(f"时间：{_format_local_time(public.get('dismissed_at') or public.get('processed_at'))}")
+        lines.append(f"原因：{public.get('dismiss_reason') or '（无）'}")
     elif status == "stale":
         lines.append("QQ 侧已无此申请（stale），无法确认是否已入群。")
         msg = sanitize_action_message((action_result or last_action).get("message"))
@@ -223,6 +232,8 @@ def format_view(item, index: int | None = None) -> str:
     lines.append("可操作：")
     if status == "external":
         lines.append("（已在 QQ 侧处理，无需 ok/no）")
+    elif status == "dismissed":
+        lines.append("（已本地关闭，无需 ok/no；未调用 QQ 拒绝接口）")
     elif status == "stale":
         if index is not None:
             lines.append(f"/audit restore {index} confirm")
@@ -235,11 +246,13 @@ def format_view(item, index: int | None = None) -> str:
     elif index is not None:
         lines.append(f"/audit ok {index}")
         lines.append(f"/audit no {index} 信息不完整")
-        if last_action and last_action.get("ok") is False:
-            lines.append(f"/audit mark-external {index} confirm")
+        lines.append(f"/audit mark-external {index} confirm")
+        lines.append(f"/audit dismiss {index} confirm <原因>")
     else:
         lines.append(f"/audit approve {public.get('id')} confirm")
         lines.append(f"/audit reject {public.get('id')} confirm")
+        lines.append(f"/audit mark-external {public.get('id')} confirm")
+        lines.append(f"/audit dismiss {public.get('id')} confirm <原因>")
     return "\n".join(lines)
 
 
