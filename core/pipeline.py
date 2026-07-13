@@ -11,8 +11,9 @@ from core.decision import apply_auto_approve_flag, make_decision, should_auto_ap
 from core.matcher import MatchResult, match_student
 from core.parser import parse_application_comment
 from core.reconcile import ReconcileResult
+from core.version import RECONCILE_LOGIC_VERSION
 from data_source.njutable_provider import load_students_for_audit
-from data_source.students import ActionResult, PendingRequest
+from data_source.students import ActionResult, PendingRequest, TERMINAL_REQUEST_STATUSES
 from onebot.event_extract import GroupJoinRequest
 from onebot.member_info import is_user_in_group
 from storage.audit_log import utc_now_iso
@@ -105,37 +106,74 @@ class AuditPipeline:
         existing = await self.requests.get_by_flag(event.flag)
         comment_text = event.comment or ""
         if existing:
-            if existing.status != "pending" or existing.processed_at:
-                if existing.status == "ignored":
-                    return
-                active = await self.requests.find_active_pending_by_user_group(
-                    event.group_id, event.user_id
+            if existing.status in TERMINAL_REQUEST_STATUSES:
+                logger.info(
+                    "[audit] duplicate request ignored request=%s status=%s",
+                    existing.id,
+                    existing.status,
                 )
-                if active and active.flag != event.flag:
+                await self.audit.append(
+                    {
+                        "type": "duplicate_request_ignored",
+                        "request_id": existing.id,
+                        "group_id": event.group_id,
+                        "user_id": event.user_id,
+                        "status": existing.status,
+                        "reason": "same flag already terminal",
+                    }
+                )
+                return
+
+            if existing.status == "pending" and not existing.processed_at:
+                if existing.comment == comment_text:
                     return
-                if (
-                    existing.status == "processed"
-                    and existing.comment == comment_text
-                    and existing.action_result
-                    and existing.action_result.ok
-                ):
+                logger.info(
+                    "[audit] duplicate pending comment changed request=%s",
+                    existing.id,
+                )
+                await self.audit.append(
+                    {
+                        "type": "duplicate_pending_comment_changed",
+                        "request_id": existing.id,
+                        "group_id": event.group_id,
+                        "user_id": event.user_id,
+                        "old_comment": (existing.comment or "")[:200],
+                        "new_comment": comment_text[:200],
+                    }
+                )
+                return
+
+            if existing.status == "failed":
+                retryable = await self.requests.ensure_retryable(existing.id)
+                if retryable is None:
                     return
                 await self._audit_and_act(
-                    event, resubmit=False, reapply=True, request_id=existing.id
+                    event, resubmit=True, reapply=False, request_id=existing.id
                 )
                 return
-            if existing.comment == comment_text:
-                return
-            await self._audit_and_act(
-                event, resubmit=True, reapply=False, request_id=existing.id
+
+            logger.info(
+                "[audit] duplicate request ignored request=%s status=%s",
+                existing.id,
+                existing.status,
+            )
+            await self.audit.append(
+                {
+                    "type": "duplicate_request_ignored",
+                    "request_id": existing.id,
+                    "group_id": event.group_id,
+                    "user_id": event.user_id,
+                    "status": existing.status,
+                    "reason": "same flag not actionable",
+                }
             )
             return
 
-        stale = await self.requests.find_active_pending_by_user_group(
+        active_pending = await self.requests.find_active_pending_by_user_group(
             event.group_id, event.user_id
         )
-        if stale and stale.flag != event.flag:
-            await self.requests.supersede_pending(stale.flag, event.flag)
+        if active_pending and active_pending.flag != event.flag:
+            await self.requests.supersede_pending(active_pending.flag, event.flag)
 
         await self._audit_and_act(event)
 
@@ -657,10 +695,12 @@ class AuditPipeline:
         )
 
         logger.info(
-            "[audit] external join reconciled request=%s group=%s user=%s notice_sub_type=%s",
+            "[audit] external join reconciled request=%s group=%s user=%s "
+            "notice_sub_type=%s logic=%s",
             pending.id,
             group_id,
             user_id,
             notice_sub_type,
+            RECONCILE_LOGIC_VERSION,
         )
         return ReconcileResult.success(pending.id, message)

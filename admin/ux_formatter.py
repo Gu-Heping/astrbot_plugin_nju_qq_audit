@@ -345,6 +345,10 @@ def format_debug(
     data_dir: str,
     adapter_probe: dict | None = None,
     admin_session_stats: dict | None = None,
+    plugin_version: str | None = None,
+    reconcile_logic_version: str | None = None,
+    duplicate_policy_version: str | None = None,
+    git_commit: str | None = None,
 ) -> str:
     return format_status(
         settings,
@@ -357,4 +361,8 @@ def format_debug(
         data_dir=data_dir,
         adapter_probe=adapter_probe,
         admin_session_stats=admin_session_stats,
+        plugin_version=plugin_version,
+        reconcile_logic_version=reconcile_logic_version,
+        duplicate_policy_version=duplicate_policy_version,
+        git_commit=git_commit,
     )

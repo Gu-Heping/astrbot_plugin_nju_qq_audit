@@ -115,12 +115,27 @@ def format_status(
     data_dir: str,
     adapter_probe: dict | None = None,
     admin_session_stats: dict | None = None,
+    plugin_version: str | None = None,
+    reconcile_logic_version: str | None = None,
+    duplicate_policy_version: str | None = None,
+    git_commit: str | None = None,
 ) -> str:
     adapter_probe = adapter_probe or {}
     admin_session_stats = admin_session_stats or {"cached": 0, "total": 0}
     adapter_available = adapter_probe.get("adapter_action_available", "unknown")
     lines = [
         "NJU QQ Audit 状态（debug）",
+    ]
+    if plugin_version:
+        lines.append(f"plugin_version: {plugin_version}")
+    if reconcile_logic_version:
+        lines.append(f"reconcile_logic_version: {reconcile_logic_version}")
+    if duplicate_policy_version:
+        lines.append(f"duplicate_policy_version: {duplicate_policy_version}")
+    if git_commit:
+        lines.append(f"git_commit: {git_commit}")
+    lines.extend(
+        [
         f"effective_mode: {effective_mode}",
         f"mode_source: {mode_source}",
         "event_source: astrbot_adapter",
@@ -138,7 +153,8 @@ def format_status(
         f"probe_enabled: {settings.probe_enabled}",
         f"probe_recent_count: {probe_count}",
         f"data_dir: {data_dir}",
-    ]
+        ]
+    )
     if settings.onebot_action_backend == "http":
         lines.append(f"http_url: {mask_http_url(settings.onebot_http_url)}")
     if not settings.target_group_ids:

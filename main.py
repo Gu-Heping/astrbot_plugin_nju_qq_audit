@@ -61,8 +61,14 @@ from probe.event_store import ProbeEventStore, utc_now_iso
 from probe.formatter import format_event_summary, format_raw_event, format_recent as format_probe_recent
 from probe.sanitizer import build_missing_raw_summary, classify_raw_message, sanitize
 
+from core.version import (
+    DUPLICATE_POLICY_VERSION,
+    PLUGIN_VERSION,
+    RECONCILE_LOGIC_VERSION,
+    get_git_commit,
+)
+
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
-PLUGIN_VERSION = "v0.3.7.1"
 
 
 def _format_stale_list(items: list, index_map: dict[int, str]) -> str:
@@ -132,7 +138,15 @@ class NjuQqAuditPlugin(Star):
             from data_source.mock_provider import generate_mock_students
 
             self.ctx.cache.save_students(generate_mock_students())
-        logger.info("[%s] 插件已初始化 %s, data_dir=%s", PLUGIN_NAME, PLUGIN_VERSION, self.data_dir)
+        logger.info(
+            "[%s] 插件已初始化 %s reconcile=%s duplicate=%s git=%s data_dir=%s",
+            PLUGIN_NAME,
+            PLUGIN_VERSION,
+            RECONCILE_LOGIC_VERSION,
+            DUPLICATE_POLICY_VERSION,
+            get_git_commit() or "n/a",
+            self.data_dir,
+        )
 
     async def terminate(self):
         await self.ctx.stop()
@@ -258,9 +272,10 @@ class NjuQqAuditPlugin(Star):
                     )
                     if not reconcile.handled:
                         logger.debug(
-                            "[audit] reconcile not handled: reason=%s message=%s",
+                            "[audit] reconcile not handled: reason=%s message=%s logic=%s",
                             reconcile.reason,
                             reconcile.message,
+                            RECONCILE_LOGIC_VERSION,
                         )
                 except Exception:
                     logger.exception("[audit] reconcile external join failed")
@@ -350,6 +365,10 @@ class NjuQqAuditPlugin(Star):
                 data_dir=str(self.data_dir),
                 adapter_probe=adapter_probe,
                 admin_session_stats=admin_session_stats,
+                plugin_version=PLUGIN_VERSION,
+                reconcile_logic_version=RECONCILE_LOGIC_VERSION,
+                duplicate_policy_version=DUPLICATE_POLICY_VERSION,
+                git_commit=get_git_commit(),
             )
         )
 
