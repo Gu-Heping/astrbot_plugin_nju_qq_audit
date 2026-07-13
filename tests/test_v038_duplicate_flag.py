@@ -90,9 +90,11 @@ def _pipeline(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_processed_same_flag_old_event_replayed(tmp_path):
+async def test_processed_same_flag_old_event_burst_blocked(tmp_path):
     pipe, requests, audit = _pipeline(tmp_path)
-    processed_at = "2026-07-09T01:00:00+00:00"
+    from storage.audit_log import utc_now_iso
+
+    processed_at = utc_now_iso()
     req = _pending(
         status="processed",
         decision="approve",
@@ -108,7 +110,11 @@ async def test_processed_same_flag_old_event_replayed(tmp_path):
     updated = await requests.get_by_id(req.id)
     assert updated.status == "processed"
     assert (await requests.get_by_flag("flag-1")).id == req.id
-    assert any(r.get("type") == "duplicate_event_replayed" for r in audit.read_all())
+    assert any(
+        r.get("type") == "duplicate_event_replayed"
+        and "reapply_burst" in (r.get("reason") or "")
+        for r in audit.read_all()
+    )
 
 
 @pytest.mark.asyncio
@@ -128,9 +134,11 @@ async def test_stale_same_flag_ignored(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_external_same_flag_old_event_replayed(tmp_path):
+async def test_external_same_flag_old_event_burst_blocked(tmp_path):
     pipe, requests, audit = _pipeline(tmp_path)
-    processed_at = "2026-07-09T01:00:00+00:00"
+    from storage.audit_log import utc_now_iso
+
+    processed_at = utc_now_iso()
     req = _pending(
         id="REQ-ext",
         status="external",
@@ -144,7 +152,11 @@ async def test_external_same_flag_old_event_replayed(tmp_path):
     )
 
     assert (await requests.get_by_id(req.id)).status == "external"
-    assert any(r.get("type") == "duplicate_event_replayed" for r in audit.read_all())
+    assert any(
+        r.get("type") == "duplicate_event_replayed"
+        and "reapply_burst" in (r.get("reason") or "")
+        for r in audit.read_all()
+    )
 
 
 @pytest.mark.asyncio

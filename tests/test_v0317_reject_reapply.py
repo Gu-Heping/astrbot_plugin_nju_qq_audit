@@ -212,7 +212,7 @@ async def test_reject_same_flag_same_comment_debounce_without_event_time(tmp_pat
     assert len(await requests.list_pending(limit=10)) == 0
     assert any(
         r.get("type") == "duplicate_event_replayed"
-        and r.get("reason") == "reapply_debounce_same_comment"
+        and r.get("reason") == "reapply_burst_after_terminal"
         for r in audit.read_all()
     )
     notifier.notify_manual_review.assert_not_called()
@@ -330,8 +330,10 @@ async def test_reapply_preserves_old_reject_record_and_updates_by_flag(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_reject_event_time_before_processed_is_replayed(tmp_path):
-    pipe, requests, audit, notifier = _pipeline(tmp_path, admin_notify=True)
+async def test_reject_recycled_event_time_reapplies_after_burst_window(tmp_path):
+    pipe, requests, audit, notifier = _pipeline(
+        tmp_path, admin_notify=True, debounce_seconds=15
+    )
     old = _pending(
         status="processed",
         decision="reject",
@@ -339,6 +341,7 @@ async def test_reject_event_time_before_processed_is_replayed(tmp_path):
         action_result=ActionResult(ok=True, message="reject"),
     )
     await requests.upsert(old)
+    await requests.register_fingerprint("placeholder", old.id)
 
     await pipe.handle_group_request(
         _event(
@@ -347,10 +350,39 @@ async def test_reject_event_time_before_processed_is_replayed(tmp_path):
         )
     )
 
+    latest = await requests.get_by_flag("flag-1")
+    assert latest.id != old.id
+    assert latest.status == "pending"
+    assert any(r.get("type") == "reapplication_created" for r in audit.read_all())
+    notifier.notify_manual_review.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reject_event_time_before_processed_burst_blocked(tmp_path):
+    pipe, requests, audit, notifier = _pipeline(
+        tmp_path, admin_notify=True, debounce_seconds=3600
+    )
+    from storage.audit_log import utc_now_iso
+
+    old = _pending(
+        status="processed",
+        decision="reject",
+        processed_at=utc_now_iso(),
+        action_result=ActionResult(ok=True, message="reject"),
+    )
+    await requests.upsert(old)
+
+    await pipe.handle_group_request(
+        _event(
+            comment="入群申请测试",
+            time=_unix_after(utc_now_iso(), -60),
+        )
+    )
+
     assert len(await requests.list_pending(limit=10)) == 0
     assert any(
         r.get("type") == "duplicate_event_replayed"
-        and r.get("reason") == "event_time_before_processed_at"
+        and r.get("reason") == "reapply_burst_recycled_event_time"
         for r in audit.read_all()
     )
     notifier.notify_manual_review.assert_not_called()
@@ -373,6 +405,34 @@ async def test_reapply_fallback_audit_notes_no_event_time(tmp_path):
         r.get("type") == "reapplication_created" and r.get("fallback") == "no_event_time"
         for r in audit.read_all()
     )
+
+
+@pytest.mark.asyncio
+async def test_approve_same_comment_reapplies_one_minute_after_processed(tmp_path):
+    """模拟 /audit ok 约 1 分钟后退群再申请：同 comment 应重新入队并通知。"""
+    pipe, requests, audit, notifier = _pipeline(
+        tmp_path, admin_notify=True, debounce_seconds=15
+    )
+    from datetime import datetime, timedelta, timezone
+
+    processed_at = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+    old = _pending(
+        comment="入群测试",
+        status="processed",
+        decision="approve",
+        processed_at=processed_at,
+        action_result=ActionResult(ok=True, message="ok"),
+    )
+    await requests.upsert(old)
+    await requests.register_fingerprint("fp-first", old.id)
+
+    await pipe.handle_group_request(_event(comment="入群测试", raw_event=None))
+
+    latest = await requests.get_by_flag("flag-1")
+    assert latest.id != old.id
+    assert latest.status == "pending"
+    assert latest.reapply_of == old.id
+    notifier.notify_manual_review.assert_awaited_once()
 
 
 @pytest.mark.asyncio

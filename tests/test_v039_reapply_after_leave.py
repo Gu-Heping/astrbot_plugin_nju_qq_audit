@@ -170,6 +170,6 @@ async def test_processed_same_flag_debounce_blocks_immediate_replay(tmp_path):
     assert (await requests.get_by_flag("flag-1")).id == old.id
     assert any(
         r.get("type") == "duplicate_event_replayed"
-        and r.get("reason") == "reapply_debounce_same_comment"
+        and r.get("reason") == "reapply_burst_after_terminal"
         for r in audit.read_all()
     )

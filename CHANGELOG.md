@@ -2,6 +2,14 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.3.19] - 2026-07-13
+
+### 修复
+
+- **退群再申请仍无提醒**：v0.3.18 的 120 秒 debounce 与 `event_time <= processed_at` 判定过严，NapCat 复用旧 `time` + 同 comment 时 1–2 分钟内再申请会被静默丢弃
+- 终态 reapply 改为 **15 秒 burst 窗口**（仅挡 `/audit ok` 后 QQ 平台连发）；窗口外一律允许新 attempt，NapCat 复用旧 event_time 时写 `fallback=recycled_event_time`
+- 日志 `[audit] reapply burst blocked` 便于排查
+
 ## [v0.3.18] - 2026-07-13
 
 ### 修复

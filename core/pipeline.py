@@ -158,34 +158,12 @@ class AuditPipeline:
             record["fallback"] = fallback
         await self.audit.append(record)
 
-    def _evaluate_reapply_after_terminal(
-        self,
-        existing: PendingRequest,
-        event: GroupJoinRequest,
-        event_time: str | None,
-    ) -> tuple[str, str | None]:
-        """返回 (action, fallback_note)。action: reapply | debounce | before_processed"""
-        if event_time and existing.processed_at:
-            et = parse_iso_datetime(event_time)
-            pt = parse_iso_datetime(existing.processed_at)
-            if et and pt and et <= pt:
-                return "before_processed", None
-
-        if not event_time:
-            fallback = "no_event_time"
-            if (event.comment or "") != (existing.comment or ""):
-                return "reapply", fallback
-            if existing.processed_at:
-                pt = parse_iso_datetime(existing.processed_at)
-                if pt is not None:
-                    elapsed = (
-                        parse_iso_datetime(utc_now_iso()) - pt
-                    ).total_seconds()
-                    if elapsed < self.settings.reapply_debounce_seconds:
-                        return "debounce", fallback
-            return "reapply", fallback
-
-        return "reapply", None
+    def _seconds_since_processed(self, existing: PendingRequest) -> float:
+        pt = parse_iso_datetime(existing.processed_at)
+        now = parse_iso_datetime(utc_now_iso())
+        if not pt or not now:
+            return float("inf")
+        return (now - pt).total_seconds()
 
     async def _resolve_reapply_storage_fingerprint(
         self, base_fingerprint: str, existing: PendingRequest
@@ -203,27 +181,6 @@ class AuditPipeline:
         event_time: str | None,
         fingerprint: str,
     ) -> None:
-        action, fallback = self._evaluate_reapply_after_terminal(
-            existing, event, event_time
-        )
-        if action == "before_processed":
-            await self._audit_event_replayed(
-                event,
-                fingerprint=fingerprint,
-                reason="event_time_before_processed_at",
-                request_id=existing.id,
-            )
-            return
-        if action == "debounce":
-            await self._audit_event_replayed(
-                event,
-                fingerprint=fingerprint,
-                reason="reapply_debounce_same_comment",
-                request_id=existing.id,
-                fallback=fallback,
-            )
-            return
-
         storage_fp = await self._resolve_reapply_storage_fingerprint(
             fingerprint, existing
         )
@@ -236,12 +193,55 @@ class AuditPipeline:
             )
             return
 
+        elapsed = self._seconds_since_processed(existing)
+        fallback = "no_event_time" if not event_time else None
+
+        if elapsed < self.settings.reapply_debounce_seconds:
+            if event_time and existing.processed_at:
+                et = parse_iso_datetime(event_time)
+                pt = parse_iso_datetime(existing.processed_at)
+                if et and pt and et <= pt:
+                    logger.info(
+                        "[audit] reapply burst blocked request=%s elapsed=%.1fs reason=recycled_event_time",
+                        existing.id,
+                        elapsed,
+                    )
+                    await self._audit_event_replayed(
+                        event,
+                        fingerprint=storage_fp,
+                        reason="reapply_burst_recycled_event_time",
+                        request_id=existing.id,
+                        fallback="recycled_event_time",
+                    )
+                    return
+            logger.info(
+                "[audit] reapply burst blocked request=%s elapsed=%.1fs storage_fp=%s",
+                existing.id,
+                elapsed,
+                storage_fp[:12],
+            )
+            await self._audit_event_replayed(
+                event,
+                fingerprint=storage_fp,
+                reason="reapply_burst_after_terminal",
+                request_id=existing.id,
+                fallback=fallback,
+            )
+            return
+
+        reapply_fallback = fallback
+        if event_time and existing.processed_at:
+            et = parse_iso_datetime(event_time)
+            pt = parse_iso_datetime(existing.processed_at)
+            if et and pt and et <= pt:
+                reapply_fallback = "recycled_event_time"
+
         await self._audit_and_act_reapply(
             event,
             existing,
             event_time=event_time,
             fingerprint=storage_fp,
-            fallback=fallback,
+            fallback=reapply_fallback,
         )
 
     async def _ignore_duplicate_terminal(
