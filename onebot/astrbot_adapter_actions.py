@@ -125,7 +125,8 @@ class AstrBotAdapterActionClient:
                     ok=True,
                     retcode=int(retcode) if retcode is not None else 0,
                     message=redact_tokens_in_string(detail, self.settings),
-                    data=data if isinstance(data, dict) else None,
+                    # Preserve SnowLuma list payloads and any other JSON value.
+                    data=data,
                 )
             return ActionResult(
                 ok=False,
@@ -133,6 +134,7 @@ class AstrBotAdapterActionClient:
                 message=redact_tokens_in_string(
                     str(message or f"{action} failed"), self.settings
                 ),
+                data=data,
             )
         return ActionResult(ok=True, retcode=0, message="ok")
 
@@ -191,6 +193,21 @@ class AstrBotAdapterActionClient:
         if no_cache:
             params["no_cache"] = True
         return await self.call_action("get_group_member_info", params, event=event)
+
+    async def get_group_system_msg(
+        self,
+        group_id: str | None = None,
+        *,
+        no_cache: bool = True,
+        event: Any | None = None,
+    ) -> ActionResult:
+        params: dict[str, Any] = {}
+        if group_id is not None:
+            params["group_id"] = int(group_id)
+        if no_cache:
+            params["no_cache"] = True
+        # Keep ActionResult.data as returned by SnowLuma (top-level list) or NapCat (dict).
+        return await self.call_action("get_group_system_msg", params, event=event)
 
     async def send_private_msg_safe(self, user_id: str, message: str) -> ActionResult:
         try:

@@ -34,6 +34,10 @@ class ActionClient(Protocol):
         self, group_id: str, user_id: str, *, no_cache: bool = True
     ) -> ActionResult: ...
 
+    async def get_group_system_msg(
+        self, group_id: str | None = None, *, no_cache: bool = True
+    ) -> ActionResult: ...
+
     def backend_name(self) -> str: ...
 
 

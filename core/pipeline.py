@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+import asyncio
 from typing import TYPE_CHECKING
 
 from astrbot.api import logger
@@ -16,6 +16,20 @@ from core.event_fingerprint import (
     parse_iso_datetime,
 )
 from core.reconcile import ReconcileResult
+from core.pending_reconcile import (
+    GroupSnapshotFetch,
+    PendingReconcileSummary,
+    build_group_snapshot_fetch,
+    classify_disappearance,
+    next_absence_state,
+)
+from onebot.group_system_msg import (
+    filter_entries_for_group,
+    match_pending_to_entries,
+    pending_seen_in_snapshot,
+    snapshot_index,
+)
+from onebot.member_info import is_user_in_group
 from core.version import (
     RECONCILE_LOGIC_VERSION,
     is_permanent_terminal,
@@ -755,11 +769,10 @@ class AuditPipeline:
         admin_user_id: str | None = None,
         admin_command: str | None = None,
         notifier: AdminNotifier | None = None,
+        notify: bool = True,
     ) -> None:
         now = utc_now_iso()
-        await self.requests.update_by_id(
-            req.id,
-            {
+        update = {
                 "processed_at": now,
                 "status": "external",
                 "action_result": {"ok": True, "message": message},
@@ -768,11 +781,15 @@ class AuditPipeline:
                 "admin_override": admin_user_id is not None,
                 "admin_user_id": admin_user_id,
                 "admin_command": admin_command,
-            },
-        )
+            }
+        if source == "audit_list":
+            update["reconcile_outcome"] = "external_approved"
+            update["reconcile_source"] = source
+        await self.requests.update_by_id(req.id, update)
+        audit_type = "external_approved" if source == "audit_list" else "external_handled"
         await self.audit.append(
             {
-                "type": "external_handled",
+                "type": audit_type,
                 "request_id": req.id,
                 "group_id": req.group_id,
                 "user_id": req.user_id,
@@ -791,12 +808,12 @@ class AuditPipeline:
                     req.id,
                     exc_info=True,
                 )
-        notify = notifier if notifier is not None else self.notifier
-        if self.settings.admin_notify and notify is not None:
+        notify_client = notifier if notifier is not None else self.notifier
+        if notify and self.settings.admin_notify and notify_client is not None:
             try:
                 parsed = req.parsed or {}
                 summary = parsed.get("name") or parsed.get("student_id")
-                await notify.notify_external_handled(
+                await notify_client.notify_external_handled(
                     request_id=req.id,
                     group_id=req.group_id,
                     user_id=req.user_id,
@@ -1116,3 +1133,252 @@ class AuditPipeline:
                 "operator_id": decrease.operator_id,
             }
         )
+
+    async def reconcile_active_pending(
+        self,
+        *,
+        source: str,
+        list_cache: AdminListCacheStore | None = None,
+    ) -> PendingReconcileSummary:
+        summary = PendingReconcileSummary()
+        try:
+            return await asyncio.wait_for(
+                self._reconcile_active_pending_inner(
+                    source=source,
+                    list_cache=list_cache,
+                    summary=summary,
+                ),
+                timeout=self.settings.audit_list_reconcile_timeout_ms / 1000,
+            )
+        except asyncio.TimeoutError:
+            summary.failed = True
+            summary.failure_message = "timeout"
+            await self.audit.append(
+                {
+                    "type": "reconcile_failed",
+                    "source": source,
+                    "reason": "timeout",
+                }
+            )
+            return summary
+        except Exception as exc:
+            logger.exception("[audit] reconcile_active_pending failed source=%s", source)
+            summary.failed = True
+            summary.failure_message = str(exc)
+            await self.audit.append(
+                {
+                    "type": "reconcile_failed",
+                    "source": source,
+                    "reason": "exception",
+                }
+            )
+            return summary
+
+    async def _reconcile_active_pending_inner(
+        self,
+        *,
+        source: str,
+        list_cache: AdminListCacheStore | None,
+        summary: PendingReconcileSummary,
+    ) -> PendingReconcileSummary:
+        pendings = [
+            req
+            for req in await self.requests.list_pending(limit=1000)
+            if req.group_id in self.settings.target_group_ids
+        ]
+        if not pendings:
+            return summary
+
+        by_group: dict[str, list[PendingRequest]] = {}
+        for pending in pendings:
+            by_group.setdefault(pending.group_id, []).append(pending)
+
+        fetches: dict[str, GroupSnapshotFetch] = {}
+        for group_id in by_group:
+            result = await self.actions.get_group_system_msg(group_id)
+            fetch = build_group_snapshot_fetch(result)
+            if not fetch.ok or not fetch.reliable:
+                summary.failed = True
+                summary.failure_message = fetch.message or "group system msg failed"
+                await self.audit.append(
+                    {
+                        "type": "reconcile_failed",
+                        "source": source,
+                        "reason": "group_system_msg_unavailable",
+                        "group_id": group_id,
+                        "message": summary.failure_message,
+                    }
+                )
+                return summary
+            fetches[group_id] = fetch
+
+        planned: list[tuple[str, PendingRequest]] = []
+        now_iso = utc_now_iso()
+        for group_id, items in by_group.items():
+            fetch = fetches[group_id]
+            if fetch.empty_untrusted:
+                summary.snowluma_empty_ambiguity = True
+            current_entries = filter_entries_for_group(fetch.entries, group_id)
+            previous_index = self.runtime.get_qq_snapshot_index(group_id)
+            meta = self.runtime.get_qq_snapshot_meta(group_id) or {}
+            history = list(meta.get("history") or [])
+
+            for pending in items:
+                fresh = await self.requests.get_by_id(pending.id)
+                if fresh is None or fresh.status != "pending":
+                    continue
+
+                match = match_pending_to_entries(
+                    flag=pending.flag,
+                    group_id=pending.group_id,
+                    user_id=pending.user_id,
+                    comment=pending.comment or "",
+                    entries=current_entries,
+                )
+                if match.kind == "ambiguous":
+                    summary.skipped_ambiguous += 1
+                    summary.unchanged += 1
+                    await self.runtime.set_pending_absence_state(pending.id, None)
+                    continue
+                if match.kind == "unique":
+                    summary.unchanged += 1
+                    await self.runtime.set_pending_absence_state(pending.id, None)
+                    continue
+
+                seen_before = pending_seen_in_snapshot(
+                    flag=pending.flag,
+                    group_id=pending.group_id,
+                    user_id=pending.user_id,
+                    snapshot=previous_index,
+                )
+                if not seen_before:
+                    for hist in history:
+                        if pending_seen_in_snapshot(
+                            flag=pending.flag,
+                            group_id=pending.group_id,
+                            user_id=pending.user_id,
+                            snapshot=hist.get("index") if isinstance(hist, dict) else None,
+                        ):
+                            seen_before = True
+                            break
+
+                absence_prev = self.runtime.get_pending_absence_state(pending.id)
+                absence_next = next_absence_state(
+                    currently_present=False,
+                    previous=absence_prev,
+                    seen_in_history=seen_before,
+                    now_iso=now_iso,
+                )
+                await self.runtime.set_pending_absence_state(pending.id, absence_next)
+
+                member_present = None
+                if seen_before or (absence_next and absence_next.get("seen_before_absent")):
+                    member_result = await self.actions.get_group_member_info(
+                        pending.group_id, pending.user_id
+                    )
+                    member_present = is_user_in_group(member_result)
+
+                action = classify_disappearance(
+                    pending=pending,
+                    current_entries=current_entries,
+                    previous_index=previous_index,
+                    member_present=member_present,
+                    absence_state=absence_next,
+                    reject_confirm_snapshots=self.settings.audit_list_reject_confirm_snapshots,
+                    reject_wait_seconds=self.settings.audit_list_reject_wait_seconds,
+                )
+                if action == "ambiguous":
+                    summary.skipped_ambiguous += 1
+                    summary.unchanged += 1
+                elif action == "unchanged":
+                    summary.unchanged += 1
+                elif action == "external_approved":
+                    planned.append(("external_approved", pending))
+                elif action == "external_rejected_inferred":
+                    planned.append(("external_rejected_inferred", pending))
+                else:
+                    summary.external_handled_unknown += 1
+                    summary.unchanged += 1
+                    await self.audit.append(
+                        {
+                            "type": "external_handled_unknown",
+                            "source": source,
+                            "request_id": pending.id,
+                            "group_id": pending.group_id,
+                            "user_id": pending.user_id,
+                            "reason": "awaiting_multi_snapshot_confirm_or_member_unknown",
+                        }
+                    )
+
+        for action, pending in planned:
+            latest = await self.requests.get_by_id(pending.id)
+            if latest is None or latest.status != "pending":
+                continue
+            if action == "external_approved":
+                await self._apply_external_status(
+                    latest,
+                    "QQ 侧已入群（audit list 自动对账）",
+                    source=source,
+                    list_cache=list_cache,
+                    notify=False,
+                )
+                summary.external_approved += 1
+                await self.runtime.set_pending_absence_state(pending.id, None)
+            elif action == "external_rejected_inferred":
+                await self._apply_external_rejected_inferred(
+                    latest,
+                    source=source,
+                    list_cache=list_cache,
+                )
+                summary.external_rejected_inferred += 1
+                await self.runtime.set_pending_absence_state(pending.id, None)
+
+        for group_id, fetch in fetches.items():
+            group_entries = filter_entries_for_group(fetch.entries, group_id)
+            await self.runtime.save_qq_snapshot_index(
+                group_id, snapshot_index(group_entries)
+            )
+
+        return summary
+
+    async def _apply_external_rejected_inferred(
+        self,
+        req: PendingRequest,
+        *,
+        source: str,
+        list_cache: AdminListCacheStore | None = None,
+    ) -> None:
+        now = utc_now_iso()
+        message = "QQ 侧已拒绝（推断；多次成功空快照 + 成员不存在）"
+        await self.requests.update_by_id(
+            req.id,
+            {
+                "processed_at": now,
+                "status": "processed",
+                "decision": "reject",
+                "action_result": {"ok": True, "message": message},
+                "last_action_result": {"ok": True, "message": message},
+                "last_action_at": now,
+                "reconcile_outcome": "external_rejected_inferred",
+                "reconcile_source": source,
+            },
+        )
+        await self.audit.append(
+            {
+                "type": "external_rejected_inferred",
+                "source": source,
+                "request_id": req.id,
+                "group_id": req.group_id,
+                "user_id": req.user_id,
+                "message": message,
+            }
+        )
+        if list_cache is not None:
+            try:
+                await list_cache.remove_request_id(req.id)
+            except Exception:
+                logger.warning(
+                    "[audit] list_cache cleanup failed for request=%s",
+                    req.id,
+                    exc_info=True,
+                )

@@ -90,7 +90,13 @@ class HttpActionClient:
                 business_ok = 200 <= http_status < 300 and status == "ok" and retcode == 0
                 msg = redact_tokens_in_string(str(message or ""), self.settings)
                 if business_ok:
-                    return ActionResult(ok=True, retcode=retcode, message=msg or "ok")
+                    data = body.get("data")
+                    return ActionResult(
+                        ok=True,
+                        retcode=retcode,
+                        message=msg or "ok",
+                        data=data,
+                    )
                 return ActionResult(
                     ok=False,
                     retcode=retcode if retcode >= 0 else http_status,
@@ -149,6 +155,16 @@ class HttpActionClient:
         if no_cache:
             params["no_cache"] = True
         return await self.call_action("get_group_member_info", params)
+
+    async def get_group_system_msg(
+        self, group_id: str | None = None, *, no_cache: bool = True
+    ) -> ActionResult:
+        params: dict[str, Any] = {}
+        if group_id is not None:
+            params["group_id"] = int(group_id)
+        if no_cache:
+            params["no_cache"] = True
+        return await self.call_action("get_group_system_msg", params)
 
 
 # Backward compatibility alias for tests/imports

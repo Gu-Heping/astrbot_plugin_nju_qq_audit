@@ -379,6 +379,20 @@ class NjuQqAuditPlugin(Star):
         sync_state = self.ctx.cache.load_sync_state()
         adapter_probe = await self.ctx.get_adapter_probe()
         admin_session_stats = self.ctx.admin_sessions.stats(self._settings().admin_qq_ids)
+        group_system_msg_probe = {}
+        try:
+            from onebot.group_system_msg import describe_group_system_msg_result
+
+            target_groups = sorted(self._settings().target_group_ids)
+            probe_group = target_groups[0] if target_groups else None
+            gsm = await self.ctx.actions.get_group_system_msg(probe_group)
+            group_system_msg_probe = describe_group_system_msg_result(gsm)
+        except Exception:
+            group_system_msg_probe = {
+                "action_status": "failed",
+                "parser_variant": "unavailable",
+                "data_type": "unavailable",
+            }
         yield event.plain_result(
             format_debug(
                 self._settings(),
@@ -396,6 +410,7 @@ class NjuQqAuditPlugin(Star):
                 duplicate_policy_version=DUPLICATE_POLICY_VERSION,
                 pending_update_policy_version=PENDING_UPDATE_POLICY_VERSION,
                 git_commit=get_git_commit(),
+                group_system_msg_probe=group_system_msg_probe,
             )
         )
 
@@ -407,8 +422,16 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
-        items, index_map = await fetch_pending_for_admin(self.ctx, event.get_sender_id(), limit)
-        yield event.plain_result(format_list(items, index_map))
+        reconcile_summary = await self.ctx.pipeline.reconcile_active_pending(
+            source="audit_list",
+            list_cache=self.ctx.list_cache,
+        )
+        items, index_map = await fetch_pending_for_admin(
+            self.ctx, event.get_sender_id(), limit
+        )
+        yield event.plain_result(
+            format_list(items, index_map, reconcile_summary=reconcile_summary)
+        )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("view")

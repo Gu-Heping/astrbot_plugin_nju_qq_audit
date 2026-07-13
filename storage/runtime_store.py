@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -64,3 +63,68 @@ class RuntimeStore:
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self.path)
+
+    def get_qq_snapshot_index(self, group_id: str) -> dict[str, Any] | None:
+        data = self.load()
+        snapshots = data.get("qq_group_snapshots")
+        if not isinstance(snapshots, dict):
+            return None
+        entry = snapshots.get(str(group_id))
+        if not isinstance(entry, dict):
+            return None
+        index = entry.get("index")
+        return dict(index) if isinstance(index, dict) else None
+
+    def get_qq_snapshot_meta(self, group_id: str) -> dict[str, Any] | None:
+        data = self.load()
+        snapshots = data.get("qq_group_snapshots")
+        if not isinstance(snapshots, dict):
+            return None
+        entry = snapshots.get(str(group_id))
+        return dict(entry) if isinstance(entry, dict) else None
+
+    async def save_qq_snapshot_index(
+        self, group_id: str, index: dict[str, Any]
+    ) -> None:
+        async with self._lock:
+            data = self.load()
+            snapshots = data.setdefault("qq_group_snapshots", {})
+            previous = snapshots.get(str(group_id))
+            history = []
+            if isinstance(previous, dict):
+                history = list(previous.get("history") or [])
+                if isinstance(previous.get("index"), dict):
+                    history.append(
+                        {
+                            "captured_at": previous.get("captured_at"),
+                            "index": previous.get("index"),
+                        }
+                    )
+                history = history[-4:]
+            snapshots[str(group_id)] = {
+                "captured_at": utc_now_iso(),
+                "index": index,
+                "history": history,
+            }
+            self._write(data)
+
+    def get_pending_absence_state(self, request_id: str) -> dict[str, Any] | None:
+        data = self.load()
+        watches = data.get("pending_absence_watch")
+        if not isinstance(watches, dict):
+            return None
+        entry = watches.get(str(request_id))
+        return dict(entry) if isinstance(entry, dict) else None
+
+    async def set_pending_absence_state(
+        self, request_id: str, state: dict[str, Any] | None
+    ) -> None:
+        async with self._lock:
+            data = self.load()
+            watches = data.setdefault("pending_absence_watch", {})
+            key = str(request_id)
+            if state is None:
+                watches.pop(key, None)
+            else:
+                watches[key] = state
+            self._write(data)

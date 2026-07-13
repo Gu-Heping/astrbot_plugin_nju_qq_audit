@@ -112,29 +112,40 @@ def format_home(
     return "\n".join(lines)
 
 
-def format_list(items: list, index_map: dict[int, str]) -> str:
+def format_list(
+    items: list,
+    index_map: dict[int, str],
+    *,
+    reconcile_summary=None,
+) -> str:
     if not items:
-        return "目前没有待处理申请。"
-    lines = [f"待处理申请：{len(items)} 条", ""]
-    for idx, item in enumerate(items, start=1):
-        public = item.to_public_dict()
-        summary = applicant_summary(item)
-        comment = (public.get("comment") or "")[:80]
-        lines.extend(
-            [
-                f"[{idx}] {summary}",
-                f"群：{public.get('group_id', '')}",
-                f"验证：{comment or '（空）'}",
-                f"判断：{human_judgement(item)}",
-            ]
-        )
-        last_action = public.get("last_action_result") or {}
-        if last_action and last_action.get("ok") is False:
-            lines.append("提示：上次操作失败，可重试或到 QQ 侧确认。")
-        lines.append(list_action_hint(item).replace("编号", str(idx)))
-        lines.append("")
-    lines.append("编号来自本次列表，30 分钟内有效。无需复制长 request id。")
-    return "\n".join(lines)
+        body = "目前没有待处理申请。"
+    else:
+        lines = [f"待处理申请：{len(items)} 条", ""]
+        for idx, item in enumerate(items, start=1):
+            public = item.to_public_dict()
+            summary = applicant_summary(item)
+            comment = (public.get("comment") or "")[:80]
+            lines.extend(
+                [
+                    f"[{idx}] {summary}",
+                    f"群：{public.get('group_id', '')}",
+                    f"验证：{comment or '（空）'}",
+                    f"判断：{human_judgement(item)}",
+                ]
+            )
+            last_action = public.get("last_action_result") or {}
+            if last_action and last_action.get("ok") is False:
+                lines.append("提示：上次操作失败，可重试或到 QQ 侧确认。")
+            lines.append(list_action_hint(item).replace("编号", str(idx)))
+            lines.append("")
+        lines.append("编号来自本次列表，30 分钟内有效。无需复制长 request id。")
+        body = "\n".join(lines)
+
+    if reconcile_summary is not None:
+        extra = reconcile_summary.to_display_lines()
+        return body + "\n\n" + "\n".join(extra)
+    return body
 
 
 def _parsed_line(label: str, value) -> str:
@@ -399,6 +410,7 @@ def format_debug(
     duplicate_policy_version: str | None = None,
     pending_update_policy_version: str | None = None,
     git_commit: str | None = None,
+    group_system_msg_probe: dict | None = None,
 ) -> str:
     return format_status(
         settings,
@@ -416,4 +428,5 @@ def format_debug(
         duplicate_policy_version=duplicate_policy_version,
         pending_update_policy_version=pending_update_policy_version,
         git_commit=git_commit,
+        group_system_msg_probe=group_system_msg_probe,
     )

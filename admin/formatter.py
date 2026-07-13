@@ -120,6 +120,7 @@ def format_status(
     duplicate_policy_version: str | None = None,
     pending_update_policy_version: str | None = None,
     git_commit: str | None = None,
+    group_system_msg_probe: dict | None = None,
 ) -> str:
     adapter_probe = adapter_probe or {}
     admin_session_stats = admin_session_stats or {"cached": 0, "total": 0}
@@ -158,6 +159,19 @@ def format_status(
         f"data_dir: {data_dir}",
         ]
     )
+    if group_system_msg_probe:
+        lines.append("group_system_msg_probe:")
+        for key in (
+            "action_status",
+            "retcode",
+            "data_type",
+            "request_count",
+            "top_level_shape",
+            "first_request_fields",
+            "parser_variant",
+        ):
+            if key in group_system_msg_probe:
+                lines.append(f"  {key}: {group_system_msg_probe[key]}")
     if settings.onebot_action_backend == "http":
         lines.append(f"http_url: {mask_http_url(settings.onebot_http_url)}")
     if not settings.target_group_ids:

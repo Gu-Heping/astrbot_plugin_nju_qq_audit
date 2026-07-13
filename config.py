@@ -77,6 +77,9 @@ class PluginSettings:
     auto_sync_interval_minutes: int = 360
     auto_sync_notify_admin: bool = False
     reapply_debounce_seconds: int = 15
+    audit_list_reconcile_timeout_ms: int = 4000
+    audit_list_reject_confirm_snapshots: int = 2
+    audit_list_reject_wait_seconds: int = 30
 
     def __repr__(self) -> str:
         return f"PluginSettings(mode={self.mode!r}, student_source={self.student_source!r}, target_groups={len(self.target_group_ids)})"
@@ -237,6 +240,15 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         auto_sync_notify_admin=bool(config.get("auto_sync_notify_admin", False)),
         reapply_debounce_seconds=_clamp_int(
             config.get("reapply_debounce_seconds"), 15, minimum=0, maximum=86400
+        ),
+        audit_list_reconcile_timeout_ms=_clamp_int(
+            config.get("audit_list_reconcile_timeout_ms"), 4000, minimum=50, maximum=30000
+        ),
+        audit_list_reject_confirm_snapshots=_clamp_int(
+            config.get("audit_list_reject_confirm_snapshots"), 2, minimum=2, maximum=10
+        ),
+        audit_list_reject_wait_seconds=_clamp_int(
+            config.get("audit_list_reject_wait_seconds"), 30, minimum=0, maximum=3600
         ),
     )
 

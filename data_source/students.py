@@ -92,7 +92,7 @@ class ActionResult:
     ok: bool
     retcode: int | None = None
     message: str | None = None
-    data: dict[str, Any] | None = None
+    data: Any | None = None
 
 
 @dataclass
