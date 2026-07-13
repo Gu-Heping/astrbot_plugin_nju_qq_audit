@@ -166,6 +166,14 @@ class RequestsStore:
             data = store["by_id"].get(req_id)
             return self._to_request(data) if data else None
 
+    async def release_flag(self, flag: str) -> str | None:
+        """解除 flag 索引绑定，便于同 flag 退群后重新申请。"""
+        async with self._lock:
+            store = self._read_unlocked()
+            req_id = store["by_flag"].pop(flag, None)
+            self._write(store)
+            return str(req_id) if req_id else None
+
     async def find_active_pending_by_user_group(
         self, group_id: str, user_id: str
     ) -> PendingRequest | None:

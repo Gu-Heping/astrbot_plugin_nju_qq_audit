@@ -11,9 +11,9 @@ from core.decision import apply_auto_approve_flag, make_decision, should_auto_ap
 from core.matcher import MatchResult, match_student
 from core.parser import parse_application_comment
 from core.reconcile import ReconcileResult
-from core.version import RECONCILE_LOGIC_VERSION
+from core.version import RECONCILE_LOGIC_VERSION, REAPPLY_CHECK_TERMINAL_STATUSES
 from data_source.njutable_provider import load_students_for_audit
-from data_source.students import ActionResult, PendingRequest, TERMINAL_REQUEST_STATUSES
+from data_source.students import ActionResult, PendingRequest
 from onebot.event_extract import GroupJoinRequest
 from onebot.member_info import is_user_in_group
 from storage.audit_log import utc_now_iso
@@ -81,6 +81,44 @@ class AuditPipeline:
     def _effective_mode(self) -> tuple[str, str]:
         return get_effective_mode(self.settings, self.runtime.get_mode_override())
 
+    async def _is_user_in_group(self, group_id: str, user_id: str) -> bool | None:
+        try:
+            if not hasattr(self.actions, "get_group_member_info"):
+                return None
+            result = await self.actions.get_group_member_info(group_id, user_id)
+            return is_user_in_group(result)
+        except Exception:
+            logger.warning(
+                "[audit] get_group_member_info failed group=%s user=%s",
+                group_id,
+                user_id,
+                exc_info=True,
+            )
+            return None
+
+    async def _ignore_duplicate_terminal(
+        self,
+        existing: PendingRequest,
+        event: GroupJoinRequest,
+        *,
+        reason: str,
+    ) -> None:
+        logger.info(
+            "[audit] duplicate request ignored request=%s status=%s",
+            existing.id,
+            existing.status,
+        )
+        await self.audit.append(
+            {
+                "type": "duplicate_request_ignored",
+                "request_id": existing.id,
+                "group_id": event.group_id,
+                "user_id": event.user_id,
+                "status": existing.status,
+                "reason": reason,
+            }
+        )
+
     async def handle_group_request(self, event: GroupJoinRequest) -> None:
         if not self.settings.target_group_ids:
             logger.debug("[audit] target_group_ids empty, skip request")
@@ -106,22 +144,44 @@ class AuditPipeline:
         existing = await self.requests.get_by_flag(event.flag)
         comment_text = event.comment or ""
         if existing:
-            if existing.status in TERMINAL_REQUEST_STATUSES:
-                logger.info(
-                    "[audit] duplicate request ignored request=%s status=%s",
-                    existing.id,
-                    existing.status,
+            if existing.status == "processed":
+                await self._ignore_duplicate_terminal(
+                    existing, event, reason="same flag already processed"
                 )
+                return
+
+            if existing.status in REAPPLY_CHECK_TERMINAL_STATUSES:
+                in_group = await self._is_user_in_group(event.group_id, event.user_id)
+                if in_group is True:
+                    await self._ignore_duplicate_terminal(
+                        existing, event, reason="same flag terminal and user still in group"
+                    )
+                    return
+                if in_group is None:
+                    logger.warning(
+                        "[audit] cannot confirm membership for reapply request=%s; "
+                        "allowing new application",
+                        existing.id,
+                    )
+                previous_id = await self.requests.release_flag(event.flag)
                 await self.audit.append(
                     {
-                        "type": "duplicate_request_ignored",
-                        "request_id": existing.id,
+                        "type": "reapplication_after_terminal",
+                        "previous_request_id": previous_id or existing.id,
+                        "previous_status": existing.status,
                         "group_id": event.group_id,
                         "user_id": event.user_id,
-                        "status": existing.status,
-                        "reason": "same flag already terminal",
+                        "flag": event.flag,
+                        "in_group": in_group,
                     }
                 )
+                logger.info(
+                    "[audit] reapplication after terminal previous=%s status=%s flag=%s",
+                    existing.id,
+                    existing.status,
+                    event.flag,
+                )
+                await self._audit_and_act(event)
                 return
 
             if existing.status == "pending" and not existing.processed_at:

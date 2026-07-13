@@ -1,7 +1,7 @@
 """v0.3.8 duplicate flag / terminal never reapply tests."""
 
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -57,7 +57,7 @@ def _event(**kwargs) -> GroupJoinRequest:
     return GroupJoinRequest(**defaults)
 
 
-def _pipeline(tmp_path):
+def _pipeline(tmp_path, *, in_group: bool | None = None):
     settings = load_settings(
         DummyConfig({"target_group_ids": "796836121", "admin_notify": False})
     )
@@ -65,18 +65,26 @@ def _pipeline(tmp_path):
     audit = AuditLog(tmp_path / "audit.jsonl", settings)
     runtime = RuntimeStore(tmp_path / "runtime.json")
     cache = StudentCache(tmp_path)
+    actions = MagicMock()
+    if in_group is not None:
+        if in_group:
+            member = ActionResult(
+                ok=True, retcode=0, message="ok", data={"user_id": "2492835361"}
+            )
+        else:
+            member = ActionResult(ok=False, retcode=1, message="not in group")
+        actions.get_group_member_info = AsyncMock(return_value=member)
     pipe = AuditPipeline(
-        settings, requests, audit, runtime, cache, MagicMock(), MagicMock()
+        settings, requests, audit, runtime, cache, actions, MagicMock()
     )
     return pipe, requests, audit
 
 
-@pytest.mark.parametrize("status", ["processed", "external", "stale"])
 @pytest.mark.asyncio
-async def test_terminal_same_flag_ignored(tmp_path, status):
+async def test_processed_same_flag_always_ignored(tmp_path):
     pipe, requests, audit = _pipeline(tmp_path)
     req = _pending(
-        status=status,
+        status="processed",
         processed_at="2026-07-09T01:00:00+00:00",
         action_result=ActionResult(ok=True, message="ok"),
     )
@@ -86,7 +94,23 @@ async def test_terminal_same_flag_ignored(tmp_path, status):
     await pipe.handle_group_request(_event(comment="不同验证内容"))
 
     updated = await requests.get_by_id(req.id)
-    assert updated.status == status
+    assert updated.status == "processed"
+    assert any(r.get("type") == "duplicate_request_ignored" for r in audit.read_all())
+
+
+@pytest.mark.asyncio
+async def test_stale_same_flag_user_still_in_group_ignored(tmp_path):
+    pipe, requests, audit = _pipeline(tmp_path, in_group=True)
+    req = _pending(
+        id="REQ-stale",
+        status="stale",
+        action_result=ActionResult(ok=False, message="flag expired"),
+    )
+    await requests.upsert(req)
+
+    await pipe.handle_group_request(_event())
+
+    assert (await requests.get_by_id(req.id)).status == "stale"
     assert any(r.get("type") == "duplicate_request_ignored" for r in audit.read_all())
 
 
