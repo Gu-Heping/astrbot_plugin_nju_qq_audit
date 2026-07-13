@@ -333,3 +333,103 @@ async def test_format_list_includes_sync_summary(tmp_path):
     assert "本次自动同步" in text
     assert "外部同意：1" in text
     assert "外部拒绝（推断）：1" in text
+
+
+@pytest.mark.asyncio
+async def test_saturated_snapshot_does_not_reject_missing_pending(tmp_path):
+    """Previously seen A missing from a full 20-item snapshot must stay pending."""
+    flag_a = "flag-list-1"
+    first_payload = [
+        {
+            "group_id": int(GROUP_ID),
+            "requester_uin": int(USER_ID),
+            "flag": flag_a,
+            "message": "A",
+        }
+    ]
+    saturated = [
+        {
+            "group_id": int(GROUP_ID),
+            "requester_uin": 1000000000 + i,
+            "flag": f"flag-other-{i}",
+            "message": f"other-{i}",
+        }
+        for i in range(20)
+    ]
+    assert len(saturated) == 20
+    assert not any(item["flag"] == flag_a for item in saturated)
+
+    actions = MagicMock()
+    actions.get_group_system_msg = AsyncMock(
+        side_effect=[
+            ActionResult(ok=True, data=first_payload),
+            ActionResult(ok=True, data=saturated),
+        ]
+    )
+    actions.get_group_member_info = AsyncMock(
+        return_value=ActionResult(ok=False, message="not found")
+    )
+    pipe, requests, audit, list_cache, _ = _pipeline(tmp_path, actions)
+    req = _pending(flag=flag_a)
+    await requests.upsert(req)
+
+    await pipe.reconcile_active_pending(source="audit_list", list_cache=list_cache)
+    summary = await pipe.reconcile_active_pending(source="audit_list", list_cache=list_cache)
+
+    assert summary.snapshot_saturated is True
+    assert summary.external_rejected_inferred == 0
+    assert summary.absence_not_trusted == 1
+    assert len(await requests.list_pending(limit=10)) == 1
+    assert (await requests.get_by_id(req.id)).status == "pending"
+    records = audit.read_all()
+    assert any(r.get("type") == "reconcile_snapshot_saturated" for r in records)
+    assert any(r.get("type") == "reconcile_absence_not_trusted" for r in records)
+    text = format_list(
+        await requests.list_pending(limit=10),
+        {1: req.id},
+        reconcile_summary=summary,
+    )
+    assert "SnowLuma 返回达到 20 条上限，未对缺失申请进行拒绝推断。" in text
+
+
+@pytest.mark.asyncio
+async def test_saturated_snapshot_still_allows_member_approved(tmp_path):
+    flag_a = "flag-list-1"
+    first_payload = [
+        {
+            "group_id": int(GROUP_ID),
+            "requester_uin": int(USER_ID),
+            "flag": flag_a,
+            "message": "A",
+        }
+    ]
+    saturated = [
+        {
+            "group_id": int(GROUP_ID),
+            "requester_uin": 1000000000 + i,
+            "flag": f"flag-other-{i}",
+            "message": f"other-{i}",
+        }
+        for i in range(20)
+    ]
+    actions = MagicMock()
+    actions.get_group_system_msg = AsyncMock(
+        side_effect=[
+            ActionResult(ok=True, data=first_payload),
+            ActionResult(ok=True, data=saturated),
+        ]
+    )
+    actions.get_group_member_info = AsyncMock(
+        return_value=ActionResult(ok=True, data={"user_id": int(USER_ID), "nickname": "在群"})
+    )
+    pipe, requests, audit, list_cache, _ = _pipeline(tmp_path, actions)
+    req = _pending(flag=flag_a)
+    await requests.upsert(req)
+
+    await pipe.reconcile_active_pending(source="audit_list", list_cache=list_cache)
+    summary = await pipe.reconcile_active_pending(source="audit_list", list_cache=list_cache)
+
+    assert summary.external_approved == 1
+    assert summary.external_rejected_inferred == 0
+    assert (await requests.get_by_id(req.id)).status == "external"
+    assert any(r.get("type") == "reconcile_snapshot_saturated" for r in audit.read_all())

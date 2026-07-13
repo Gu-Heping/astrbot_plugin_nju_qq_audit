@@ -36,6 +36,24 @@ def test_parse_snowluma_list():
     assert parsed.variant == "snowluma_list"
     assert parsed.request_count == 1
     assert parsed.entries[0].requester_uin == "0"
+    assert parsed.snapshot_saturated is False
+    assert parsed.snapshot_complete is True
+
+
+def test_parse_snowluma_list_saturated_at_20():
+    data = [
+        {
+            "group_id": 796836121,
+            "requester_uin": i,
+            "flag": f"slreq:1:{i}:796836121:7:0",
+            "message": f"m{i}",
+        }
+        for i in range(20)
+    ]
+    parsed = parse_group_system_msg_data(data)
+    assert parsed.request_count == 20
+    assert parsed.snapshot_saturated is True
+    assert parsed.snapshot_complete is False
 
 
 def test_match_pending_prefers_flag():

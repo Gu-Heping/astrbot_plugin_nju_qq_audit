@@ -6,6 +6,9 @@ from typing import Any, Literal
 MatchKind = Literal["unique", "ambiguous", "none"]
 ParserVariant = Literal["snowluma_list", "napcat_dict", "parse_failed", "empty"]
 
+# SnowLuma FetchGroupRequests currently hardcodes count=20.
+SNOWLUMA_SNAPSHOT_LIMIT = 20
+
 
 @dataclass(frozen=True)
 class SystemJoinRequest:
@@ -30,6 +33,13 @@ class ParsedGroupSystemMsg:
     top_level_shape: str
     request_count: int
     first_request_fields: list[str]
+    snapshot_saturated: bool = False
+    snapshot_complete: bool = True
+
+
+def _saturation_flags(request_count: int) -> tuple[bool, bool]:
+    saturated = request_count >= SNOWLUMA_SNAPSHOT_LIMIT
+    return saturated, not saturated
 
 
 def _as_str(value: Any) -> str | None:
@@ -93,12 +103,15 @@ def parse_group_system_msg_data(data: Any) -> ParsedGroupSystemMsg:
         first_fields: list[str] = []
         if data and isinstance(data[0], dict):
             first_fields = sorted(str(k) for k in data[0].keys())
+        saturated, complete = _saturation_flags(len(entries))
         return ParsedGroupSystemMsg(
             entries=entries,
             variant="snowluma_list",
             top_level_shape="list",
             request_count=len(entries),
             first_request_fields=first_fields,
+            snapshot_saturated=saturated,
+            snapshot_complete=complete,
         )
 
     if isinstance(data, dict):
@@ -113,12 +126,17 @@ def parse_group_system_msg_data(data: Any) -> ParsedGroupSystemMsg:
         first_fields: list[str] = []
         if bucket and isinstance(bucket[0], dict):
             first_fields = sorted(str(k) for k in bucket[0].keys())
+        # NapCat dict shape is not known to use the same hard 20-cap; still flag
+        # saturation when count hits the SnowLuma limit as a conservative signal.
+        saturated, complete = _saturation_flags(len(entries))
         return ParsedGroupSystemMsg(
             entries=entries,
             variant="napcat_dict",
             top_level_shape="dict",
             request_count=len(entries),
             first_request_fields=first_fields,
+            snapshot_saturated=saturated,
+            snapshot_complete=complete,
         )
 
     return ParsedGroupSystemMsg(
@@ -127,6 +145,8 @@ def parse_group_system_msg_data(data: Any) -> ParsedGroupSystemMsg:
         top_level_shape=type(data).__name__,
         request_count=0,
         first_request_fields=[],
+        snapshot_saturated=False,
+        snapshot_complete=False,
     )
 
 
@@ -150,6 +170,8 @@ def describe_group_system_msg_result(result: Any) -> dict[str, Any]:
         ),
         "parser_variant": parsed.variant if parsed else "unavailable",
         "group_system_msg_action_available": "yes" if ok else "no",
+        "snapshot_saturated": bool(parsed.snapshot_saturated) if parsed else False,
+        "snapshot_complete": bool(parsed.snapshot_complete) if parsed else False,
     }
 
 

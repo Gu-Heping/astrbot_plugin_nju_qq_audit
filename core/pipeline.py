@@ -1218,6 +1218,18 @@ class AuditPipeline:
             fetch = fetches[group_id]
             if fetch.empty_untrusted:
                 summary.snowluma_empty_ambiguity = True
+            if fetch.snapshot_saturated:
+                summary.snapshot_saturated = True
+                await self.audit.append(
+                    {
+                        "type": "reconcile_snapshot_saturated",
+                        "source": source,
+                        "group_id": group_id,
+                        "request_count": fetch.request_count,
+                        "snapshot_complete": False,
+                        "reason": "snowluma_fetch_limit_20",
+                    }
+                )
             current_entries = filter_entries_for_group(fetch.entries, group_id)
             previous_index = self.runtime.get_qq_snapshot_index(group_id)
             meta = self.runtime.get_qq_snapshot_meta(group_id) or {}
@@ -1268,6 +1280,7 @@ class AuditPipeline:
                     previous=absence_prev,
                     seen_in_history=seen_before,
                     now_iso=now_iso,
+                    snapshot_saturated=fetch.snapshot_saturated,
                 )
                 await self.runtime.set_pending_absence_state(pending.id, absence_next)
 
@@ -1286,12 +1299,27 @@ class AuditPipeline:
                     absence_state=absence_next,
                     reject_confirm_snapshots=self.settings.audit_list_reject_confirm_snapshots,
                     reject_wait_seconds=self.settings.audit_list_reject_wait_seconds,
+                    snapshot_saturated=fetch.snapshot_saturated,
                 )
                 if action == "ambiguous":
                     summary.skipped_ambiguous += 1
                     summary.unchanged += 1
                 elif action == "unchanged":
                     summary.unchanged += 1
+                elif action == "absence_not_trusted":
+                    summary.absence_not_trusted += 1
+                    summary.unchanged += 1
+                    await self.audit.append(
+                        {
+                            "type": "reconcile_absence_not_trusted",
+                            "source": source,
+                            "request_id": pending.id,
+                            "group_id": pending.group_id,
+                            "user_id": pending.user_id,
+                            "reason": "snapshot_saturated",
+                            "request_count": fetch.request_count,
+                        }
+                    )
                 elif action == "external_approved":
                     planned.append(("external_approved", pending))
                 elif action == "external_rejected_inferred":

@@ -24,6 +24,8 @@ class PendingReconcileSummary:
     failed: bool = False
     failure_message: str | None = None
     snowluma_empty_ambiguity: bool = False
+    snapshot_saturated: bool = False
+    absence_not_trusted: int = 0
 
     def to_display_lines(self) -> list[str]:
         if self.failed:
@@ -36,6 +38,10 @@ class PendingReconcileSummary:
         ]
         if self.skipped_ambiguous:
             lines.append(f"匹配不唯一：{self.skipped_ambiguous}")
+        if self.snapshot_saturated:
+            lines.append(
+                "SnowLuma 返回达到 20 条上限，未对缺失申请进行拒绝推断。"
+            )
         if self.snowluma_empty_ambiguity:
             lines.append(
                 "说明：SnowLuma 空列表无法区分查询失败与真实无申请，拒绝仅在多次确认后推断。"
@@ -53,6 +59,9 @@ class GroupSnapshotFetch:
     parser_variant: str | None = None
     top_level_shape: str | None = None
     empty_untrusted: bool = False
+    snapshot_saturated: bool = False
+    snapshot_complete: bool = True
+    request_count: int = 0
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -74,11 +83,15 @@ def classify_disappearance(
     reject_confirm_snapshots: int = 2,
     reject_wait_seconds: int = 30,
     now: datetime | None = None,
+    snapshot_saturated: bool = False,
 ) -> str:
     """Return reconcile action id or 'unchanged'/'ambiguous'/'external_handled_unknown'.
 
     SnowLuma may return a successful empty list on internal failure, so external
     reject requires multiple spaced successful absences + member_not_found.
+
+    When snapshot_saturated (count >= 20), absence from the list must not imply
+    reject — the request may only have fallen past the FetchGroupRequests cap.
     """
     match = match_pending_to_entries(
         flag=pending.flag,
@@ -107,6 +120,10 @@ def classify_disappearance(
     if member_present is True:
         return "external_approved"
 
+    # Truncated/saturated snapshots cannot prove absence.
+    if snapshot_saturated:
+        return "absence_not_trusted"
+
     if member_present is False:
         consecutive = int((absence_state or {}).get("consecutive_absent") or 0)
         first_absent_at = _parse_iso((absence_state or {}).get("first_absent_at"))
@@ -132,11 +149,23 @@ def next_absence_state(
     previous: dict[str, Any] | None,
     seen_in_history: bool,
     now_iso: str,
+    snapshot_saturated: bool = False,
 ) -> dict[str, Any] | None:
     if currently_present:
         return None
     if not seen_in_history and not (previous and previous.get("seen_before_absent")):
         return None
+    # Saturated snapshots do not count toward reject-confirm consecutive absences.
+    if snapshot_saturated:
+        if previous and previous.get("seen_before_absent"):
+            return dict(previous)
+        return {
+            "seen_before_absent": True,
+            "first_absent_at": None,
+            "consecutive_absent": 0,
+            "last_absent_at": now_iso,
+            "saturated_skip": True,
+        }
     if previous and previous.get("seen_before_absent"):
         return {
             "seen_before_absent": True,
@@ -159,6 +188,7 @@ def build_group_snapshot_fetch(result) -> GroupSnapshotFetch:
             ok=False,
             reliable=False,
             message=getattr(result, "message", None) or "query failed",
+            snapshot_complete=False,
         )
     data = getattr(result, "data", None)
     parsed = parse_group_system_msg_data(data)
@@ -169,11 +199,13 @@ def build_group_snapshot_fetch(result) -> GroupSnapshotFetch:
             message="invalid group system msg payload",
             parser_variant=parsed.variant,
             top_level_shape=parsed.top_level_shape,
+            snapshot_complete=False,
         )
     empty_untrusted = parsed.request_count == 0
     return GroupSnapshotFetch(
         ok=True,
         # Empty success is accepted but not trusted as definitive absence alone.
+        # Saturated snapshots are ok for presence / member-approved paths only.
         reliable=True,
         entries=parsed.entries,
         message=getattr(result, "message", None),
@@ -181,4 +213,7 @@ def build_group_snapshot_fetch(result) -> GroupSnapshotFetch:
         parser_variant=parsed.variant,
         top_level_shape=parsed.top_level_shape,
         empty_untrusted=empty_untrusted,
+        snapshot_saturated=parsed.snapshot_saturated,
+        snapshot_complete=parsed.snapshot_complete,
+        request_count=parsed.request_count,
     )

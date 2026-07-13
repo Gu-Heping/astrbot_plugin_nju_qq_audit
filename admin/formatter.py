@@ -183,6 +183,8 @@ def format_status(
             "first_request_fields",
             "parser_variant",
             "group_system_msg_action_available",
+            "snapshot_saturated",
+            "snapshot_complete",
         ):
             if key in group_system_msg_probe:
                 lines.append(f"  {key}: {group_system_msg_probe[key]}")
