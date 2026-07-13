@@ -3,14 +3,12 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-PLUGIN_VERSION = "v0.3.13"
+PLUGIN_VERSION = "v0.3.14"
 RECONCILE_LOGIC_VERSION = "v2-invite-matches-pending"
-DUPLICATE_POLICY_VERSION = "v4-external-reapply-on-request"
+DUPLICATE_POLICY_VERSION = "v5-terminal-never-reapply"
 
-# processed 同 flag 一律视为 QQ 重复事件
-# external 收到新的 group_request 时允许重新审核（退群重进/同 flag 重申请）
-# stale/ignored 在用户已不在群时可重新申请
-REAPPLY_CHECK_TERMINAL_STATUSES = frozenset({"stale", "ignored"})
+# 同 flag 重复 group_request：终态一律忽略，不 release_flag、不复活 pending
+TERMINAL_DUPLICATE_STATUSES = frozenset({"processed", "external", "ignored", "stale"})
 
 
 def get_git_commit() -> str | None:

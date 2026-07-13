@@ -112,7 +112,7 @@ async def test_stale_failure_marks_stale(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_stale_failure_member_in_group_marks_external(tmp_path):
+async def test_stale_failure_always_marks_stale(tmp_path):
     pipe, requests, audit, actions, notifier = _pipeline(tmp_path, admin_notify=True)
     actions.get_group_member_info = AsyncMock(
         return_value=ActionResult(ok=True, retcode=0, message="ok", data={"user_id": "2492835361"})
@@ -122,9 +122,9 @@ async def test_stale_failure_member_in_group_marks_external(tmp_path):
 
     await pipe.admin_approve(req, "111")
     updated = await requests.get_by_id(req.id)
-    assert updated.status == "external"
-    notifier.notify_external_handled.assert_awaited_once()
-    assert not any(r.get("type") == "request_stale" for r in audit.read_all())
+    assert updated.status == "stale"
+    notifier.notify_stale_request.assert_awaited_once()
+    assert any(r.get("type") == "request_stale" for r in audit.read_all())
 
 
 @pytest.mark.asyncio

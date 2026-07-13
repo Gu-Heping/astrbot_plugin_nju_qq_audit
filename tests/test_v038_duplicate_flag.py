@@ -57,7 +57,7 @@ def _event(**kwargs) -> GroupJoinRequest:
     return GroupJoinRequest(**defaults)
 
 
-def _pipeline(tmp_path, *, in_group: bool | None = None):
+def _pipeline(tmp_path):
     settings = load_settings(
         DummyConfig({"target_group_ids": "796836121", "admin_notify": False})
     )
@@ -66,14 +66,6 @@ def _pipeline(tmp_path, *, in_group: bool | None = None):
     runtime = RuntimeStore(tmp_path / "runtime.json")
     cache = StudentCache(tmp_path)
     actions = MagicMock()
-    if in_group is not None:
-        if in_group:
-            member = ActionResult(
-                ok=True, retcode=0, message="ok", data={"user_id": "2492835361"}
-            )
-        else:
-            member = ActionResult(ok=False, retcode=1, message="not in group")
-        actions.get_group_member_info = AsyncMock(return_value=member)
     pipe = AuditPipeline(
         settings, requests, audit, runtime, cache, actions, MagicMock()
     )
@@ -99,8 +91,8 @@ async def test_processed_same_flag_always_ignored(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_stale_same_flag_user_still_in_group_ignored(tmp_path):
-    pipe, requests, audit = _pipeline(tmp_path, in_group=True)
+async def test_stale_same_flag_ignored(tmp_path):
+    pipe, requests, audit = _pipeline(tmp_path)
     req = _pending(
         id="REQ-stale",
         status="stale",
@@ -111,6 +103,23 @@ async def test_stale_same_flag_user_still_in_group_ignored(tmp_path):
     await pipe.handle_group_request(_event())
 
     assert (await requests.get_by_id(req.id)).status == "stale"
+    assert any(r.get("type") == "duplicate_request_ignored" for r in audit.read_all())
+
+
+@pytest.mark.asyncio
+async def test_external_same_flag_ignored(tmp_path):
+    pipe, requests, audit = _pipeline(tmp_path)
+    req = _pending(
+        id="REQ-ext",
+        status="external",
+        processed_at="2026-07-09T01:00:00+00:00",
+        action_result=ActionResult(ok=True, message="external"),
+    )
+    await requests.upsert(req)
+
+    await pipe.handle_group_request(_event())
+
+    assert (await requests.get_by_id(req.id)).status == "external"
     assert any(r.get("type") == "duplicate_request_ignored" for r in audit.read_all())
 
 
