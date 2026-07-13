@@ -23,7 +23,7 @@ from core.version import (
 )
 from data_source.njutable_provider import load_students_for_audit
 from data_source.students import ActionResult, PendingRequest
-from onebot.event_extract import GroupJoinRequest
+from onebot.event_extract import GroupJoinRequest, GroupMemberDecrease, GroupMemberIncrease
 from storage.audit_log import utc_now_iso
 from storage.requests_store import RequestsStore, new_request_id
 
@@ -181,6 +181,37 @@ class AuditPipeline:
         event_time: str | None,
         fingerprint: str,
     ) -> None:
+        membership = await self.requests.get_membership_state(
+            event.group_id, event.user_id
+        )
+        if membership.get("reapply_eligible"):
+            storage_fp = fingerprint
+            if await self.requests.has_fingerprint(storage_fp):
+                linked_id = await self.requests.get_fingerprint_request_id(storage_fp)
+                linked = await self.requests.get_by_id(linked_id) if linked_id else None
+                if linked and linked.id != existing.id and linked.reapply_of == existing.id:
+                    await self._audit_event_replayed(
+                        event,
+                        fingerprint=storage_fp,
+                        reason="seen_fingerprint",
+                        request_id=linked.id,
+                    )
+                    return
+
+            await self._audit_and_act_reapply(
+                event,
+                existing,
+                event_time=event_time,
+                fingerprint=storage_fp,
+                fallback="strong_signal_group_decrease",
+            )
+            await self.requests.update_membership_state(
+                event.group_id,
+                event.user_id,
+                {"reapply_eligible": False},
+            )
+            return
+
         storage_fp = await self._resolve_reapply_storage_fingerprint(
             fingerprint, existing
         )
@@ -662,6 +693,8 @@ class AuditPipeline:
             }
             if reject_decision:
                 update["decision"] = reject_decision
+            elif admin_command == "approve":
+                update["decision"] = "approve"
             await self.requests.update_by_id(req.id, update)
             return "processed"
 
@@ -1013,3 +1046,73 @@ class AuditPipeline:
             RECONCILE_LOGIC_VERSION,
         )
         return ReconcileResult.success(pending.id, message)
+
+    async def handle_group_increase(self, increase: GroupMemberIncrease) -> None:
+        if not self.settings.target_group_ids:
+            return
+        if increase.group_id not in self.settings.target_group_ids:
+            return
+
+        await self.requests.update_membership_state(
+            increase.group_id,
+            increase.user_id,
+            {
+                "membership": "joined",
+                "reapply_eligible": False,
+            },
+        )
+        await self.audit.append(
+            {
+                "type": "member_joined",
+                "group_id": increase.group_id,
+                "user_id": increase.user_id,
+                "notice_sub_type": increase.sub_type,
+                "operator_id": increase.operator_id,
+            }
+        )
+
+    async def handle_group_decrease(self, decrease: GroupMemberDecrease) -> None:
+        if not self.settings.target_group_ids:
+            return
+        if decrease.group_id not in self.settings.target_group_ids:
+            return
+
+        if decrease.sub_type == "kick_me" or (
+            decrease.self_id and decrease.user_id == decrease.self_id
+        ):
+            await self.audit.append(
+                {
+                    "type": "bot_kicked_from_group",
+                    "group_id": decrease.group_id,
+                    "user_id": decrease.user_id,
+                    "notice_sub_type": decrease.sub_type,
+                    "operator_id": decrease.operator_id,
+                }
+            )
+            return
+
+        sub_type = decrease.sub_type or "leave"
+        if sub_type not in {"leave", "kick"}:
+            sub_type = "leave"
+
+        membership_status = "left" if sub_type == "leave" else "kicked"
+        await self.requests.update_membership_state(
+            decrease.group_id,
+            decrease.user_id,
+            {
+                "membership": membership_status,
+                "reapply_eligible": True,
+                "left_sub_type": sub_type,
+                "left_at": utc_now_iso(),
+            },
+        )
+        audit_type = "member_left" if sub_type == "leave" else "member_kicked"
+        await self.audit.append(
+            {
+                "type": audit_type,
+                "group_id": decrease.group_id,
+                "user_id": decrease.user_id,
+                "notice_sub_type": sub_type,
+                "operator_id": decrease.operator_id,
+            }
+        )

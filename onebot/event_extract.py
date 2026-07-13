@@ -62,6 +62,39 @@ class GroupMemberIncrease:
     raw_event: dict[str, Any] | None = None
 
 
+@dataclass
+class GroupMemberDecrease:
+    group_id: str
+    user_id: str
+    sub_type: str | None = None
+    operator_id: str | None = None
+    self_id: str | None = None
+    raw_event: dict[str, Any] | None = None
+
+
+def extract_group_decrease(raw: dict[str, Any] | None) -> GroupMemberDecrease | None:
+    if not raw:
+        return None
+    if get_field(raw, "post_type") != "notice":
+        return None
+    if get_field(raw, "notice_type") != "group_decrease":
+        return None
+    group_id = get_field(raw, "group_id")
+    user_id = get_field(raw, "user_id")
+    if group_id is None or user_id is None:
+        return None
+    sub_type = get_field(raw, "sub_type")
+    operator_id = get_field(raw, "operator_id")
+    return GroupMemberDecrease(
+        group_id=str(group_id),
+        user_id=str(user_id),
+        sub_type=str(sub_type) if sub_type is not None else None,
+        operator_id=str(operator_id) if operator_id is not None else None,
+        self_id=str(get_field(raw, "self_id")) if get_field(raw, "self_id") is not None else None,
+        raw_event=raw,
+    )
+
+
 def extract_group_increase(raw: dict[str, Any] | None) -> GroupMemberIncrease | None:
     if not raw:
         return None

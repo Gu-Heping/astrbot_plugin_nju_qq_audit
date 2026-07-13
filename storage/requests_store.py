@@ -34,6 +34,7 @@ class RequestsStore:
             "by_id": {},
             "by_flag": {},
             "seen_fingerprints": {},
+            "membership_by_user_group": {},
         }
 
     def _read_unlocked(self) -> dict[str, Any]:
@@ -48,6 +49,7 @@ class RequestsStore:
             parsed.setdefault("by_id", {})
             parsed.setdefault("by_flag", {})
             parsed.setdefault("seen_fingerprints", {})
+            parsed.setdefault("membership_by_user_group", {})
             return parsed
         if isinstance(parsed, dict) and parsed.get("version") == 2:
             parsed["version"] = REQUESTS_VERSION
@@ -176,6 +178,30 @@ class RequestsStore:
 
     def _to_request(self, data: dict[str, Any]) -> PendingRequest:
         return self._dict_to_request(str(data["id"]), data, str(data.get("flag", "")))
+
+    @staticmethod
+    def membership_key(group_id: str, user_id: str) -> str:
+        return f"{group_id}:{user_id}"
+
+    async def get_membership_state(self, group_id: str, user_id: str) -> dict[str, Any]:
+        async with self._lock:
+            store = self._read_unlocked()
+            key = self.membership_key(group_id, user_id)
+            data = store.get("membership_by_user_group", {}).get(key)
+            return dict(data) if isinstance(data, dict) else {}
+
+    async def update_membership_state(
+        self, group_id: str, user_id: str, update: dict[str, Any]
+    ) -> dict[str, Any]:
+        async with self._lock:
+            store = self._read_unlocked()
+            membership = store.setdefault("membership_by_user_group", {})
+            key = self.membership_key(group_id, user_id)
+            current = dict(membership.get(key, {}))
+            current.update(update)
+            membership[key] = current
+            self._write(store)
+            return current
 
     async def get_by_id(self, req_id: str) -> PendingRequest | None:
         async with self._lock:

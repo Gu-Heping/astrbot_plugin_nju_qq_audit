@@ -50,6 +50,7 @@ from admin.report import build_report_data, format_report, format_unknown
 from admin.permissions import can_run_command
 from data_source.njutable_provider import load_students_for_audit
 from onebot.event_extract import (
+    extract_group_decrease,
     extract_group_increase,
     extract_group_request,
     extract_raw_dict,
@@ -254,6 +255,20 @@ class NjuQqAuditPlugin(Star):
         raw = extract_raw_dict(event.message_obj)
         await self._handle_probe(event, raw)
         if raw and is_notice_event(raw):
+            decrease = extract_group_decrease(raw)
+            if decrease:
+                logger.info(
+                    "[audit] notice.group_decrease group_id=%s user_id=%s sub_type=%s operator_id=%s",
+                    decrease.group_id,
+                    decrease.user_id,
+                    decrease.sub_type,
+                    decrease.operator_id,
+                )
+                try:
+                    await self.ctx.pipeline.handle_group_decrease(decrease)
+                except Exception:
+                    logger.exception("[audit] handle group_decrease failed")
+                return
             increase = extract_group_increase(raw)
             if increase:
                 logger.info(
@@ -263,6 +278,10 @@ class NjuQqAuditPlugin(Star):
                     increase.sub_type,
                     increase.operator_id,
                 )
+                try:
+                    await self.ctx.pipeline.handle_group_increase(increase)
+                except Exception:
+                    logger.exception("[audit] handle group_increase failed")
                 try:
                     reconcile = await self.ctx.pipeline.reconcile_external_join(
                         increase.group_id,
