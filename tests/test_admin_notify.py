@@ -115,6 +115,7 @@ async def test_notify_falls_back_to_http_when_no_umo(tmp_path):
     context = MagicMock()
     context.send_message = AsyncMock(return_value=True)
     actions = MagicMock()
+    actions.send_private_msg_safe = AsyncMock(return_value=MagicMock(ok=False, message="fail"))
     notifier = AdminNotifier(settings, actions, context, store, lambda: http_client)
     await notifier.notify_manual_review(
         request_id="r1",
@@ -124,5 +125,27 @@ async def test_notify_falls_back_to_http_when_no_umo(tmp_path):
         parsed={},
         reason="manual",
     )
+    actions.send_private_msg_safe.assert_awaited_once_with("111", ANY)
     http_client.send_private_msg_safe.assert_awaited_once_with("111", ANY)
+    context.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_notify_falls_back_to_adapter_when_no_umo(tmp_path):
+    settings = load_settings(DummyConfig({"admin_qq_ids": "111", "onebot_http_url": ""}))
+    store = AdminSessionStore(tmp_path / "admin_sessions.json")
+    context = MagicMock()
+    context.send_message = AsyncMock(return_value=True)
+    actions = MagicMock()
+    actions.send_private_msg_safe = AsyncMock(return_value=MagicMock(ok=True, message="ok"))
+    notifier = AdminNotifier(settings, actions, context, store, lambda: None)
+    await notifier.notify_manual_review(
+        request_id="r1",
+        group_id="g1",
+        user_id="u1",
+        comment="hello",
+        parsed={},
+        reason="manual",
+    )
+    actions.send_private_msg_safe.assert_awaited_once_with("111", ANY)
     context.send_message.assert_not_called()

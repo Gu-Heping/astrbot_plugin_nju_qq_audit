@@ -93,6 +93,25 @@ async def test_remember_event_bot_is_used():
 
 
 @pytest.mark.asyncio
+async def test_send_private_msg_safe_calls_adapter_api():
+    client = _make_client(MagicMock())
+    bot = MagicMock()
+    bot.api.call_action = AsyncMock(return_value={"status": "ok", "retcode": 0, "data": {}})
+
+    async def fake_get_bot(event=None):
+        return bot
+
+    client._get_bot_client = fake_get_bot
+    result = await client.send_private_msg_safe("123456", "hello")
+    assert result.ok
+    bot.api.call_action.assert_awaited_once_with(
+        "send_private_msg",
+        user_id=123456,
+        message="hello",
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_platform_inst_fallback():
     client = _make_client(None)
     bot = MagicMock()

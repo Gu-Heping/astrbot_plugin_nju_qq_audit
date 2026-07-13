@@ -219,8 +219,30 @@ class AdminNotifier:
             except Exception as exc:
                 logger.warning("[audit] context.send_message 失败 admin=%s: %s", admin_id, exc)
 
+        try:
+            result = await self.actions.send_private_msg_safe(admin_id, message)
+            if result.ok:
+                return True
+            logger.warning(
+                "[audit] adapter send_private_msg 失败 admin=%s: %s",
+                admin_id,
+                result.message,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[audit] adapter send_private_msg 异常 admin=%s: %s",
+                admin_id,
+                exc,
+            )
+
         http_client = self._http_notify_client_getter()
         if http_client is not None:
             result = await http_client.send_private_msg_safe(admin_id, message)
-            return result.ok
+            if result.ok:
+                return True
+            logger.warning(
+                "[audit] HTTP send_private_msg 失败 admin=%s: %s",
+                admin_id,
+                result.message,
+            )
         return False

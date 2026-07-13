@@ -193,10 +193,16 @@ class AstrBotAdapterActionClient:
         return await self.call_action("get_group_member_info", params, event=event)
 
     async def send_private_msg_safe(self, user_id: str, message: str) -> ActionResult:
-        return ActionResult(
-            ok=False,
-            message="send_private_msg not supported on astrbot_adapter backend; use context.send_message",
-        )
+        try:
+            return await self.call_action(
+                "send_private_msg",
+                {"user_id": int(user_id), "message": message},
+            )
+        except Exception as exc:
+            return ActionResult(
+                ok=False,
+                message=redact_tokens_in_string(str(exc), self.settings),
+            )
 
     async def probe_api(self, event: Any | None = None) -> dict[str, Any]:
         client = await self._get_bot_client(event)
