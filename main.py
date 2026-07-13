@@ -17,6 +17,7 @@ from admin.action_error import format_action_outcome_message
 from admin.command_resolver import (
     parse_no_command_reason,
     resolve_request_ref,
+    sanitize_action_message,
 )
 from admin.formatter import (
     format_help,
@@ -37,11 +38,8 @@ from admin.ux_formatter import (
 )
 from admin.handlers import PluginContext
 from admin.ctx_compat import ensure_ctx_compat
-from admin.pending import (
-    fetch_pending_for_admin,
-    fetch_stale_for_admin,
-    format_stale_list,
-)
+from admin.labels import applicant_summary
+from admin.pending import fetch_pending_for_admin
 from admin.release import (
     format_release_help,
     format_release_preview,
@@ -64,7 +62,48 @@ from probe.formatter import format_event_summary, format_raw_event, format_recen
 from probe.sanitizer import build_missing_raw_summary, classify_raw_message, sanitize
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
-PLUGIN_VERSION = "v0.3.6.1"
+PLUGIN_VERSION = "v0.3.6.2"
+
+
+def _format_stale_list(items: list, index_map: dict[int, str]) -> str:
+    if not items:
+        return "目前没有 stale 申请。"
+    lines = [f"stale 申请：{len(items)} 条", ""]
+    for idx, item in enumerate(items, start=1):
+        public = item.to_public_dict()
+        summary = applicant_summary(item)
+        comment = (public.get("comment") or "")[:80]
+        last_action = public.get("last_action_result") or {}
+        reason = sanitize_action_message(last_action.get("message"))
+        lines.extend(
+            [
+                f"[{idx}] {summary}",
+                f"群：{public.get('group_id', '')}",
+                f"验证：{comment or '（空）'}",
+                f"原因：{reason}",
+            ]
+        )
+        lines.append(f"/audit view {idx}  |  /audit restore {idx} confirm")
+        lines.append(f"/audit mark-external {idx} confirm")
+        lines.append("")
+    lines.append("编号来自本次 /audit stale 列表，30 分钟内有效。")
+    return "\n".join(lines)
+
+
+async def _fetch_stale_for_admin(
+    ctx, admin_id: str, limit: int = 10
+) -> tuple[list, dict[int, str]]:
+    try:
+        from admin.pending import fetch_stale_for_admin as _impl
+
+        return await _impl(ctx, admin_id, limit)
+    except ImportError:
+        ensure_ctx_compat(ctx)
+        limit = max(1, min(int(limit), 50))
+        items = await ctx.requests.list_stale(limit=limit)
+        cache_key = f"{admin_id}:stale"
+        index_map = await ctx.list_cache.refresh(cache_key, [item.id for item in items])
+        return items, index_map
 
 
 @register(
@@ -442,8 +481,8 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
-        items, index_map = await fetch_stale_for_admin(self.ctx, event.get_sender_id(), limit)
-        yield event.plain_result(format_stale_list(items, index_map))
+        items, index_map = await _fetch_stale_for_admin(self.ctx, event.get_sender_id(), limit)
+        yield event.plain_result(_format_stale_list(items, index_map))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("restore")

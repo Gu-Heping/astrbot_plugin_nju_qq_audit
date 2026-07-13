@@ -11,7 +11,6 @@ from admin.labels import (
     mode_label,
 )
 from admin.command_resolver import sanitize_action_message
-from admin.pending import format_stale_list
 from config import PluginSettings, mask_http_url
 from data_source.student_cache import SyncState
 
