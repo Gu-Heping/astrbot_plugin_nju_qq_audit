@@ -25,16 +25,23 @@ def _install_mock_astrbot():
     return chain
 
 
+def _fail_adapter():
+    actions = MagicMock()
+    actions.send_private_msg_safe = AsyncMock(
+        return_value=MagicMock(ok=False, message="adapter unavailable")
+    )
+    return actions
+
+
 @pytest.mark.asyncio
-async def test_notify_uses_context_send_message_without_http(tmp_path):
-    _install_mock_astrbot()
+async def test_notify_prefers_adapter_send_private_msg(tmp_path):
     settings = load_settings(DummyConfig({"admin_qq_ids": "111", "onebot_http_url": ""}))
     store = AdminSessionStore(tmp_path / "admin_sessions.json")
     await store.record("111", "aiocqhttp:FriendMessage:111")
     context = MagicMock()
     context.send_message = AsyncMock(return_value=True)
     actions = MagicMock()
-    actions.send_private_msg_safe = AsyncMock()
+    actions.send_private_msg_safe = AsyncMock(return_value=MagicMock(ok=True, message="ok"))
     notifier = AdminNotifier(settings, actions, context, store, lambda: None)
     await notifier.notify_auto_result(
         request_id="r1",
@@ -43,8 +50,27 @@ async def test_notify_uses_context_send_message_without_http(tmp_path):
         ok=True,
         reason="test",
     )
+    actions.send_private_msg_safe.assert_awaited_once()
+    context.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_notify_falls_back_to_umo_when_adapter_fails(tmp_path):
+    _install_mock_astrbot()
+    settings = load_settings(DummyConfig({"admin_qq_ids": "111", "onebot_http_url": ""}))
+    store = AdminSessionStore(tmp_path / "admin_sessions.json")
+    await store.record("111", "aiocqhttp:FriendMessage:111")
+    context = MagicMock()
+    context.send_message = AsyncMock(return_value=True)
+    notifier = AdminNotifier(settings, _fail_adapter(), context, store, lambda: None)
+    await notifier.notify_auto_result(
+        request_id="r1",
+        group_id="g1",
+        user_id="u1",
+        ok=True,
+        reason="test",
+    )
     context.send_message.assert_awaited_once()
-    actions.send_private_msg_safe.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -55,10 +81,11 @@ async def test_manual_review_notifies_when_admin_is_applicant(tmp_path):
         DummyConfig({"admin_qq_ids": user_id, "admin_notify": True, "onebot_http_url": ""})
     )
     store = AdminSessionStore(tmp_path / "admin_sessions.json")
-    await store.record(user_id, "aiocqhttp:FriendMessage:2492835361")
+    actions = MagicMock()
+    actions.send_private_msg_safe = AsyncMock(return_value=MagicMock(ok=True, message="ok"))
     context = MagicMock()
     context.send_message = AsyncMock(return_value=True)
-    notifier = AdminNotifier(settings, MagicMock(), context, store, lambda: None)
+    notifier = AdminNotifier(settings, actions, context, store, lambda: None)
     await notifier.notify_manual_review(
         request_id="REQ-test",
         group_id="796836121",
@@ -67,7 +94,7 @@ async def test_manual_review_notifies_when_admin_is_applicant(tmp_path):
         parsed={},
         reason="manual",
     )
-    context.send_message.assert_awaited_once()
+    actions.send_private_msg_safe.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -75,12 +102,12 @@ async def test_manual_review_notice_includes_short_commands(tmp_path):
     settings = load_settings(DummyConfig({"admin_qq_ids": "111", "onebot_http_url": ""}))
     store = AdminSessionStore(tmp_path / "admin_sessions.json")
     list_cache = AdminListCacheStore(tmp_path / "list_cache.json")
-    http_client = MagicMock()
-    http_client.send_private_msg_safe = AsyncMock(return_value=MagicMock(ok=True))
+    actions = MagicMock()
+    actions.send_private_msg_safe = AsyncMock(return_value=MagicMock(ok=True, message="ok"))
     context = MagicMock()
     context.send_message = AsyncMock(return_value=True)
     notifier = AdminNotifier(
-        settings, MagicMock(), context, store, lambda: http_client, list_cache
+        settings, actions, context, store, lambda: None, list_cache
     )
     await notifier.notify_manual_review(
         request_id="REQ-test123",
@@ -90,7 +117,7 @@ async def test_manual_review_notice_includes_short_commands(tmp_path):
         parsed={"name": "李四"},
         reason="姓名+专业弱匹配",
     )
-    message = http_client.send_private_msg_safe.await_args.args[1]
+    message = actions.send_private_msg_safe.await_args.args[1]
     assert "/audit view 1" in message
     assert "/audit ok 1" in message
     assert "/audit no 1" in message
@@ -100,7 +127,8 @@ async def test_manual_review_notice_includes_short_commands(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_notify_falls_back_to_http_when_no_umo(tmp_path):
+async def test_notify_falls_back_to_http_when_adapter_and_umo_fail(tmp_path):
+    _install_mock_astrbot()
     settings = load_settings(
         DummyConfig(
             {
@@ -113,10 +141,8 @@ async def test_notify_falls_back_to_http_when_no_umo(tmp_path):
     http_client = MagicMock()
     http_client.send_private_msg_safe = AsyncMock(return_value=MagicMock(ok=True))
     context = MagicMock()
-    context.send_message = AsyncMock(return_value=True)
-    actions = MagicMock()
-    actions.send_private_msg_safe = AsyncMock(return_value=MagicMock(ok=False, message="fail"))
-    notifier = AdminNotifier(settings, actions, context, store, lambda: http_client)
+    context.send_message = AsyncMock(return_value=False)
+    notifier = AdminNotifier(settings, _fail_adapter(), context, store, lambda: http_client)
     await notifier.notify_manual_review(
         request_id="r1",
         group_id="g1",
@@ -125,13 +151,11 @@ async def test_notify_falls_back_to_http_when_no_umo(tmp_path):
         parsed={},
         reason="manual",
     )
-    actions.send_private_msg_safe.assert_awaited_once_with("111", ANY)
     http_client.send_private_msg_safe.assert_awaited_once_with("111", ANY)
-    context.send_message.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_notify_falls_back_to_adapter_when_no_umo(tmp_path):
+async def test_notify_uses_adapter_when_no_umo(tmp_path):
     settings = load_settings(DummyConfig({"admin_qq_ids": "111", "onebot_http_url": ""}))
     store = AdminSessionStore(tmp_path / "admin_sessions.json")
     context = MagicMock()

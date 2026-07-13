@@ -244,6 +244,12 @@ class NjuQqAuditPlugin(Star):
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_all_events(self, event: AstrMessageEvent):
         self._remember_event_platform(event)
+        if event.get_message_type() == MessageType.FRIEND_MESSAGE:
+            sender = event.get_sender_id() or ""
+            if sender in self._settings().admin_qq_ids:
+                umo = getattr(event, "unified_msg_origin", None)
+                if umo:
+                    await self.ctx.record_admin_session(sender, umo)
         raw = extract_raw_dict(event.message_obj)
         await self._handle_probe(event, raw)
         if raw and is_notice_event(raw):

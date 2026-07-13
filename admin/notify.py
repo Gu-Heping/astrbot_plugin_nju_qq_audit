@@ -99,8 +99,8 @@ class AdminNotifier:
                 sent_count += 1
             else:
                 logger.warning(
-                    "[audit] 无法通知管理员 %s：无 UMO 且 HTTP fallback 不可用。"
-                    "请管理员私聊 /audit 建立通知通道。",
+                    "[audit] 无法通知管理员 %s：adapter/UMO/HTTP 均失败。"
+                    "请检查 /audit debug 中 adapter 与 admin_notify_channels。",
                     admin_id,
                 )
         logger.info(
@@ -200,28 +200,17 @@ class AdminNotifier:
             sent = await self._send_to_admin(admin_id, message)
             if not sent:
                 logger.warning(
-                    "[audit] 无法通知管理员 %s：无 UMO 且 HTTP fallback 不可用。"
-                    "请管理员私聊 /audit 建立通知通道。",
+                    "[audit] 无法通知管理员 %s：adapter/UMO/HTTP 均失败。"
+                    "请检查 /audit debug 中 adapter 与 admin_notify_channels。",
                     admin_id,
                 )
 
     async def _send_to_admin(self, admin_id: str, message: str) -> bool:
-        umo = self.admin_sessions.get_umo(admin_id)
-        if umo:
-            try:
-                from astrbot.api.event import MessageChain
-
-                ok = await self.astrbot_context.send_message(
-                    umo, MessageChain().message(message)
-                )
-                if ok:
-                    return True
-            except Exception as exc:
-                logger.warning("[audit] context.send_message 失败 admin=%s: %s", admin_id, exc)
-
+        # 1) adapter send_private_msg：只需 admin QQ，与 Node 版一致，最可靠
         try:
             result = await self.actions.send_private_msg_safe(admin_id, message)
             if result.ok:
+                logger.info("[audit] notify via adapter send_private_msg admin=%s", admin_id)
                 return True
             logger.warning(
                 "[audit] adapter send_private_msg 失败 admin=%s: %s",
@@ -235,10 +224,32 @@ class AdminNotifier:
                 exc,
             )
 
+        # 2) UMO + context.send_message（管理员私聊过机器人后可用）
+        umo = self.admin_sessions.get_umo(admin_id)
+        if umo:
+            try:
+                from astrbot.api.event import MessageChain
+
+                ok = await self.astrbot_context.send_message(
+                    umo, MessageChain().message(message)
+                )
+                if ok:
+                    logger.info("[audit] notify via UMO send_message admin=%s umo=%s", admin_id, umo)
+                    return True
+                logger.warning(
+                    "[audit] context.send_message 返回 false admin=%s umo=%s",
+                    admin_id,
+                    umo,
+                )
+            except Exception as exc:
+                logger.warning("[audit] context.send_message 失败 admin=%s: %s", admin_id, exc)
+
+        # 3) HTTP fallback
         http_client = self._http_notify_client_getter()
         if http_client is not None:
             result = await http_client.send_private_msg_safe(admin_id, message)
             if result.ok:
+                logger.info("[audit] notify via HTTP send_private_msg admin=%s", admin_id)
                 return True
             logger.warning(
                 "[audit] HTTP send_private_msg 失败 admin=%s: %s",
