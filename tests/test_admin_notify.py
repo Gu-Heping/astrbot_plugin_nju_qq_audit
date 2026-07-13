@@ -34,7 +34,8 @@ def _fail_adapter():
 
 
 @pytest.mark.asyncio
-async def test_notify_prefers_adapter_send_private_msg(tmp_path):
+async def test_notify_prefers_umo_when_session_exists(tmp_path):
+    _install_mock_astrbot()
     settings = load_settings(DummyConfig({"admin_qq_ids": "111", "onebot_http_url": ""}))
     store = AdminSessionStore(tmp_path / "admin_sessions.json")
     await store.record("111", "aiocqhttp:FriendMessage:111")
@@ -50,19 +51,20 @@ async def test_notify_prefers_adapter_send_private_msg(tmp_path):
         ok=True,
         reason="test",
     )
-    actions.send_private_msg_safe.assert_awaited_once()
-    context.send_message.assert_not_called()
+    context.send_message.assert_awaited_once()
+    actions.send_private_msg_safe.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_notify_falls_back_to_umo_when_adapter_fails(tmp_path):
+async def test_notify_uses_umo_only_when_session_exists(tmp_path):
     _install_mock_astrbot()
     settings = load_settings(DummyConfig({"admin_qq_ids": "111", "onebot_http_url": ""}))
     store = AdminSessionStore(tmp_path / "admin_sessions.json")
     await store.record("111", "aiocqhttp:FriendMessage:111")
     context = MagicMock()
     context.send_message = AsyncMock(return_value=True)
-    notifier = AdminNotifier(settings, _fail_adapter(), context, store, lambda: None)
+    actions = _fail_adapter()
+    notifier = AdminNotifier(settings, actions, context, store, lambda: None)
     await notifier.notify_auto_result(
         request_id="r1",
         group_id="g1",
@@ -71,6 +73,29 @@ async def test_notify_falls_back_to_umo_when_adapter_fails(tmp_path):
         reason="test",
     )
     context.send_message.assert_awaited_once()
+    actions.send_private_msg_safe.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_notify_falls_back_to_adapter_when_umo_fails(tmp_path):
+    _install_mock_astrbot()
+    settings = load_settings(DummyConfig({"admin_qq_ids": "111", "onebot_http_url": ""}))
+    store = AdminSessionStore(tmp_path / "admin_sessions.json")
+    await store.record("111", "aiocqhttp:FriendMessage:111")
+    context = MagicMock()
+    context.send_message = AsyncMock(return_value=False)
+    actions = MagicMock()
+    actions.send_private_msg_safe = AsyncMock(return_value=MagicMock(ok=True, message="ok"))
+    notifier = AdminNotifier(settings, actions, context, store, lambda: None)
+    await notifier.notify_auto_result(
+        request_id="r1",
+        group_id="g1",
+        user_id="u1",
+        ok=True,
+        reason="test",
+    )
+    context.send_message.assert_awaited_once()
+    actions.send_private_msg_safe.assert_awaited_once()
 
 
 @pytest.mark.asyncio

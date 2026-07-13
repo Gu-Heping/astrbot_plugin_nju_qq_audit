@@ -278,7 +278,50 @@ class AdminNotifier:
                 )
 
     async def _send_to_admin(self, admin_id: str, message: str) -> bool:
-        # 1) adapter send_private_msg：只需 admin QQ，与 Node 版一致，最可靠
+        umo = self.admin_sessions.get_umo(admin_id)
+        if umo:
+            if await self._send_via_umo(admin_id, umo, message):
+                return True
+
+        if await self._send_via_adapter(admin_id, message):
+            return True
+
+        http_client = self._http_notify_client_getter()
+        if http_client is not None:
+            try:
+                result = await http_client.send_private_msg_safe(admin_id, message)
+                if result.ok:
+                    logger.info("[audit] notify via HTTP send_private_msg admin=%s", admin_id)
+                    return True
+                logger.warning(
+                    "[audit] HTTP send_private_msg 失败 admin=%s: %s",
+                    admin_id,
+                    result.message,
+                )
+            except Exception as exc:
+                logger.warning("[audit] HTTP send_private_msg 异常 admin=%s: %s", admin_id, exc)
+        return False
+
+    async def _send_via_umo(self, admin_id: str, umo: str, message: str) -> bool:
+        try:
+            from astrbot.api.event import MessageChain
+
+            ok = await self.astrbot_context.send_message(
+                umo, MessageChain().message(message)
+            )
+            if ok:
+                logger.info("[audit] notify via UMO send_message admin=%s umo=%s", admin_id, umo)
+                return True
+            logger.warning(
+                "[audit] context.send_message 返回 false admin=%s umo=%s",
+                admin_id,
+                umo,
+            )
+        except Exception as exc:
+            logger.warning("[audit] context.send_message 失败 admin=%s: %s", admin_id, exc)
+        return False
+
+    async def _send_via_adapter(self, admin_id: str, message: str) -> bool:
         try:
             result = await self.actions.send_private_msg_safe(admin_id, message)
             if result.ok:
@@ -294,38 +337,5 @@ class AdminNotifier:
                 "[audit] adapter send_private_msg 异常 admin=%s: %s",
                 admin_id,
                 exc,
-            )
-
-        # 2) UMO + context.send_message（管理员私聊过机器人后可用）
-        umo = self.admin_sessions.get_umo(admin_id)
-        if umo:
-            try:
-                from astrbot.api.event import MessageChain
-
-                ok = await self.astrbot_context.send_message(
-                    umo, MessageChain().message(message)
-                )
-                if ok:
-                    logger.info("[audit] notify via UMO send_message admin=%s umo=%s", admin_id, umo)
-                    return True
-                logger.warning(
-                    "[audit] context.send_message 返回 false admin=%s umo=%s",
-                    admin_id,
-                    umo,
-                )
-            except Exception as exc:
-                logger.warning("[audit] context.send_message 失败 admin=%s: %s", admin_id, exc)
-
-        # 3) HTTP fallback
-        http_client = self._http_notify_client_getter()
-        if http_client is not None:
-            result = await http_client.send_private_msg_safe(admin_id, message)
-            if result.ok:
-                logger.info("[audit] notify via HTTP send_private_msg admin=%s", admin_id)
-                return True
-            logger.warning(
-                "[audit] HTTP send_private_msg 失败 admin=%s: %s",
-                admin_id,
-                result.message,
             )
         return False
