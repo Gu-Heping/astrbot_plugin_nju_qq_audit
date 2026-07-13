@@ -33,12 +33,15 @@ from admin.ux_formatter import (
     format_no_result,
     format_off_warning,
     format_ok_result,
-    format_stale_list,
     format_view,
 )
 from admin.handlers import PluginContext
 from admin.ctx_compat import ensure_ctx_compat
-from admin.pending import fetch_pending_for_admin, fetch_stale_for_admin
+from admin.pending import (
+    fetch_pending_for_admin,
+    fetch_stale_for_admin,
+    format_stale_list,
+)
 from admin.release import (
     format_release_help,
     format_release_preview,
@@ -61,7 +64,7 @@ from probe.formatter import format_event_summary, format_raw_event, format_recen
 from probe.sanitizer import build_missing_raw_summary, classify_raw_message, sanitize
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
-PLUGIN_VERSION = "v0.3.6"
+PLUGIN_VERSION = "v0.3.6.1"
 
 
 @register(

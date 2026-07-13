@@ -12,7 +12,8 @@ sys.modules["astrbot.api"].logger = MagicMock()
 from admin.action_error import classify_action_failure, format_action_outcome_message
 from admin.command_resolver import resolve_request_ref
 from admin.notify import AdminNotifier
-from admin.ux_formatter import format_stale_list, format_view
+from admin.pending import format_stale_list
+from admin.ux_formatter import format_view
 from config import load_settings
 from core.pipeline import AuditPipeline
 from core.reconcile import ReconcileResult

@@ -11,6 +11,7 @@ from admin.labels import (
     mode_label,
 )
 from admin.command_resolver import sanitize_action_message
+from admin.pending import format_stale_list
 from config import PluginSettings, mask_http_url
 from data_source.student_cache import SyncState
 
@@ -134,31 +135,6 @@ def format_list(items: list, index_map: dict[int, str]) -> str:
         lines.append(list_action_hint(item).replace("编号", str(idx)))
         lines.append("")
     lines.append("编号来自本次列表，30 分钟内有效。无需复制长 request id。")
-    return "\n".join(lines)
-
-
-def format_stale_list(items: list, index_map: dict[int, str]) -> str:
-    if not items:
-        return "目前没有 stale 申请。"
-    lines = [f"stale 申请：{len(items)} 条", ""]
-    for idx, item in enumerate(items, start=1):
-        public = item.to_public_dict()
-        summary = applicant_summary(item)
-        comment = (public.get("comment") or "")[:80]
-        last_action = public.get("last_action_result") or {}
-        reason = sanitize_action_message(last_action.get("message"))
-        lines.extend(
-            [
-                f"[{idx}] {summary}",
-                f"群：{public.get('group_id', '')}",
-                f"验证：{comment or '（空）'}",
-                f"原因：{reason}",
-            ]
-        )
-        lines.append(f"/audit view {idx}  |  /audit restore {idx} confirm")
-        lines.append(f"/audit mark-external {idx} confirm")
-        lines.append("")
-    lines.append("编号来自本次 /audit stale 列表，30 分钟内有效。")
     return "\n".join(lines)
 
 
