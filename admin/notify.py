@@ -1,13 +1,28 @@
 from __future__ import annotations
 
-import logging
 from typing import Any, Callable
+
+try:
+    from astrbot.api import logger
+except ImportError:  # pragma: no cover - unit tests without astrbot
+    import logging
+
+    logger = logging.getLogger(__name__)
 
 from admin.ux_formatter import format_manual_review_notice
 from config import PluginSettings
 from onebot.actions import ActionClient
 
-logger = logging.getLogger(__name__)
+
+def _resolve_notify_targets(
+    admin_ids: list[str], exclude_user_id: str | None = None
+) -> list[str]:
+    if not admin_ids:
+        return []
+    if not exclude_user_id:
+        return list(admin_ids)
+    filtered = [admin_id for admin_id in admin_ids if admin_id != exclude_user_id]
+    return filtered if filtered else list(admin_ids)
 
 
 class AdminNotifier:
@@ -55,11 +70,21 @@ class AdminNotifier:
         reason: str,
     ) -> None:
         if not self.settings.admin_notify:
+            logger.debug("[audit] manual_review notify skipped: admin_notify=false")
             return
+        admin_ids = list(self.settings.admin_qq_ids)
+        if not admin_ids:
+            logger.warning("[audit] manual_review notify skipped: admin_qq_ids empty")
+            return
+        targets = _resolve_notify_targets(admin_ids, user_id)
         judgement = reason or "需要人工确认"
-        for admin_id in self.settings.admin_qq_ids:
-            if user_id and admin_id == user_id:
-                continue
+        sent_count = 0
+        logger.info(
+            "[audit] manual_review notify request=%s targets=%s",
+            request_id,
+            targets,
+        )
+        for admin_id in targets:
             index = None
             if self.list_cache is not None:
                 index = await self.list_cache.append(admin_id, request_id)
@@ -70,13 +95,20 @@ class AdminNotifier:
                 comment=comment,
                 judgement=judgement,
             )
-            sent = await self._send_to_admin(admin_id, message)
-            if not sent:
+            if await self._send_to_admin(admin_id, message):
+                sent_count += 1
+            else:
                 logger.warning(
                     "[audit] 无法通知管理员 %s：无 UMO 且 HTTP fallback 不可用。"
                     "请管理员私聊 /audit 建立通知通道。",
                     admin_id,
                 )
+        logger.info(
+            "[audit] manual_review notify request=%s sent=%s/%s",
+            request_id,
+            sent_count,
+            len(targets),
+        )
 
     async def notify_auto_result(
         self,
@@ -163,12 +195,7 @@ class AdminNotifier:
         await self._notify_admins("\n".join(lines), exclude_user_id=None)
 
     async def _notify_admins(self, message: str, exclude_user_id: str | None = None) -> None:
-        admin_ids = list(self.settings.admin_qq_ids)
-        targets = admin_ids
-        if exclude_user_id:
-            targets = [a for a in admin_ids if a != exclude_user_id]
-        if not targets and admin_ids:
-            targets = admin_ids
+        targets = _resolve_notify_targets(list(self.settings.admin_qq_ids), exclude_user_id)
         for admin_id in targets:
             sent = await self._send_to_admin(admin_id, message)
             if not sent:

@@ -48,6 +48,29 @@ async def test_notify_uses_context_send_message_without_http(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_manual_review_notifies_when_admin_is_applicant(tmp_path):
+    _install_mock_astrbot()
+    user_id = "2492835361"
+    settings = load_settings(
+        DummyConfig({"admin_qq_ids": user_id, "admin_notify": True, "onebot_http_url": ""})
+    )
+    store = AdminSessionStore(tmp_path / "admin_sessions.json")
+    await store.record(user_id, "aiocqhttp:FriendMessage:2492835361")
+    context = MagicMock()
+    context.send_message = AsyncMock(return_value=True)
+    notifier = AdminNotifier(settings, MagicMock(), context, store, lambda: None)
+    await notifier.notify_manual_review(
+        request_id="REQ-test",
+        group_id="796836121",
+        user_id=user_id,
+        comment="test",
+        parsed={},
+        reason="manual",
+    )
+    context.send_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_manual_review_notice_includes_short_commands(tmp_path):
     settings = load_settings(DummyConfig({"admin_qq_ids": "111", "onebot_http_url": ""}))
     store = AdminSessionStore(tmp_path / "admin_sessions.json")

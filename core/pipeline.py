@@ -352,14 +352,20 @@ class AuditPipeline:
 
         if mode in {"manual", "record-only"} or decision.decision == "manual_review":
             if self.settings.admin_notify and decision.decision == "manual_review":
-                await self.notifier.notify_manual_review(
-                    request_id=req_id,
-                    group_id=event.group_id,
-                    user_id=event.user_id,
-                    comment=event.comment,
-                    parsed=pending.parsed,
-                    reason=decision.reason,
-                )
+                try:
+                    await self.notifier.notify_manual_review(
+                        request_id=req_id,
+                        group_id=event.group_id,
+                        user_id=event.user_id,
+                        comment=event.comment,
+                        parsed=pending.parsed,
+                        reason=decision.reason,
+                    )
+                except Exception:
+                    logger.exception(
+                        "[audit] manual_review notify failed request=%s",
+                        req_id,
+                    )
             return
 
         if should_auto_approve(decision.decision, mode, match) and event.sub_type == "add":
