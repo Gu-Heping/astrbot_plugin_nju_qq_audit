@@ -195,16 +195,30 @@ async def test_reconcile_skips_non_target_group(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_reconcile_skips_invite(tmp_path):
-    pipe, requests, _, _ = _pipeline(tmp_path)
+async def test_reconcile_invite_with_pending_add_marks_external(tmp_path):
+    pipe, requests, _, notifier = _pipeline(tmp_path, admin_notify=True)
     req = _pending()
     await requests.upsert(req)
     result = await pipe.reconcile_external_join(
-        req.group_id, req.user_id, notice_sub_type="invite"
+        req.group_id,
+        req.user_id,
+        notice_sub_type="invite",
+        operator_id="1179350197",
+        notifier=notifier,
+    )
+    assert result.handled is True
+    assert result.reason == "matched_pending_external"
+    assert (await requests.get_by_id(req.id)).status == "external"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_invite_without_pending(tmp_path):
+    pipe, _, _, _ = _pipeline(tmp_path)
+    result = await pipe.reconcile_external_join(
+        "796836121", "0000000000", notice_sub_type="invite"
     )
     assert not result.handled
-    assert result.reason == "invite_notice_ignored"
-    assert (await requests.get_by_id(req.id)).status == "pending"
+    assert result.reason == "invite_notice_no_pending"
 
 
 @pytest.mark.asyncio

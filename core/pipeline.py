@@ -35,6 +35,17 @@ def _action_payload(result: ActionResult) -> dict:
     }
 
 
+def _external_join_message(
+    notice_sub_type: str | None, operator_id: str | None
+) -> str:
+    inner = "非 bot 审批"
+    if notice_sub_type:
+        inner += f"，notice_sub_type={notice_sub_type}"
+    if operator_id:
+        inner += f"，操作者 QQ：{operator_id}"
+    return f"QQ 侧已入群（{inner}）"
+
+
 class AuditPipeline:
     def __init__(
         self,
@@ -360,6 +371,7 @@ class AuditPipeline:
         source: str,
         list_cache: AdminListCacheStore | None = None,
         operator_id: str | None = None,
+        notice_sub_type: str | None = None,
         admin_user_id: str | None = None,
         admin_command: str | None = None,
         notifier: AdminNotifier | None = None,
@@ -385,6 +397,7 @@ class AuditPipeline:
                 "group_id": req.group_id,
                 "user_id": req.user_id,
                 "operator_id": operator_id,
+                "notice_sub_type": notice_sub_type,
                 "source": source,
                 "message": message,
             }
@@ -410,6 +423,7 @@ class AuditPipeline:
                     summary=str(summary) if summary else None,
                     comment=(req.comment or "")[:120],
                     operator_id=operator_id,
+                    notice_sub_type=notice_sub_type,
                 )
             except Exception:
                 logger.warning(
@@ -612,13 +626,14 @@ class AuditPipeline:
             return ReconcileResult.not_handled(
                 "non_target_group", f"group {group_id} not in target_group_ids"
             )
-        if notice_sub_type == "invite":
-            return ReconcileResult.not_handled(
-                "invite_notice_ignored", "invite sub_type ignored"
-            )
 
         pending = await self.requests.find_active_pending_by_user_group(group_id, user_id)
         if not pending:
+            if notice_sub_type == "invite":
+                return ReconcileResult.not_handled(
+                    "invite_notice_no_pending",
+                    f"invite notice without pending for group={group_id} user={user_id}",
+                )
             return ReconcileResult.not_handled(
                 "no_matching_pending",
                 f"no pending for group={group_id} user={user_id}",
@@ -629,9 +644,7 @@ class AuditPipeline:
                 f"pending sub_type={pending.sub_type}",
             )
 
-        message = "QQ 侧已入群（非 bot 审批）"
-        if operator_id:
-            message = f"{message}，操作者 QQ：{operator_id}"
+        message = _external_join_message(notice_sub_type, operator_id)
 
         await self._apply_external_status(
             pending,
@@ -639,25 +652,15 @@ class AuditPipeline:
             source="group_increase",
             list_cache=list_cache,
             operator_id=operator_id,
+            notice_sub_type=notice_sub_type,
             notifier=notifier,
-        )
-        await self.audit.append(
-            {
-                "type": "external_handled",
-                "request_id": pending.id,
-                "group_id": group_id,
-                "user_id": user_id,
-                "operator_id": operator_id,
-                "notice_sub_type": notice_sub_type,
-                "source": "group_increase",
-                "message": message,
-            }
         )
 
         logger.info(
-            "[audit] external join reconciled request=%s group=%s user=%s",
+            "[audit] external join reconciled request=%s group=%s user=%s notice_sub_type=%s",
             pending.id,
             group_id,
             user_id,
+            notice_sub_type,
         )
         return ReconcileResult.success(pending.id, message)

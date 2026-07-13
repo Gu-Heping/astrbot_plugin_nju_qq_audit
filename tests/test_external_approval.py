@@ -203,7 +203,7 @@ def test_extract_group_increase_approve():
 
 
 @pytest.mark.asyncio
-async def test_reconcile_skips_invite_notice(tmp_path):
+async def test_reconcile_invite_with_pending_add(tmp_path):
     pipeline, requests, _, _ = _make_pipeline(tmp_path)
     req = _pending()
     await requests.upsert(req)
@@ -212,10 +212,25 @@ async def test_reconcile_skips_invite_notice(tmp_path):
         req.group_id,
         req.user_id,
         notice_sub_type="invite",
+        operator_id="1179350197",
+    )
+    assert reconciled.handled is True
+    assert reconciled.reason == "matched_pending_external"
+    updated = await requests.get_by_id(req.id)
+    assert updated.status == "external"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_invite_without_pending(tmp_path):
+    pipeline, _, _, _ = _make_pipeline(tmp_path)
+
+    reconciled = await pipeline.reconcile_external_join(
+        "796836121",
+        "2492835361",
+        notice_sub_type="invite",
     )
     assert reconciled.handled is False
-    updated = await requests.get_by_id(req.id)
-    assert updated.status == "pending"
+    assert reconciled.reason == "invite_notice_no_pending"
 
 
 @pytest.mark.asyncio

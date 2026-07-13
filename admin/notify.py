@@ -109,6 +109,7 @@ class AdminNotifier:
         summary: str | None = None,
         comment: str | None = None,
         operator_id: str | None = None,
+        notice_sub_type: str | None = None,
     ) -> None:
         if not self.settings.admin_notify:
             return
@@ -116,7 +117,7 @@ class AdminNotifier:
         label = summary or user_id
         comment_line = (comment or "")[:80]
         lines = [
-            "[入群审核] 入群申请已在 QQ 侧通过，队列已标记为 external。",
+            "[入群审核] 入群申请已在 QQ 侧通过/入群，队列已标记为 external。",
             f"申请：{short_id}",
             f"群：{group_id}",
             f"用户：{user_id}",
@@ -124,6 +125,8 @@ class AdminNotifier:
         ]
         if comment_line:
             lines.append(f"验证：{comment_line}")
+        if notice_sub_type:
+            lines.append(f"入群方式：{notice_sub_type}")
         if operator_id:
             lines.append(f"操作者：{operator_id}")
         await self._notify_admins("\n".join(lines), exclude_user_id=None)
