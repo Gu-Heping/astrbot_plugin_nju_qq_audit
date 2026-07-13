@@ -1,7 +1,7 @@
 name: astrbot_plugin_nju_qq_audit
 display_name: NJU QQ Audit
 desc: 南京大学新生 QQ 群入群审核插件
-version: v0.3.19
+version: v0.3.20
 author: Gu-Heping
 repo: https://github.com/Gu-Heping/astrbot_plugin_nju_qq_audit
 astrbot_version: ">=4.16,<5"

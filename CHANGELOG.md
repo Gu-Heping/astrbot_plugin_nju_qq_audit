@@ -2,6 +2,27 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.3.20] - 2026-07-13
+
+### 新增
+
+- **`group_decrease` 退群强信号**：提取并处理 OneBot `group_decrease`（leave/kick）；按 `group_id+user_id` 记录成员状态，退群后设 `reapply_eligible`
+- 明确 `reapply_eligible` 时强制新建 attempt：忽略 debounce、同 flag/comment、旧 `event.time`；创建成功后消费该标志，避免同一事件连续建单
+- **`/audit list` 自动对账**：列出前对当前 active pending 轻量同步 QQ 侧申请队列，并在列表末尾输出同步摘要
+- SnowLuma `get_group_system_msg`：`ActionResult.data` 支持任意 JSON；顶层 **list** 解析（`parser_variant=snowluma_list`），兼容 NapCat `join_requests` dict
+- 匹配优先级：完整 flag → `slreq` 解析的 request_id+group_id → `group_id+requester_uin`（仅 uin>0）→ comment 辅助
+- `/audit debug` 增加脱敏的 `group_system_msg_probe`（data_type / request_count / top_level_shape / parser_variant 等）
+
+### 变更
+
+- 外部拒绝改为保守推断：需多次间隔成功空快照 + 等待窗口 + 成员明确不存在，才标记 `external_rejected_inferred`
+- 配置项：`audit_list_reconcile_timeout_ms`（默认 4s）、`audit_list_reject_confirm_snapshots`、`audit_list_reject_wait_seconds`
+- 对账超时/查询失败时不删 pending，仍输出本地列表并提示「QQ 状态同步失败」
+
+### 说明
+
+- SnowLuma 内部查询失败也可能返回成功空数组，插件无法与真实空队列区分；彻底消除误删风险需上游提供显式 success/error 接口
+
 ## [v0.3.19] - 2026-07-13
 
 ### 修复
