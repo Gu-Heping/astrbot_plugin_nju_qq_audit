@@ -6,7 +6,7 @@ from data_source.students import PendingRequest
 
 def test_requests_empty_restore(tmp_path):
     store = RequestsStore(tmp_path / "requests.json")
-    assert store._read_unlocked()["version"] == 2
+    assert store._read_unlocked()["version"] == 3
 
 
 def test_flag_idempotent(tmp_path):

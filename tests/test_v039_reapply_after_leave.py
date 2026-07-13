@@ -126,7 +126,8 @@ async def test_processed_same_flag_still_ignored(tmp_path):
     old = _pending(
         id="REQ-old",
         status="processed",
-        action_result=ActionResult(ok=False, message="reject"),
+        decision="approve",
+        action_result=ActionResult(ok=True, message="ok"),
     )
     await requests.upsert(old)
 

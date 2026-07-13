@@ -3,12 +3,29 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-PLUGIN_VERSION = "v0.3.16"
+PLUGIN_VERSION = "v0.3.17"
 RECONCILE_LOGIC_VERSION = "v2-invite-matches-pending"
-DUPLICATE_POLICY_VERSION = "v5-terminal-never-reapply"
+DUPLICATE_POLICY_VERSION = "v6-reject-reapply-fingerprint"
 PENDING_UPDATE_POLICY_VERSION = "v1-update-pending-on-comment-change"
 
-# 同 flag 重复 group_request：终态一律忽略，不 release_flag、不复活 pending
+# 同 flag 永久忽略：processed+approve、external、stale、ignored
+# processed+reject 允许新 attempt（事件指纹 + 时间/防抖判定）
+PERMANENT_IGNORE_STATUSES = frozenset({"external", "ignored", "stale"})
+
+
+def is_processed_reject(req) -> bool:
+    return req.status == "processed" and req.decision == "reject"
+
+
+def is_permanent_terminal(req) -> bool:
+    if req.status in PERMANENT_IGNORE_STATUSES:
+        return True
+    if req.status == "processed" and req.decision != "reject":
+        return True
+    return False
+
+
+# 兼容旧 import
 TERMINAL_DUPLICATE_STATUSES = frozenset({"processed", "external", "ignored", "stale"})
 
 

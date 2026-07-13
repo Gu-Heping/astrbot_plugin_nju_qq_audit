@@ -10,8 +10,17 @@ from admin.action_error import classify_action_failure
 from core.decision import apply_auto_approve_flag, make_decision, should_auto_approve
 from core.matcher import MatchResult, match_student
 from core.parser import parse_application_comment
+from core.event_fingerprint import (
+    compute_event_fingerprint,
+    extract_event_time_iso,
+    parse_iso_datetime,
+)
 from core.reconcile import ReconcileResult
-from core.version import RECONCILE_LOGIC_VERSION, TERMINAL_DUPLICATE_STATUSES
+from core.version import (
+    RECONCILE_LOGIC_VERSION,
+    is_permanent_terminal,
+    is_processed_reject,
+)
 from data_source.njutable_provider import load_students_for_audit
 from data_source.students import ActionResult, PendingRequest
 from onebot.event_extract import GroupJoinRequest
@@ -74,6 +83,19 @@ def _match_to_dict(match) -> dict:
 _MAX_PREVIOUS_COMMENTS = 5
 
 
+def _event_context(event: GroupJoinRequest) -> tuple[str | None, str]:
+    event_time = extract_event_time_iso(event.raw_event)
+    fingerprint = compute_event_fingerprint(
+        group_id=event.group_id,
+        user_id=event.user_id,
+        flag=event.flag,
+        event_time=event_time,
+        comment=event.comment or "",
+        sub_type=event.sub_type,
+    )
+    return event_time, fingerprint
+
+
 class AuditPipeline:
     def __init__(
         self,
@@ -107,6 +129,63 @@ class AuditPipeline:
 
     def _effective_mode(self) -> tuple[str, str]:
         return get_effective_mode(self.settings, self.runtime.get_mode_override())
+
+    async def _audit_event_replayed(
+        self,
+        event: GroupJoinRequest,
+        *,
+        fingerprint: str,
+        reason: str,
+        request_id: str | None = None,
+        fallback: str | None = None,
+    ) -> None:
+        logger.info(
+            "[audit] duplicate event replayed flag=%s fingerprint=%s reason=%s",
+            event.flag[:8] if event.flag else "",
+            fingerprint[:12],
+            reason,
+        )
+        record: dict = {
+            "type": "duplicate_event_replayed",
+            "group_id": event.group_id,
+            "user_id": event.user_id,
+            "reason": reason,
+            "fingerprint_prefix": fingerprint[:12],
+        }
+        if request_id:
+            record["request_id"] = request_id
+        if fallback:
+            record["fallback"] = fallback
+        await self.audit.append(record)
+
+    def _evaluate_reapply_after_reject(
+        self,
+        existing: PendingRequest,
+        event: GroupJoinRequest,
+        event_time: str | None,
+    ) -> tuple[str, str | None]:
+        """返回 (action, fallback_note)。action: reapply | debounce | before_processed"""
+        if event_time and existing.processed_at:
+            et = parse_iso_datetime(event_time)
+            pt = parse_iso_datetime(existing.processed_at)
+            if et and pt and et <= pt:
+                return "before_processed", None
+
+        if not event_time:
+            fallback = "no_event_time"
+            if (event.comment or "") != (existing.comment or ""):
+                return "reapply", fallback
+            if existing.processed_at:
+                pt = parse_iso_datetime(existing.processed_at)
+                if pt is not None:
+                    elapsed = (
+                        parse_iso_datetime(utc_now_iso()) - pt
+                    ).total_seconds()
+                    if elapsed < self.settings.reapply_debounce_seconds:
+                        return "debounce", fallback
+            return "reapply", fallback
+
+        return "reapply", None
 
     async def _ignore_duplicate_terminal(
         self,
@@ -154,21 +233,66 @@ class AuditPipeline:
             logger.debug("[audit] mode off, skip processing")
             return
 
+        event_time, fingerprint = _event_context(event)
+
+        if await self.requests.has_fingerprint(fingerprint):
+            linked_id = await self.requests.get_fingerprint_request_id(fingerprint)
+            linked = await self.requests.get_by_id(linked_id) if linked_id else None
+            await self._audit_event_replayed(
+                event,
+                fingerprint=fingerprint,
+                reason="seen_fingerprint",
+                request_id=linked.id if linked else None,
+            )
+            return
+
         existing = await self.requests.get_by_flag(event.flag)
         comment_text = event.comment or ""
         if existing:
-            if existing.status in TERMINAL_DUPLICATE_STATUSES:
+            if is_permanent_terminal(existing):
                 await self._ignore_duplicate_terminal(
                     existing,
                     event,
-                    reason=f"same flag terminal status={existing.status}",
+                    reason=f"same flag permanent terminal status={existing.status} decision={existing.decision}",
+                )
+                return
+
+            if is_processed_reject(existing):
+                action, fallback = self._evaluate_reapply_after_reject(
+                    existing, event, event_time
+                )
+                if action == "before_processed":
+                    await self._audit_event_replayed(
+                        event,
+                        fingerprint=fingerprint,
+                        reason="event_time_before_processed_at",
+                        request_id=existing.id,
+                    )
+                    return
+                if action == "debounce":
+                    await self._audit_event_replayed(
+                        event,
+                        fingerprint=fingerprint,
+                        reason="reapply_debounce_same_comment",
+                        request_id=existing.id,
+                        fallback=fallback,
+                    )
+                    return
+                await self._audit_and_act_reapply(
+                    event,
+                    existing,
+                    event_time=event_time,
+                    fingerprint=fingerprint,
+                    fallback=fallback,
                 )
                 return
 
             if existing.status == "pending" and not existing.processed_at:
                 if existing.comment == comment_text:
+                    await self.requests.register_fingerprint(fingerprint, existing.id)
                     return
                 await self._audit_and_update_pending(event, existing)
+                await self.requests.register_fingerprint(fingerprint, existing.id)
                 return
 
             if existing.status == "failed":
@@ -176,7 +300,11 @@ class AuditPipeline:
                 if retryable is None:
                     return
                 await self._audit_and_act(
-                    event, resubmit=True, request_id=existing.id
+                    event,
+                    resubmit=True,
+                    request_id=existing.id,
+                    event_time=event_time,
+                    fingerprint=fingerprint,
                 )
                 return
 
@@ -191,7 +319,11 @@ class AuditPipeline:
         if active_pending and active_pending.flag != event.flag:
             await self.requests.supersede_pending(active_pending.flag, event.flag)
 
-        await self._audit_and_act(event)
+        await self._audit_and_act(
+            event,
+            event_time=event_time,
+            fingerprint=fingerprint,
+        )
 
     def _evaluate_request(self, event: GroupJoinRequest):
         mode, _ = self._effective_mode()
@@ -266,13 +398,53 @@ class AuditPipeline:
             notify_update=True,
         )
 
+    async def _audit_and_act_reapply(
+        self,
+        event: GroupJoinRequest,
+        existing: PendingRequest,
+        *,
+        event_time: str | None,
+        fingerprint: str,
+        fallback: str | None = None,
+    ) -> None:
+        req_id = await self._audit_and_act(
+            event,
+            reapply_of=existing.id,
+            attempt_no=int(existing.attempt_no or 1) + 1,
+            event_time=event_time,
+            fingerprint=fingerprint,
+        )
+        record: dict = {
+            "type": "reapplication_created",
+            "request_id": req_id,
+            "reapply_of": existing.id,
+            "group_id": event.group_id,
+            "user_id": event.user_id,
+            "attempt_no": int(existing.attempt_no or 1) + 1,
+            "received_event_time": event_time,
+            "fingerprint_prefix": fingerprint[:12],
+        }
+        if fallback:
+            record["fallback"] = fallback
+        await self.audit.append(record)
+        logger.info(
+            "[audit] reapplication created request=%s reapply_of=%s attempt=%s",
+            req_id,
+            existing.id,
+            int(existing.attempt_no or 1) + 1,
+        )
+
     async def _audit_and_act(
         self,
         event: GroupJoinRequest,
         *,
         resubmit: bool = False,
         request_id: str | None = None,
-    ) -> None:
+        reapply_of: str | None = None,
+        attempt_no: int = 1,
+        event_time: str | None = None,
+        fingerprint: str | None = None,
+    ) -> str:
         mode, parsed, match, decision = self._evaluate_request(event)
 
         req_id = request_id or new_request_id()
@@ -293,6 +465,10 @@ class AuditPipeline:
             created_at=utc_now_iso(),
             match_strength=match.strength,
             matched_student_key=decision.matched_student_key,
+            reapply_of=reapply_of,
+            attempt_no=attempt_no,
+            received_event_time=event_time,
+            event_fingerprint=fingerprint,
         )
         if resubmit:
             update_dict = RequestsStore._request_to_dict(pending)
@@ -302,13 +478,25 @@ class AuditPipeline:
             update_dict["retry_count"] = 0
             update_dict["processed_at"] = None
             update_dict["status"] = "pending"
+            if fingerprint:
+                update_dict["event_fingerprint"] = fingerprint
+            if event_time:
+                update_dict["received_event_time"] = event_time
             await self.requests.update_by_id(req_id, update_dict)
+            if fingerprint:
+                await self.requests.register_fingerprint(fingerprint, req_id)
         else:
-            await self.requests.upsert(pending)
+            await self.requests.insert_attempt(pending)
+
+        audit_type = "decision_made"
+        if resubmit:
+            audit_type = "request_received"
+        elif reapply_of:
+            audit_type = "decision_made"
 
         await self.audit.append(
             {
-                "type": "decision_made" if not resubmit else "request_received",
+                "type": audit_type,
                 "request_id": req_id,
                 "group_id": event.group_id,
                 "user_id": event.user_id,
@@ -318,6 +506,8 @@ class AuditPipeline:
                 "reason": decision.reason,
                 "mode": mode,
                 "match_strength": match.strength,
+                "reapply_of": reapply_of,
+                "attempt_no": attempt_no,
             }
         )
 
@@ -332,6 +522,7 @@ class AuditPipeline:
         await self._finish_after_decision(
             pending, event, decision, match, mode, notify_update=False
         )
+        return req_id
 
     async def _finish_after_decision(
         self,

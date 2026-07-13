@@ -76,6 +76,7 @@ class PluginSettings:
     auto_sync_on_startup: bool = False
     auto_sync_interval_minutes: int = 360
     auto_sync_notify_admin: bool = False
+    reapply_debounce_seconds: int = 120
 
     def __repr__(self) -> str:
         return f"PluginSettings(mode={self.mode!r}, student_source={self.student_source!r}, target_groups={len(self.target_group_ids)})"
@@ -234,6 +235,9 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
             config.get("auto_sync_interval_minutes"), 360, minimum=10
         ),
         auto_sync_notify_admin=bool(config.get("auto_sync_notify_admin", False)),
+        reapply_debounce_seconds=_clamp_int(
+            config.get("reapply_debounce_seconds"), 120, minimum=0, maximum=86400
+        ),
     )
 
 

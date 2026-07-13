@@ -159,6 +159,11 @@
     "type": "bool",
     "default": false
   },
+  "reapply_debounce_seconds": {
+    "description": "拒绝后无 event_time 时，同 comment 重新申请的最小间隔（秒），防平台重放重复通知",
+    "type": "int",
+    "default": 120
+  },
   "njutable_col_qq": {
     "description": "列名：QQ（可选，仅辅助参考）",
     "type": "string",

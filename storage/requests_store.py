@@ -9,7 +9,7 @@ from typing import Any
 
 from data_source.students import ActionResult, PendingRequest
 
-REQUESTS_VERSION = 2
+REQUESTS_VERSION = 3
 
 
 def utc_now_iso() -> str:
@@ -29,7 +29,12 @@ class RequestsStore:
             self._write(self._empty())
 
     def _empty(self) -> dict[str, Any]:
-        return {"version": REQUESTS_VERSION, "by_id": {}, "by_flag": {}}
+        return {
+            "version": REQUESTS_VERSION,
+            "by_id": {},
+            "by_flag": {},
+            "seen_fingerprints": {},
+        }
 
     def _read_unlocked(self) -> dict[str, Any]:
         try:
@@ -42,6 +47,11 @@ class RequestsStore:
         if isinstance(parsed, dict) and parsed.get("version") == REQUESTS_VERSION:
             parsed.setdefault("by_id", {})
             parsed.setdefault("by_flag", {})
+            parsed.setdefault("seen_fingerprints", {})
+            return parsed
+        if isinstance(parsed, dict) and parsed.get("version") == 2:
+            parsed["version"] = REQUESTS_VERSION
+            parsed.setdefault("seen_fingerprints", {})
             return parsed
         if isinstance(parsed, dict):
             return self._migrate_v1(parsed)
@@ -111,6 +121,10 @@ class RequestsStore:
             previous_comments=[
                 str(c) for c in (data.get("previous_comments") or []) if c
             ][-5:],
+            reapply_of=str(data["reapply_of"]) if data.get("reapply_of") else None,
+            attempt_no=int(data.get("attempt_no") or 1),
+            received_event_time=data.get("received_event_time"),
+            event_fingerprint=data.get("event_fingerprint"),
         )
 
     @staticmethod
@@ -141,6 +155,10 @@ class RequestsStore:
             "updated_at": req.updated_at,
             "comment_revision": req.comment_revision,
             "previous_comments": list(req.previous_comments)[-5:],
+            "reapply_of": req.reapply_of,
+            "attempt_no": req.attempt_no,
+            "received_event_time": req.received_event_time,
+            "event_fingerprint": req.event_fingerprint,
         }
         if req.action_result:
             data["action_result"] = {
@@ -223,12 +241,35 @@ class RequestsStore:
         items.sort(key=lambda r: r.last_action_at or r.created_at, reverse=True)
         return items[:limit]
 
-    async def upsert(self, req: PendingRequest) -> None:
+    async def get_fingerprint_request_id(self, fingerprint: str) -> str | None:
+        async with self._lock:
+            store = self._read_unlocked()
+            req_id = store.get("seen_fingerprints", {}).get(fingerprint)
+            return str(req_id) if req_id else None
+
+    async def has_fingerprint(self, fingerprint: str) -> bool:
+        async with self._lock:
+            store = self._read_unlocked()
+            return fingerprint in store.get("seen_fingerprints", {})
+
+    async def register_fingerprint(self, fingerprint: str, req_id: str) -> None:
+        async with self._lock:
+            store = self._read_unlocked()
+            store.setdefault("seen_fingerprints", {})[fingerprint] = req_id
+            self._write(store)
+
+    async def insert_attempt(self, req: PendingRequest) -> None:
+        """写入新 attempt：保留旧 by_id 记录，by_flag 指向最新。"""
         async with self._lock:
             store = self._read_unlocked()
             store["by_id"][req.id] = self._request_to_dict(req)
             store["by_flag"][req.flag] = req.id
+            if req.event_fingerprint:
+                store.setdefault("seen_fingerprints", {})[req.event_fingerprint] = req.id
             self._write(store)
+
+    async def upsert(self, req: PendingRequest) -> None:
+        await self.insert_attempt(req)
 
     async def update_by_id(self, req_id: str, update: dict[str, Any]) -> PendingRequest | None:
         async with self._lock:

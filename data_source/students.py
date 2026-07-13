@@ -124,6 +124,10 @@ class PendingRequest:
     updated_at: str | None = None
     comment_revision: int = 0
     previous_comments: list[str] = field(default_factory=list)
+    reapply_of: str | None = None
+    attempt_no: int = 1
+    received_event_time: str | None = None
+    event_fingerprint: str | None = None
 
     @staticmethod
     def _public_action_result(result: ActionResult | None) -> dict[str, Any] | None:
@@ -161,6 +165,10 @@ class PendingRequest:
             "updated_at": self.updated_at,
             "comment_revision": self.comment_revision,
             "previous_comments": list(self.previous_comments),
+            "reapply_of": self.reapply_of,
+            "attempt_no": self.attempt_no,
+            "received_event_time": self.received_event_time,
+            "event_fingerprint": self.event_fingerprint,
         }
 
 

@@ -77,6 +77,7 @@ async def test_processed_same_flag_always_ignored(tmp_path):
     pipe, requests, audit = _pipeline(tmp_path)
     req = _pending(
         status="processed",
+        decision="approve",
         processed_at="2026-07-09T01:00:00+00:00",
         action_result=ActionResult(ok=True, message="ok"),
     )
@@ -128,8 +129,9 @@ async def test_processed_same_flag_different_comment_ignored(tmp_path):
     pipe, requests, audit = _pipeline(tmp_path)
     req = _pending(
         status="processed",
+        decision="approve",
         processed_at="2026-07-09T01:00:00+00:00",
-        action_result=ActionResult(ok=False, message="信息不完整"),
+        action_result=ActionResult(ok=True, message="ok"),
     )
     await requests.upsert(req)
 
