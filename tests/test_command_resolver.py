@@ -96,7 +96,7 @@ async def test_already_processed(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_failed_request_shows_action_hint(tmp_path):
+async def test_failed_request_allows_retry(tmp_path):
     req_id = new_request_id()
     requests, cache, _ = await _setup(
         tmp_path,
@@ -105,8 +105,8 @@ async def test_failed_request_shows_action_hint(tmp_path):
         processed_at="2026-07-09T01:00:00+00:00",
     )
     result = await resolve_request_ref("111", "1", list_cache=cache, requests=requests)
-    assert not result.ok
-    assert "审批接口调用已失败" in result.message
+    assert result.ok
+    assert result.request.status == "pending"
 
 
 def test_map_action_error_hides_raw():

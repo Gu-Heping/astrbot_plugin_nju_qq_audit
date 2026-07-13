@@ -18,7 +18,7 @@ STUDENT_ID_LEGACY_PATTERN = re.compile(r"\b(2[0-9]1\d{6})\b")
 NOTICE_NO_PATTERN = re.compile(r"\b(202[56]\d{4})\b")
 LOOSE_TOKEN_PATTERN = re.compile(r"\b([A-Za-z0-9][A-Za-z0-9\-_/]{3,31})\b")
 NAME_LABEL_PATTERN = re.compile(
-    r"(?:姓名|名字|真实姓名)[:：\s]*([\u4e00-\u9fa5·]{2,4})(?=\s|学号|通知书|编号|专业|$|[:：])",
+    r"(?:姓名|名字|真实姓名)[:：\s]+([\u4e00-\u9fa5·]{2,4})(?=\s|学号|通知书|编号|专业|$|[:：])",
     re.IGNORECASE,
 )
 STUDENT_ID_LABEL_PATTERN = re.compile(r"(?:学号|student\s*id)[:：\s]*(\d{6,12})", re.IGNORECASE)
@@ -40,13 +40,31 @@ ACADEMY_LABEL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 CHINESE_NAME_PATTERN = re.compile(r"^[\u4e00-\u9fa5·]{2,4}$")
-QUESTION_ANSWER_PATTERN = re.compile(
-    r"问题[：:][\s\S]*?答(?:案)?[：:\s]+(.+)$",
+ANSWER_MARKER_PATTERN = re.compile(
+    r"(?:答案|回答|答|A|answer)\s*[：:]",
     re.IGNORECASE,
 )
-ANSWER_ONLY_PATTERN = re.compile(
-    r"(?:^|\n)\s*答(?:案)?[：:\s]+(.+)$",
+QUESTION_LINE_PATTERN = re.compile(
+    r"^[\s\S]*?问题\s*[：:][^\n]*(?:\n|$)",
     re.IGNORECASE,
+)
+VERIFY_PREFIX_PATTERN = re.compile(r"^验证\s*[：:]\s*", re.IGNORECASE)
+
+_TEMPLATE_TOKENS = frozenset(
+    {
+        "问题",
+        "问题：姓名",
+        "姓名",
+        "学号",
+        "录取号",
+        "学号/录取号",
+        "专业",
+        "答案",
+        "答",
+        "回答",
+        "a",
+        "answer",
+    }
 )
 
 
@@ -60,6 +78,43 @@ class ParsedApplication:
     academy: str | None = None
     notice_no_candidates: list[str] = field(default_factory=list)
     parse_errors: list[str] = field(default_factory=list)
+
+
+def extract_answer_segment(raw: str) -> str:
+    """从 QQ 入群验证 raw comment 中提取答案段（先于 normalize_whitespace）。"""
+    if not raw:
+        return ""
+    text = raw.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+
+    matches = list(ANSWER_MARKER_PATTERN.finditer(text))
+    if matches:
+        return text[matches[-1].end() :].strip()
+
+    stripped = QUESTION_LINE_PATTERN.sub("", text, count=1).strip()
+    if stripped != text:
+        return stripped
+
+    return VERIFY_PREFIX_PATTERN.sub("", text).strip()
+
+
+def _is_template_token(token: str) -> bool:
+    value = (token or "").strip()
+    if not value:
+        return True
+    if value in _TEMPLATE_TOKENS:
+        return True
+    lower = value.lower()
+    if lower in _TEMPLATE_TOKENS:
+        return True
+    if re.match(r"^问题[：:]", value):
+        return True
+    if re.fullmatch(r"学号/录取号", value):
+        return True
+    if value.startswith("问题："):
+        return True
+    return False
 
 
 def _add_notice_candidate(result: ParsedApplication, value: str) -> None:
@@ -92,17 +147,6 @@ def _finalize_notice_candidates(result: ParsedApplication) -> None:
             result.parse_errors.append("multiple notice_no candidates")
 
 
-def _extract_answer_text(text: str) -> str:
-    """QQ 入群验证常带「问题：… 答案：…」模板，只解析答案段。"""
-    inline = QUESTION_ANSWER_PATTERN.search(text)
-    if inline:
-        return normalize_whitespace(inline.group(1).strip())
-    line = ANSWER_ONLY_PATTERN.search(text)
-    if line:
-        return normalize_whitespace(line.group(1).strip())
-    return text
-
-
 def _assign_student_id(result: ParsedApplication, value: str) -> None:
     normalized = normalize_student_id(value)
     if not normalized:
@@ -122,7 +166,7 @@ def _find_student_id_in_text(text: str) -> str | None:
 
 def parse_application_comment(raw: str) -> ParsedApplication:
     full = normalize_whitespace(raw)
-    text = _extract_answer_text(full)
+    text = normalize_whitespace(extract_answer_segment(raw))
     result = ParsedApplication(raw=full)
     if not text:
         result.parse_errors.append("empty comment")
@@ -190,7 +234,7 @@ def parse_application_comment(raw: str) -> ParsedApplication:
 
 def _extract_compact_credentials(text: str, result: ParsedApplication) -> None:
     if not result.student_id:
-        sid_compact = re.search(r"([\u4e00-\u9fa5·]{2,4})(2[0-9]1\d{6})", text)
+        sid_compact = re.search(r"([\u4e00-\u9fa5·]{2,4})(2[0-9]1\d{5,6})", text)
         if sid_compact:
             if not result.name:
                 result.name = normalize_name(sid_compact.group(1))
@@ -206,6 +250,17 @@ def _extract_compact_credentials(text: str, result: ParsedApplication) -> None:
 
 
 def _split_mixed_token(token: str) -> dict[str, str]:
+    glued_major = re.match(
+        r"^([\u4e00-\u9fa5·]{2,4})(2[0-9]1\d{5,6})([\u4e00-\u9fa5a-zA-Z（）()·\-]{2,30})$",
+        token,
+    )
+    if glued_major:
+        return {
+            "name": normalize_name(glued_major.group(1)),
+            "student_id": glued_major.group(2),
+            "major": glued_major.group(3).strip(),
+        }
+
     sid_match = re.match(r"^([\u4e00-\u9fa5·]{2,4})(261\d{5,6})$", token)
     if sid_match:
         return {"name": normalize_name(sid_match.group(1)), "student_id": sid_match.group(2)}
@@ -227,11 +282,16 @@ def _parse_by_tokens(text: str, result: ParsedApplication) -> None:
     names: list[str] = []
 
     for token in tokens:
+        if _is_template_token(token):
+            continue
+
         split = _split_mixed_token(token)
         if split.get("student_id") and not result.student_id:
             result.student_id = split["student_id"]
         if split.get("notice_no") and not result.notice_no:
             _add_notice_candidate(result, split["notice_no"])
+        if split.get("major") and not result.major:
+            result.major = split["major"]
         if split.get("name"):
             names.append(split["name"])
             continue

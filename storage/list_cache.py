@@ -134,6 +134,27 @@ class AdminListCacheStore:
                 return int(key)
         return None
 
+    async def remove_request_everywhere(self, request_id: str) -> None:
+        if not request_id:
+            return
+        async with self._lock:
+            data = self.load()
+            admins = data.setdefault("admins", {})
+            changed = False
+            for admin_id, entry in list(admins.items()):
+                if not isinstance(entry, dict):
+                    continue
+                items = entry.get("items")
+                if not isinstance(items, dict):
+                    continue
+                new_items = {k: v for k, v in items.items() if v != request_id}
+                if new_items != items:
+                    entry["items"] = new_items
+                    admins[admin_id] = entry
+                    changed = True
+            if changed:
+                self._write(data)
+
     def _write(self, data: dict[str, Any]) -> None:
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

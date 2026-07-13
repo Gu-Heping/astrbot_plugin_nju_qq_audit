@@ -10,6 +10,7 @@ from admin.labels import (
     list_action_hint,
     mode_label,
 )
+from admin.command_resolver import sanitize_action_message
 from config import PluginSettings, mask_http_url
 from data_source.student_cache import SyncState
 
@@ -125,10 +126,13 @@ def format_list(items: list, index_map: dict[int, str]) -> str:
                 f"群：{public.get('group_id', '')}",
                 f"验证：{comment or '（空）'}",
                 f"判断：{human_judgement(item)}",
-                list_action_hint(item).replace("编号", str(idx)),
-                "",
             ]
         )
+        last_action = public.get("last_action_result") or {}
+        if last_action and last_action.get("ok") is False:
+            lines.append("提示：上次操作失败，可重试或到 QQ 侧确认。")
+        lines.append(list_action_hint(item).replace("编号", str(idx)))
+        lines.append("")
     lines.append("编号来自本次列表，30 分钟内有效。无需复制长 request id。")
     return "\n".join(lines)
 
@@ -142,6 +146,7 @@ def _parsed_line(label: str, value) -> str:
 def format_view(item, index: int | None = None) -> str:
     public = item.to_public_dict()
     parsed = public.get("parsed") or {}
+    status = public.get("status", "")
     title = f"申请详情 [{index}]" if index is not None else f"申请详情 {public.get('id', '')}"
     lines = [
         title,
@@ -150,6 +155,7 @@ def format_view(item, index: int | None = None) -> str:
         f"群：{public.get('group_id', '')}",
         f"验证：{public.get('comment', '')[:120]}",
         f"时间：{_format_local_time(public.get('created_at'))}",
+        f"状态：{status}",
         "",
         "解析结果：",
         _parsed_line("姓名", parsed.get("name")),
@@ -163,6 +169,26 @@ def format_view(item, index: int | None = None) -> str:
         f"原因：{public.get('reason') or human_judgement(item)}",
         "",
     ]
+    last_action = public.get("last_action_result") or {}
+    action_result = public.get("action_result") or {}
+    if status == "external":
+        lines.append("已在 QQ 客户端处理（external）。")
+        msg = sanitize_action_message((action_result or last_action).get("message"))
+        if msg and msg != "（无详情）":
+            lines.append(f"说明：{msg}")
+    elif last_action:
+        if last_action.get("ok"):
+            lines.append("上次审批结果：成功")
+        else:
+            lines.append("上次审批结果：失败")
+            lines.append(f"上次失败原因：{sanitize_action_message(last_action.get('message'))}")
+            if index is not None:
+                lines.append(
+                    "重试建议：可再次 /audit ok/no；若 QQ 侧已处理请 "
+                    f"/audit mark-external {index} confirm"
+                )
+            else:
+                lines.append("重试建议：可再次操作或使用 mark-external confirm")
     qq_match = (public.get("match") or {}).get("qq_match")
     if qq_match is True:
         lines.append("QQ 匹配：是")
@@ -170,14 +196,16 @@ def format_view(item, index: int | None = None) -> str:
         lines.append("QQ 匹配：否")
     else:
         lines.append("QQ 匹配：未记录")
-    lines.extend(
-        [
-        "可操作：",
-        ]
-    )
-    if index is not None:
+    lines.append("可操作：")
+    if status == "external":
+        lines.append("（已在 QQ 侧处理，无需 ok/no）")
+    elif status == "processed":
+        lines.append("（已处理完成）")
+    elif index is not None:
         lines.append(f"/audit ok {index}")
         lines.append(f"/audit no {index} 信息不完整")
+        if last_action and last_action.get("ok") is False:
+            lines.append(f"/audit mark-external {index} confirm")
     else:
         lines.append(f"/audit approve {public.get('id')} confirm")
         lines.append(f"/audit reject {public.get('id')} confirm")

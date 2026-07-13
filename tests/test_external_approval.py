@@ -105,7 +105,7 @@ async def test_scenario_a_external_approve_reconciles_pending(tmp_path):
 
 @pytest.mark.asyncio
 async def test_scenario_b_admin_ok_after_external_fails_gracefully(tmp_path):
-    """QQ 侧已同意后 bot 再 /audit ok → API 失败、变 failed、友好提示。"""
+    """QQ 侧已同意后 bot 再 /audit ok → API 失败、保持 pending、可重试。"""
     pipeline, requests, _, actions = _make_pipeline(tmp_path)
     req = _pending()
     await requests.upsert(req)
@@ -116,18 +116,19 @@ async def test_scenario_b_admin_ok_after_external_fails_gracefully(tmp_path):
     assert result.ok is False
 
     updated = await requests.get_by_id(req.id)
-    assert updated.status == "failed"
-    assert updated.processed_at
+    assert updated.status == "pending"
+    assert updated.processed_at is None
+    assert updated.retry_count == 1
 
     msg = map_action_error(result.message)
-    assert "其他管理员" in msg
+    assert "mark-external" in msg
     assert "adapter" not in msg
 
     resolved = await resolve_request_ref(
         "111", "1", list_cache=cache, requests=requests
     )
-    assert not resolved.ok
-    assert resolved.error == "already_processed"
+    assert resolved.ok
+    assert resolved.request.status == "pending"
 
     actions.set_group_add_request.assert_awaited_once()
 
@@ -158,7 +159,7 @@ async def test_scenario_d_reapply_supersedes_old_pending(tmp_path):
 
 @pytest.mark.asyncio
 async def test_scenario_f_auto_race_leaves_single_outcome(tmp_path):
-    """auto 与人工竞态 → 仅一条 API 调用，失败时 status=failed。"""
+    """auto 与人工竞态 → 仅一条 API 调用，失败时保持 pending 可重试。"""
     pipeline, requests, _, actions = _make_pipeline(tmp_path, mode="auto")
     from data_source.mock_provider import generate_mock_students
 
@@ -175,7 +176,10 @@ async def test_scenario_f_auto_race_leaves_single_outcome(tmp_path):
 
     stored = await requests.get_by_flag("flag-auto")
     assert stored is not None
-    assert stored.status == "failed"
+    assert stored.status == "pending"
+    assert stored.last_action_result is not None
+    assert stored.last_action_result.ok is False
+    assert stored.retry_count == 1
     actions.set_group_add_request.assert_awaited_once()
 
 

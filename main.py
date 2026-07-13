@@ -60,7 +60,7 @@ from probe.formatter import format_event_summary, format_raw_event, format_recen
 from probe.sanitizer import build_missing_raw_summary, classify_raw_message, sanitize
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
-PLUGIN_VERSION = "v0.3.3"
+PLUGIN_VERSION = "v0.3.4"
 
 
 @register(
@@ -188,6 +188,7 @@ class NjuQqAuditPlugin(Star):
                     increase.user_id,
                     notice_sub_type=increase.sub_type,
                     operator_id=increase.operator_id,
+                    list_cache=self.ctx.list_cache,
                 )
             return
         join_req = extract_group_request(raw)
@@ -302,6 +303,7 @@ class NjuQqAuditPlugin(Star):
             ref,
             list_cache=self.ctx.list_cache,
             requests=self.ctx.requests,
+            for_view=True,
         )
         if not resolved.ok:
             yield event.plain_result(resolved.message)
@@ -356,6 +358,61 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(format_no_result(resolved.request, resolved.index, reject_reason))
         else:
             yield event.plain_result(map_action_error(result.message))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("mark-external")
+    async def audit_mark_external(self, event: AstrMessageEvent, ref: str, confirm: str = ""):
+        allowed, message = can_run_command(self._settings(), "mark-external", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        if confirm != "confirm":
+            yield event.plain_result("请使用 /audit mark-external <编号> confirm")
+            return
+        resolved = await resolve_request_ref(
+            event.get_sender_id(),
+            ref,
+            list_cache=self.ctx.list_cache,
+            requests=self.ctx.requests,
+        )
+        if not resolved.ok:
+            yield event.plain_result(resolved.message)
+            return
+        await self.ctx.pipeline.mark_external(
+            resolved.request,
+            event.get_sender_id(),
+            list_cache=self.ctx.list_cache,
+        )
+        label = f"[{resolved.index}]" if resolved.index is not None else resolved.request.id
+        yield event.plain_result(f"已将申请 {label} 标记为 external（QQ 侧已处理）。")
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("cleanup")
+    async def audit_cleanup(self, event: AstrMessageEvent, kind: str = ""):
+        allowed, message = can_run_command(self._settings(), "cleanup", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        if kind != "failed":
+            yield event.plain_result("用法：/audit cleanup failed")
+            return
+        items = await self.ctx.requests.list_retryable_failures(limit=20)
+        if not items:
+            yield event.plain_result("没有疑似失败/可重试的 pending 项。")
+            return
+        lines = ["疑似失败或可重试的申请：", ""]
+        for idx, item in enumerate(items, start=1):
+            summary = item.parsed.get("name") if item.parsed else item.user_id
+            sid = (item.parsed or {}).get("student_id") or ""
+            label = f"{summary} {sid}".strip()
+            lines.append(f"[{idx}] {label or item.id} 群={item.group_id} status={item.status}")
+            if item.last_action_result and not item.last_action_result.ok:
+                lines.append("    上次操作失败，可 /audit ok/no 重试或 mark-external confirm")
+        lines.append("")
+        lines.append("提示：先 /audit list 获取当前编号后再操作。")
+        yield event.plain_result("\n".join(lines))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("auto")

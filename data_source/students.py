@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 Decision = Literal["approve", "manual_review", "reject", "ignored"]
 PendingStatus = Literal["pending", "processed", "failed", "ignored", "external"]
+TERMINAL_REQUEST_STATUSES = frozenset({"processed", "external", "ignored"})
 MatchStrength = Literal["strong", "weak", "none", "auxiliary"]
 
 SENSITIVE_FIELD_NAMES = frozenset(
@@ -113,10 +114,19 @@ class PendingRequest:
     match: dict[str, Any] = field(default_factory=dict)
     processed_at: str | None = None
     action_result: ActionResult | None = None
+    last_action_result: ActionResult | None = None
+    last_action_at: str | None = None
+    retry_count: int = 0
     admin_override: bool = False
     admin_user_id: str | None = None
     admin_command: str | None = None
     matched_student_key: str | None = None
+
+    @staticmethod
+    def _public_action_result(result: ActionResult | None) -> dict[str, Any] | None:
+        if result is None:
+            return None
+        return {"ok": result.ok, "message": result.message}
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -134,6 +144,10 @@ class PendingRequest:
             "processed_at": self.processed_at,
             "match_strength": self.match_strength,
             "parsed": self.parsed,
+            "retry_count": self.retry_count,
+            "last_action_at": self.last_action_at,
+            "action_result": self._public_action_result(self.action_result),
+            "last_action_result": self._public_action_result(self.last_action_result),
             "match": {
                 k: v
                 for k, v in self.match.items()

@@ -73,6 +73,14 @@ class RequestsStore:
                 retcode=action_result.get("retcode"),
                 message=action_result.get("message"),
             )
+        last_action_result = data.get("last_action_result")
+        lar = None
+        if isinstance(last_action_result, dict):
+            lar = ActionResult(
+                ok=bool(last_action_result.get("ok")),
+                retcode=last_action_result.get("retcode"),
+                message=last_action_result.get("message"),
+            )
         return PendingRequest(
             id=req_id,
             group_id=str(data.get("group_id", "")),
@@ -90,6 +98,9 @@ class RequestsStore:
             created_at=str(data.get("created_at", utc_now_iso())),
             processed_at=data.get("processed_at"),
             action_result=ar,
+            last_action_result=lar,
+            last_action_at=data.get("last_action_at"),
+            retry_count=int(data.get("retry_count") or 0),
             admin_override=bool(data.get("admin_override", False)),
             admin_user_id=str(data.get("admin_user_id")) if data.get("admin_user_id") else None,
             admin_command=data.get("admin_command"),
@@ -115,6 +126,8 @@ class RequestsStore:
             "status": req.status,
             "created_at": req.created_at,
             "processed_at": req.processed_at,
+            "retry_count": req.retry_count,
+            "last_action_at": req.last_action_at,
             "admin_override": req.admin_override,
             "admin_user_id": req.admin_user_id,
             "admin_command": req.admin_command,
@@ -126,6 +139,12 @@ class RequestsStore:
                 "ok": req.action_result.ok,
                 "retcode": req.action_result.retcode,
                 "message": req.action_result.message,
+            }
+        if req.last_action_result:
+            data["last_action_result"] = {
+                "ok": req.last_action_result.ok,
+                "retcode": req.last_action_result.retcode,
+                "message": req.last_action_result.message,
             }
         return data
 
@@ -161,6 +180,32 @@ class RequestsStore:
                 ):
                     return self._to_request(data)
             return None
+
+    async def ensure_retryable(self, req_id: str) -> PendingRequest | None:
+        """将旧版 status=failed 迁移为可重试的 pending。"""
+        req = await self.get_by_id(req_id)
+        if req is None:
+            return None
+        if req.status != "failed":
+            return req
+        return await self.update_by_id(
+            req_id,
+            {
+                "status": "pending",
+                "processed_at": None,
+            },
+        )
+
+    async def list_retryable_failures(self, limit: int = 20) -> list[PendingRequest]:
+        items: list[PendingRequest] = []
+        for req in await self.list_all():
+            if req.status == "failed":
+                items.append(req)
+                continue
+            if req.status == "pending" and req.last_action_result and not req.last_action_result.ok:
+                items.append(req)
+        items.sort(key=lambda r: r.last_action_at or r.created_at, reverse=True)
+        return items[:limit]
 
     async def upsert(self, req: PendingRequest) -> None:
         async with self._lock:

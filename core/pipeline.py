@@ -10,7 +10,7 @@ from core.decision import apply_auto_approve_flag, make_decision, should_auto_ap
 from core.matcher import MatchResult, match_student
 from core.parser import parse_application_comment
 from data_source.njutable_provider import load_students_for_audit
-from data_source.students import PendingRequest
+from data_source.students import ActionResult, PendingRequest
 from onebot.event_extract import GroupJoinRequest
 from storage.audit_log import utc_now_iso
 from storage.requests_store import RequestsStore, new_request_id
@@ -20,7 +20,16 @@ if TYPE_CHECKING:
     from data_source.student_cache import StudentCache
     from onebot.actions import ActionClient
     from storage.audit_log import AuditLog
+    from storage.list_cache import AdminListCacheStore
     from storage.runtime_store import RuntimeStore
+
+
+def _action_payload(result: ActionResult) -> dict:
+    return {
+        "ok": result.ok,
+        "retcode": result.retcode,
+        "message": result.message,
+    }
 
 
 class AuditPipeline:
@@ -170,6 +179,9 @@ class AuditPipeline:
         if reapply or resubmit:
             update_dict = RequestsStore._request_to_dict(pending)
             update_dict["action_result"] = None
+            update_dict["last_action_result"] = None
+            update_dict["last_action_at"] = None
+            update_dict["retry_count"] = 0
             update_dict["processed_at"] = None
             update_dict["status"] = "pending"
             await self.requests.update_by_id(req_id, update_dict)
@@ -215,17 +227,13 @@ class AuditPipeline:
             action_result = await self.actions.set_group_add_request(
                 event.flag, event.sub_type, True, "自动审核通过"
             )
-            await self.requests.update_by_flag(
-                event.flag,
-                {
-                    "processed_at": utc_now_iso(),
-                    "action_result": {
-                        "ok": action_result.ok,
-                        "retcode": action_result.retcode,
-                        "message": action_result.message,
-                    },
-                    "status": "processed" if action_result.ok else "failed",
-                },
+            await self._record_action_outcome(
+                req_id,
+                action_result,
+                admin_user_id=None,
+                admin_command="auto_approve",
+                reject_decision=None,
+                current_retry=0,
             )
             await self.audit.append(
                 {
@@ -245,24 +253,56 @@ class AuditPipeline:
                     reason=decision.reason,
                 )
 
+    async def _record_action_outcome(
+        self,
+        req_id: str,
+        result: ActionResult,
+        *,
+        admin_user_id: str | None,
+        admin_command: str,
+        reject_decision: str | None,
+        current_retry: int,
+    ) -> None:
+        now = utc_now_iso()
+        payload = _action_payload(result)
+        update: dict = {
+            "last_action_result": payload,
+            "last_action_at": now,
+        }
+        if result.ok:
+            update.update(
+                {
+                    "processed_at": now,
+                    "status": "processed",
+                    "action_result": payload,
+                    "admin_override": admin_user_id is not None,
+                    "admin_user_id": admin_user_id,
+                    "admin_command": admin_command,
+                }
+            )
+            if reject_decision:
+                update["decision"] = reject_decision
+        else:
+            update.update(
+                {
+                    "status": "pending",
+                    "processed_at": None,
+                    "retry_count": current_retry + 1,
+                }
+            )
+        await self.requests.update_by_id(req_id, update)
+
     async def admin_approve(self, req: PendingRequest, admin_user_id: str) -> ActionResult:
         result = await self.actions.set_group_add_request(
             req.flag, req.sub_type, True, "管理员人工通过"
         )
-        await self.requests.update_by_id(
+        await self._record_action_outcome(
             req.id,
-            {
-                "processed_at": utc_now_iso(),
-                "status": "processed" if result.ok else "failed",
-                "action_result": {
-                    "ok": result.ok,
-                    "retcode": result.retcode,
-                    "message": result.message,
-                },
-                "admin_override": True,
-                "admin_user_id": admin_user_id,
-                "admin_command": "approve",
-            },
+            result,
+            admin_user_id=admin_user_id,
+            admin_command="approve",
+            reject_decision=None,
+            current_retry=req.retry_count,
         )
         await self.audit.append(
             {
@@ -284,21 +324,13 @@ class AuditPipeline:
         result = await self.actions.set_group_add_request(
             req.flag, req.sub_type, False, reason
         )
-        await self.requests.update_by_id(
+        await self._record_action_outcome(
             req.id,
-            {
-                "processed_at": utc_now_iso(),
-                "status": "processed" if result.ok else "failed",
-                "decision": "reject",
-                "action_result": {
-                    "ok": result.ok,
-                    "retcode": result.retcode,
-                    "message": result.message,
-                },
-                "admin_override": True,
-                "admin_user_id": admin_user_id,
-                "admin_command": "reject",
-            },
+            result,
+            admin_user_id=admin_user_id,
+            admin_command="reject",
+            reject_decision="reject",
+            current_retry=req.retry_count,
         )
         await self.audit.append(
             {
@@ -310,6 +342,48 @@ class AuditPipeline:
             }
         )
         return result
+
+    async def mark_external(
+        self,
+        req: PendingRequest,
+        admin_user_id: str,
+        *,
+        list_cache: AdminListCacheStore | None = None,
+    ) -> None:
+        message = "管理员手动标记为 QQ 侧已处理"
+        now = utc_now_iso()
+        await self.requests.update_by_id(
+            req.id,
+            {
+                "processed_at": now,
+                "status": "external",
+                "action_result": {"ok": True, "message": message},
+                "last_action_result": {"ok": True, "message": message},
+                "last_action_at": now,
+                "admin_override": True,
+                "admin_user_id": admin_user_id,
+                "admin_command": "mark_external",
+            },
+        )
+        await self.audit.append(
+            {
+                "type": "external_handled",
+                "request_id": req.id,
+                "group_id": req.group_id,
+                "user_id": req.user_id,
+                "admin_user_id": admin_user_id,
+                "source": "mark_external",
+                "message": message,
+            }
+        )
+        if list_cache is not None:
+            await list_cache.remove_request_everywhere(req.id)
+        if self.settings.admin_notify:
+            await self.notifier.notify_external_handled(
+                group_id=req.group_id,
+                user_id=req.user_id,
+                summary=req.parsed.get("name") if req.parsed else None,
+            )
 
     async def process_strong_pending(self, admin_user_id: str) -> list[str]:
         from admin.release import ReleaseService
@@ -338,6 +412,7 @@ class AuditPipeline:
         *,
         notice_sub_type: str | None = None,
         operator_id: str | None = None,
+        list_cache: AdminListCacheStore | None = None,
     ) -> bool:
         if not self.settings.target_group_ids:
             return False
@@ -354,15 +429,21 @@ class AuditPipeline:
         if operator_id:
             message = f"{message}，操作者 QQ：{operator_id}"
 
+        now = utc_now_iso()
         await self.requests.update_by_id(
             pending.id,
             {
-                "processed_at": utc_now_iso(),
+                "processed_at": now,
                 "status": "external",
                 "action_result": {
                     "ok": True,
                     "message": message,
                 },
+                "last_action_result": {
+                    "ok": True,
+                    "message": message,
+                },
+                "last_action_at": now,
             },
         )
         await self.audit.append(
@@ -376,6 +457,14 @@ class AuditPipeline:
                 "message": message,
             }
         )
+        if list_cache is not None:
+            await list_cache.remove_request_everywhere(pending.id)
+        if self.settings.admin_notify:
+            await self.notifier.notify_external_handled(
+                group_id=group_id,
+                user_id=user_id,
+                summary=(pending.parsed or {}).get("name"),
+            )
         logger.info(
             "[audit] external join reconciled request=%s group=%s user=%s",
             pending.id,

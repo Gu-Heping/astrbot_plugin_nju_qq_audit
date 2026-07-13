@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from admin.labels import DEFAULT_REJECT_REASON
+from data_source.students import TERMINAL_REQUEST_STATUSES
 from data_source.students import PendingRequest
 from storage.list_cache import AdminListCacheStore
 from storage.requests_store import RequestsStore
@@ -22,14 +23,23 @@ ERROR_MESSAGES = {
 
 
 def processed_request_message(request: PendingRequest) -> str:
-    if request.status == "failed":
-        return (
-            "这条申请上次审批接口调用已失败（凭证可能已失效或机器人无权限）。"
-            "请到 QQ 群管理后台确认是否已处理，勿重复操作。"
-        )
     if request.status == "external":
         return "这条申请已在 QQ 客户端被其他管理员处理，不能重复操作。"
+    if request.status == "processed":
+        return ERROR_MESSAGES["already_processed"]
+    if request.status == "ignored":
+        return "这条申请已被新申请取代或忽略，不能重复操作。"
     return ERROR_MESSAGES["already_processed"]
+
+
+def sanitize_action_message(message: str | None) -> str:
+    if not message:
+        return "（无详情）"
+    text = str(message)
+    lower = text.lower()
+    if any(key in lower for key in ("flag", "token", "raw_event", "access_token")):
+        return "审批接口返回错误（细节已隐藏）"
+    return text[:200]
 
 
 @dataclass
@@ -53,7 +63,8 @@ class ResolveResult:
 
 
 _EXTERNAL_HANDLED_HINT = (
-    "也可能已被其他管理员在 QQ 客户端处理，请核对群成员列表。"
+    "可能已被其他管理员处理、申请撤回或过期。"
+    "请使用 /audit list 刷新；确认已处理可用 /audit mark-external <编号> confirm。"
 )
 
 
@@ -64,11 +75,11 @@ def map_action_error(raw_message: str | None) -> str:
             "调用 QQ 审批接口失败，申请可能已过期、被撤回，或机器人没有管理员权限。"
             + _EXTERNAL_HANDLED_HINT
         )
-    if "expired" in text or "flag" in text or "凭证" in text:
-        return (
-            "这条申请的审批凭证可能已经过期，请到 QQ 群管理后台确认。"
-            + _EXTERNAL_HANDLED_HINT
-        )
+    if any(
+        key in text
+        for key in ("expired", "flag", "凭证", "not found", "already handled", "request")
+    ):
+        return "这条申请的审批凭证可能已经过期，请到 QQ 群管理后台确认。" + _EXTERNAL_HANDLED_HINT
     if "adapter" in text or "permission" in text or "权限" in text:
         return (
             "调用 QQ 审批接口失败，申请可能已过期、被撤回，或机器人没有管理员权限。"
@@ -86,6 +97,7 @@ async def resolve_request_ref(
     *,
     list_cache: AdminListCacheStore,
     requests: RequestsStore,
+    for_view: bool = False,
 ) -> ResolveResult:
     ref = (ref or "").strip()
     if not ref:
@@ -110,7 +122,23 @@ async def resolve_request_ref(
             return ResolveResult(error="not_found")
         index = list_cache.find_index(admin_id, request.id)
 
-    if request.status != "pending" or request.processed_at:
+    if for_view:
+        return ResolveResult(request=request, index=index)
+
+    if request.status == "failed":
+        request = await requests.ensure_retryable(request.id)
+        if request is None:
+            return ResolveResult(error="not_found")
+
+    if request.status in TERMINAL_REQUEST_STATUSES:
+        return ResolveResult(
+            request=request,
+            index=index,
+            error="already_processed",
+            detail_message=processed_request_message(request),
+        )
+
+    if request.status != "pending":
         return ResolveResult(
             request=request,
             index=index,
@@ -130,6 +158,6 @@ def parse_no_command_reason(message_str: str, ref: str) -> str:
     text = (message_str or "").strip()
     prefix = f"/audit no {ref}".strip()
     if text.startswith(prefix):
-        rest = text[len(prefix):].strip()
+        rest = text[len(prefix) :].strip()
         return normalize_reject_reason(rest)
     return DEFAULT_REJECT_REASON
