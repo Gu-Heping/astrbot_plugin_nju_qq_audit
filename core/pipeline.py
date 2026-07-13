@@ -11,7 +11,11 @@ from core.decision import apply_auto_approve_flag, make_decision, should_auto_ap
 from core.matcher import MatchResult, match_student
 from core.parser import parse_application_comment
 from core.reconcile import ReconcileResult
-from core.version import RECONCILE_LOGIC_VERSION, REAPPLY_CHECK_TERMINAL_STATUSES
+from core.version import (
+    DUPLICATE_POLICY_VERSION,
+    RECONCILE_LOGIC_VERSION,
+    REAPPLY_CHECK_TERMINAL_STATUSES,
+)
 from data_source.njutable_provider import load_students_for_audit
 from data_source.students import ActionResult, PendingRequest
 from onebot.event_extract import GroupJoinRequest
@@ -104,9 +108,10 @@ class AuditPipeline:
         reason: str,
     ) -> None:
         logger.info(
-            "[audit] duplicate request ignored request=%s status=%s",
+            "[audit] duplicate request ignored request=%s status=%s reason=%s",
             existing.id,
             existing.status,
+            reason,
         )
         await self.audit.append(
             {
@@ -148,6 +153,28 @@ class AuditPipeline:
                 await self._ignore_duplicate_terminal(
                     existing, event, reason="same flag already processed"
                 )
+                return
+
+            if existing.status == "external":
+                previous_id = await self.requests.release_flag(event.flag)
+                await self.audit.append(
+                    {
+                        "type": "reapplication_after_terminal",
+                        "previous_request_id": previous_id or existing.id,
+                        "previous_status": existing.status,
+                        "group_id": event.group_id,
+                        "user_id": event.user_id,
+                        "flag": event.flag,
+                        "reason": "external group_request reopened",
+                    }
+                )
+                logger.info(
+                    "[audit] reapplication after external previous=%s flag=%s policy=%s",
+                    existing.id,
+                    event.flag,
+                    DUPLICATE_POLICY_VERSION,
+                )
+                await self._audit_and_act(event)
                 return
 
             if existing.status in REAPPLY_CHECK_TERMINAL_STATUSES:

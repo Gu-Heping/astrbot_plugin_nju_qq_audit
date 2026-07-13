@@ -84,6 +84,22 @@ def _pipeline(tmp_path, *, in_group: bool | None = False):
 
 
 @pytest.mark.asyncio
+async def test_external_same_flag_always_reapplies_on_group_request(tmp_path):
+    pipe, requests, audit, _ = _pipeline(tmp_path, in_group=True)
+    old = _pending(id="REQ-old")
+    await requests.upsert(old)
+
+    await pipe.handle_group_request(_event())
+
+    assert (await requests.get_by_id(old.id)).status == "external"
+    current = await requests.get_by_flag("flag-1")
+    assert current is not None
+    assert current.id != old.id
+    assert current.status == "pending"
+    assert any(r.get("type") == "reapplication_after_terminal" for r in audit.read_all())
+
+
+@pytest.mark.asyncio
 async def test_external_same_flag_user_left_creates_new_pending(tmp_path):
     pipe, requests, audit, _ = _pipeline(tmp_path, in_group=False)
     old = _pending(id="REQ-old")
@@ -100,17 +116,18 @@ async def test_external_same_flag_user_left_creates_new_pending(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_external_same_flag_user_still_in_group_ignored(tmp_path):
+async def test_external_same_flag_user_still_in_group_still_reapplies(tmp_path):
     pipe, requests, audit, _ = _pipeline(tmp_path, in_group=True)
     old = _pending(id="REQ-old")
     await requests.upsert(old)
 
     await pipe.handle_group_request(_event())
 
-    assert (await requests.get_by_id(old.id)).status == "external"
-    assert await requests.get_by_flag("flag-1") is not None
-    assert (await requests.get_by_flag("flag-1")).id == old.id
-    assert any(r.get("type") == "duplicate_request_ignored" for r in audit.read_all())
+    current = await requests.get_by_flag("flag-1")
+    assert current is not None
+    assert current.id != old.id
+    assert current.status == "pending"
+    assert any(r.get("type") == "reapplication_after_terminal" for r in audit.read_all())
 
 
 @pytest.mark.asyncio

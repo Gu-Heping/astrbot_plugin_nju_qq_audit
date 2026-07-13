@@ -30,7 +30,7 @@ def test_debug_shows_logic_versions():
         duplicate_policy_version=DUPLICATE_POLICY_VERSION,
         git_commit="abc1234",
     )
-    assert "plugin_version: v0.3.9" in text
+    assert "plugin_version: v0.3.10" in text
     assert f"reconcile_logic_version: {RECONCILE_LOGIC_VERSION}" in text
     assert f"duplicate_policy_version: {DUPLICATE_POLICY_VERSION}" in text
     assert "git_commit: abc1234" in text
@@ -38,4 +38,4 @@ def test_debug_shows_logic_versions():
 
 def test_reconcile_logic_version_constant():
     assert RECONCILE_LOGIC_VERSION == "v2-invite-matches-pending"
-    assert DUPLICATE_POLICY_VERSION == "v3-reapply-after-leave"
+    assert DUPLICATE_POLICY_VERSION == "v4-external-reapply-on-request"
