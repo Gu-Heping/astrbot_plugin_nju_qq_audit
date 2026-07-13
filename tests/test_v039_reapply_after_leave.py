@@ -1,6 +1,7 @@
-"""v0.3.14 rescue: terminal statuses never reapply on same flag."""
+"""v0.3.14+ terminal reapply policy tests."""
 
 import sys
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -47,7 +48,15 @@ def _pending(**kwargs) -> PendingRequest:
     return PendingRequest(**defaults)
 
 
+def _unix_after(iso: str, seconds: int) -> int:
+    dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    return int(dt.timestamp()) + seconds
+
+
 def _event(**kwargs) -> GroupJoinRequest:
+    raw = kwargs.pop("raw_event", None)
+    if raw is None and "time" in kwargs:
+        raw = {"time": kwargs.pop("time")}
     defaults = dict(
         group_id="796836121",
         user_id="2492835361",
@@ -56,7 +65,14 @@ def _event(**kwargs) -> GroupJoinRequest:
         sub_type="add",
     )
     defaults.update(kwargs)
-    return GroupJoinRequest(**defaults)
+    return GroupJoinRequest(
+        group_id=defaults["group_id"],
+        user_id=defaults["user_id"],
+        comment=defaults["comment"],
+        flag=defaults["flag"],
+        sub_type=defaults["sub_type"],
+        raw_event=raw,
+    )
 
 
 def _pipeline(tmp_path):
@@ -75,19 +91,32 @@ def _pipeline(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_external_same_flag_never_reapplies(tmp_path):
+async def test_external_same_flag_reapplies_with_new_event(tmp_path):
     pipe, requests, audit = _pipeline(tmp_path)
     old = _pending(id="REQ-old")
     await requests.upsert(old)
+    await requests.update_by_id(
+        old.id,
+        {
+            "status": "external",
+            "processed_at": "2026-07-09T01:00:00+00:00",
+            "action_result": {"ok": True, "message": "external"},
+        },
+    )
 
-    await pipe.handle_group_request(_event())
+    await pipe.handle_group_request(
+        _event(
+            comment="入群申请测试",
+            time=_unix_after("2026-07-09T01:00:00+00:00", 3600),
+        )
+    )
 
-    updated = await requests.get_by_id(old.id)
-    assert updated.status == "external"
-    assert await requests.get_by_flag("flag-1") is not None
-    assert (await requests.get_by_flag("flag-1")).id == old.id
-    assert any(r.get("type") == "duplicate_request_ignored" for r in audit.read_all())
-    assert not any(r.get("type") == "reapplication_after_terminal" for r in audit.read_all())
+    latest = await requests.get_by_flag("flag-1")
+    assert latest.id != old.id
+    assert latest.status == "pending"
+    assert latest.reapply_of == old.id
+    assert (await requests.get_by_id(old.id)).status == "external"
+    assert any(r.get("type") == "reapplication_created" for r in audit.read_all())
 
 
 @pytest.mark.asyncio
@@ -121,18 +150,26 @@ async def test_stale_same_flag_never_reapplies(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_processed_same_flag_still_ignored(tmp_path):
+async def test_processed_same_flag_debounce_blocks_immediate_replay(tmp_path):
     pipe, requests, audit = _pipeline(tmp_path)
+    from storage.audit_log import utc_now_iso
+
     old = _pending(
         id="REQ-old",
         status="processed",
         decision="approve",
+        comment="张三20260002",
+        processed_at=utc_now_iso(),
         action_result=ActionResult(ok=True, message="ok"),
     )
     await requests.upsert(old)
 
-    await pipe.handle_group_request(_event())
+    await pipe.handle_group_request(_event(comment="张三20260002"))
 
     assert (await requests.get_by_id(old.id)).status == "processed"
     assert (await requests.get_by_flag("flag-1")).id == old.id
-    assert any(r.get("type") == "duplicate_request_ignored" for r in audit.read_all())
+    assert any(
+        r.get("type") == "duplicate_event_replayed"
+        and r.get("reason") == "reapply_debounce_same_comment"
+        for r in audit.read_all()
+    )

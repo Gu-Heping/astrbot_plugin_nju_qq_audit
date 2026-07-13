@@ -219,7 +219,7 @@ async def test_reject_same_flag_same_comment_debounce_without_event_time(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_approve_same_flag_new_event_still_ignored(tmp_path):
+async def test_approve_same_flag_new_event_reapplies(tmp_path):
     pipe, requests, audit, notifier = _pipeline(tmp_path, admin_notify=True)
     old = _pending(
         status="processed",
@@ -230,16 +230,67 @@ async def test_approve_same_flag_new_event_still_ignored(tmp_path):
     await requests.upsert(old)
 
     await pipe.handle_group_request(
-        _event(comment="新内容", time=_unix_after(PROCESSED_AT, 7200))
+        _event(comment="入群申请测试", time=_unix_after(PROCESSED_AT, 7200))
     )
 
-    assert len(await requests.list_pending(limit=10)) == 0
-    assert (await requests.get_by_flag("flag-1")).id == old.id
-    assert any(r.get("type") == "duplicate_request_ignored" for r in audit.read_all())
-    notifier.notify_manual_review.assert_not_called()
+    latest = await requests.get_by_flag("flag-1")
+    assert latest.id != old.id
+    assert latest.status == "pending"
+    assert latest.reapply_of == old.id
+    assert any(r.get("type") == "reapplication_created" for r in audit.read_all())
+    notifier.notify_manual_review.assert_awaited_once()
 
 
-@pytest.mark.parametrize("status", ["external", "stale", "ignored"])
+@pytest.mark.asyncio
+async def test_external_same_flag_new_event_reapplies(tmp_path):
+    pipe, requests, audit, notifier = _pipeline(tmp_path, admin_notify=True)
+    old = _pending(
+        status="external",
+        processed_at=PROCESSED_AT,
+        action_result=ActionResult(ok=True, message="external"),
+    )
+    await requests.upsert(old)
+
+    await pipe.handle_group_request(
+        _event(comment="入群申请测试", time=_unix_after(PROCESSED_AT, 7200))
+    )
+
+    latest = await requests.get_by_flag("flag-1")
+    assert latest.id != old.id
+    assert latest.status == "pending"
+    assert latest.reapply_of == old.id
+    notifier.notify_manual_review.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_approve_reapply_after_leave_same_comment_new_attempt(tmp_path):
+    """退群再申请：同 flag、同 comment、无 event_time，防抖过后应新建 attempt。"""
+    pipe, requests, audit, notifier = _pipeline(
+        tmp_path, admin_notify=True, debounce_seconds=0
+    )
+    old = _pending(
+        id="REQ-approved",
+        comment="入群申请测试",
+        status="processed",
+        decision="approve",
+        processed_at="2020-01-01T00:00:00+00:00",
+        action_result=ActionResult(ok=True, message="ok"),
+        event_fingerprint="original-fp",
+    )
+    await requests.upsert(old)
+    await requests.register_fingerprint("original-fp", old.id)
+
+    event = _event(comment="入群申请测试", raw_event=None)
+    await pipe.handle_group_request(event)
+
+    latest = await requests.get_by_flag("flag-1")
+    assert latest.id != old.id
+    assert latest.status == "pending"
+    assert (await requests.get_by_id("REQ-approved")).status == "processed"
+    notifier.notify_manual_review.assert_awaited_once()
+
+
+@pytest.mark.parametrize("status", ["stale", "ignored"])
 @pytest.mark.asyncio
 async def test_other_terminal_same_flag_still_ignored(tmp_path, status):
     pipe, requests, audit, _ = _pipeline(tmp_path)

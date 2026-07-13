@@ -83,20 +83,24 @@ async def test_external_invite_notifies_all_admins_even_if_applicant_is_admin(tm
 
 
 @pytest.mark.asyncio
-async def test_external_same_flag_after_reconcile_still_ignored(tmp_path):
+async def test_external_same_flag_after_reconcile_reapplies_on_new_attempt(tmp_path):
     pipe, requests, audit, _ = _pipeline(tmp_path)
     req = _pending(
         id="REQ-ext",
         status="external",
-        processed_at="2026-07-09T01:00:00+00:00",
+        processed_at="2020-01-01T00:00:00+00:00",
         action_result=ActionResult(ok=True, message="external"),
     )
     await requests.upsert(req)
 
     await pipe.handle_group_request(_event(comment="new answer after external"))
 
+    latest = await requests.get_by_flag("flag-1")
+    assert latest.id != req.id
+    assert latest.status == "pending"
+    assert latest.reapply_of == req.id
     assert (await requests.get_by_id(req.id)).status == "external"
-    assert any(r.get("type") == "duplicate_request_ignored" for r in audit.read_all())
+    assert any(r.get("type") == "reapplication_created" for r in audit.read_all())
 
 
 def _pipeline(tmp_path, *, admin_notify=False, admin_qq_ids="111"):
@@ -166,7 +170,7 @@ async def test_pending_same_comment_noop(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["processed", "external", "stale", "ignored"])
+@pytest.mark.parametrize("status", ["stale", "ignored"])
 async def test_terminal_same_flag_changed_comment_ignored(tmp_path, status):
     pipe, requests, audit, notifier = _pipeline(tmp_path)
     req = _pending(

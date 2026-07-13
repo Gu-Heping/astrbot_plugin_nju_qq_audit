@@ -19,7 +19,7 @@ from core.reconcile import ReconcileResult
 from core.version import (
     RECONCILE_LOGIC_VERSION,
     is_permanent_terminal,
-    is_processed_reject,
+    is_reapply_eligible_terminal,
 )
 from data_source.njutable_provider import load_students_for_audit
 from data_source.students import ActionResult, PendingRequest
@@ -158,7 +158,7 @@ class AuditPipeline:
             record["fallback"] = fallback
         await self.audit.append(record)
 
-    def _evaluate_reapply_after_reject(
+    def _evaluate_reapply_after_terminal(
         self,
         existing: PendingRequest,
         event: GroupJoinRequest,
@@ -186,6 +186,63 @@ class AuditPipeline:
             return "reapply", fallback
 
         return "reapply", None
+
+    async def _resolve_reapply_storage_fingerprint(
+        self, base_fingerprint: str, existing: PendingRequest
+    ) -> str:
+        next_attempt = int(existing.attempt_no or 1) + 1
+        if not await self.requests.has_fingerprint(base_fingerprint):
+            return base_fingerprint
+        return f"{base_fingerprint}#a{next_attempt}"
+
+    async def _handle_reapply_after_terminal(
+        self,
+        event: GroupJoinRequest,
+        existing: PendingRequest,
+        *,
+        event_time: str | None,
+        fingerprint: str,
+    ) -> None:
+        action, fallback = self._evaluate_reapply_after_terminal(
+            existing, event, event_time
+        )
+        if action == "before_processed":
+            await self._audit_event_replayed(
+                event,
+                fingerprint=fingerprint,
+                reason="event_time_before_processed_at",
+                request_id=existing.id,
+            )
+            return
+        if action == "debounce":
+            await self._audit_event_replayed(
+                event,
+                fingerprint=fingerprint,
+                reason="reapply_debounce_same_comment",
+                request_id=existing.id,
+                fallback=fallback,
+            )
+            return
+
+        storage_fp = await self._resolve_reapply_storage_fingerprint(
+            fingerprint, existing
+        )
+        if await self.requests.has_fingerprint(storage_fp):
+            await self._audit_event_replayed(
+                event,
+                fingerprint=storage_fp,
+                reason="seen_fingerprint",
+                request_id=existing.id,
+            )
+            return
+
+        await self._audit_and_act_reapply(
+            event,
+            existing,
+            event_time=event_time,
+            fingerprint=storage_fp,
+            fallback=fallback,
+        )
 
     async def _ignore_duplicate_terminal(
         self,
@@ -235,6 +292,16 @@ class AuditPipeline:
 
         event_time, fingerprint = _event_context(event)
 
+        existing = await self.requests.get_by_flag(event.flag)
+        if existing and is_reapply_eligible_terminal(existing):
+            await self._handle_reapply_after_terminal(
+                event,
+                existing,
+                event_time=event_time,
+                fingerprint=fingerprint,
+            )
+            return
+
         if await self.requests.has_fingerprint(fingerprint):
             linked_id = await self.requests.get_fingerprint_request_id(fingerprint)
             linked = await self.requests.get_by_id(linked_id) if linked_id else None
@@ -246,7 +313,6 @@ class AuditPipeline:
             )
             return
 
-        existing = await self.requests.get_by_flag(event.flag)
         comment_text = event.comment or ""
         if existing:
             if is_permanent_terminal(existing):
@@ -254,36 +320,6 @@ class AuditPipeline:
                     existing,
                     event,
                     reason=f"same flag permanent terminal status={existing.status} decision={existing.decision}",
-                )
-                return
-
-            if is_processed_reject(existing):
-                action, fallback = self._evaluate_reapply_after_reject(
-                    existing, event, event_time
-                )
-                if action == "before_processed":
-                    await self._audit_event_replayed(
-                        event,
-                        fingerprint=fingerprint,
-                        reason="event_time_before_processed_at",
-                        request_id=existing.id,
-                    )
-                    return
-                if action == "debounce":
-                    await self._audit_event_replayed(
-                        event,
-                        fingerprint=fingerprint,
-                        reason="reapply_debounce_same_comment",
-                        request_id=existing.id,
-                        fallback=fallback,
-                    )
-                    return
-                await self._audit_and_act_reapply(
-                    event,
-                    existing,
-                    event_time=event_time,
-                    fingerprint=fingerprint,
-                    fallback=fallback,
                 )
                 return
 

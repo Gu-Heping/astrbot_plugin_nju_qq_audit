@@ -9,6 +9,8 @@ sys.modules.setdefault("astrbot", MagicMock())
 sys.modules.setdefault("astrbot.api", MagicMock())
 sys.modules["astrbot.api"].logger = MagicMock()
 
+from datetime import datetime
+
 from config import load_settings
 from core.pipeline import AuditPipeline
 from data_source.student_cache import StudentCache
@@ -45,7 +47,15 @@ def _pending(**kwargs) -> PendingRequest:
     return PendingRequest(**defaults)
 
 
+def _unix_after(iso: str, seconds: int) -> int:
+    dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    return int(dt.timestamp()) + seconds
+
+
 def _event(**kwargs) -> GroupJoinRequest:
+    raw = kwargs.pop("raw_event", None)
+    if raw is None and "time" in kwargs:
+        raw = {"time": kwargs.pop("time")}
     defaults = dict(
         group_id="796836121",
         user_id="2492835361",
@@ -54,7 +64,14 @@ def _event(**kwargs) -> GroupJoinRequest:
         sub_type="add",
     )
     defaults.update(kwargs)
-    return GroupJoinRequest(**defaults)
+    return GroupJoinRequest(
+        group_id=defaults["group_id"],
+        user_id=defaults["user_id"],
+        comment=defaults["comment"],
+        flag=defaults["flag"],
+        sub_type=defaults["sub_type"],
+        raw_event=raw,
+    )
 
 
 def _pipeline(tmp_path):
@@ -73,22 +90,25 @@ def _pipeline(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_processed_same_flag_always_ignored(tmp_path):
+async def test_processed_same_flag_old_event_replayed(tmp_path):
     pipe, requests, audit = _pipeline(tmp_path)
+    processed_at = "2026-07-09T01:00:00+00:00"
     req = _pending(
         status="processed",
         decision="approve",
-        processed_at="2026-07-09T01:00:00+00:00",
+        processed_at=processed_at,
         action_result=ActionResult(ok=True, message="ok"),
     )
     await requests.upsert(req)
 
-    await pipe.handle_group_request(_event())
-    await pipe.handle_group_request(_event(comment="不同验证内容"))
+    await pipe.handle_group_request(
+        _event(time=_unix_after(processed_at, -3600))
+    )
 
     updated = await requests.get_by_id(req.id)
     assert updated.status == "processed"
-    assert any(r.get("type") == "duplicate_request_ignored" for r in audit.read_all())
+    assert (await requests.get_by_flag("flag-1")).id == req.id
+    assert any(r.get("type") == "duplicate_event_replayed" for r in audit.read_all())
 
 
 @pytest.mark.asyncio
@@ -108,37 +128,45 @@ async def test_stale_same_flag_ignored(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_external_same_flag_ignored(tmp_path):
+async def test_external_same_flag_old_event_replayed(tmp_path):
     pipe, requests, audit = _pipeline(tmp_path)
+    processed_at = "2026-07-09T01:00:00+00:00"
     req = _pending(
         id="REQ-ext",
         status="external",
-        processed_at="2026-07-09T01:00:00+00:00",
+        processed_at=processed_at,
         action_result=ActionResult(ok=True, message="external"),
     )
     await requests.upsert(req)
 
-    await pipe.handle_group_request(_event())
+    await pipe.handle_group_request(
+        _event(time=_unix_after(processed_at, -3600))
+    )
 
     assert (await requests.get_by_id(req.id)).status == "external"
-    assert any(r.get("type") == "duplicate_request_ignored" for r in audit.read_all())
+    assert any(r.get("type") == "duplicate_event_replayed" for r in audit.read_all())
 
 
 @pytest.mark.asyncio
-async def test_processed_same_flag_different_comment_ignored(tmp_path):
+async def test_processed_same_flag_different_comment_reapplies(tmp_path):
     pipe, requests, audit = _pipeline(tmp_path)
+    processed_at = "2026-07-09T01:00:00+00:00"
     req = _pending(
         status="processed",
         decision="approve",
-        processed_at="2026-07-09T01:00:00+00:00",
+        processed_at=processed_at,
         action_result=ActionResult(ok=True, message="ok"),
     )
     await requests.upsert(req)
 
-    await pipe.handle_group_request(_event(comment="张三20260002"))
+    await pipe.handle_group_request(
+        _event(comment="张三20260002", time=_unix_after(processed_at, 3600))
+    )
 
-    assert (await requests.get_by_id(req.id)).status == "processed"
-    assert any(r.get("type") == "duplicate_request_ignored" for r in audit.read_all())
+    latest = await requests.get_by_flag("flag-1")
+    assert latest.id != req.id
+    assert latest.status == "pending"
+    assert latest.reapply_of == req.id
 
 
 @pytest.mark.asyncio

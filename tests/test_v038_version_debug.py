@@ -32,7 +32,7 @@ def test_debug_shows_logic_versions():
         pending_update_policy_version=PENDING_UPDATE_POLICY_VERSION,
         git_commit="abc1234",
     )
-    assert "plugin_version: v0.3.17" in text
+    assert "plugin_version: v0.3.18" in text
     assert f"reconcile_logic_version: {RECONCILE_LOGIC_VERSION}" in text
     assert f"duplicate_policy_version: {DUPLICATE_POLICY_VERSION}" in text
     assert f"pending_update_policy_version: {PENDING_UPDATE_POLICY_VERSION}" in text
@@ -41,5 +41,5 @@ def test_debug_shows_logic_versions():
 
 def test_reconcile_logic_version_constant():
     assert RECONCILE_LOGIC_VERSION == "v2-invite-matches-pending"
-    assert DUPLICATE_POLICY_VERSION == "v6-reject-reapply-fingerprint"
+    assert DUPLICATE_POLICY_VERSION == "v7-terminal-reapply-fingerprint"
     assert PENDING_UPDATE_POLICY_VERSION == "v1-update-pending-on-comment-change"
