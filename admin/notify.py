@@ -126,9 +126,12 @@ class AdminNotifier:
         if comment_line:
             lines.append(f"验证：{comment_line}")
         if notice_sub_type:
-            lines.append(f"入群方式：{notice_sub_type}")
+            lines.append(
+                f"QQ 事件 sub_type：{notice_sub_type}"
+                "（OneBot 通知类型；搜索入群、邀请、审批通过均可能为 invite，不代表实际入群路径）"
+            )
         if operator_id:
-            lines.append(f"操作者：{operator_id}")
+            lines.append(f"操作者 QQ：{operator_id}")
         await self._notify_admins("\n".join(lines), exclude_user_id=None)
 
     async def notify_stale_request(

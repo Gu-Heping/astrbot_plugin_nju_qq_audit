@@ -62,7 +62,7 @@ from probe.formatter import format_event_summary, format_raw_event, format_recen
 from probe.sanitizer import build_missing_raw_summary, classify_raw_message, sanitize
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
-PLUGIN_VERSION = "v0.3.7"
+PLUGIN_VERSION = "v0.3.7.1"
 
 
 def _format_stale_list(items: list, index_map: dict[int, str]) -> str:
