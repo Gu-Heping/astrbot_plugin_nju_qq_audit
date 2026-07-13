@@ -113,7 +113,10 @@ class AstrBotAdapterActionClient:
         return None
 
     def _normalize_response(self, action: str, response: Any) -> ActionResult:
-        if isinstance(response, dict):
+        # Full OneBot envelope: {"status","retcode","data",...}
+        if isinstance(response, dict) and (
+            "status" in response or "retcode" in response
+        ):
             status = str(response.get("status", ""))
             retcode = response.get("retcode")
             message = response.get("message")
@@ -125,7 +128,6 @@ class AstrBotAdapterActionClient:
                     ok=True,
                     retcode=int(retcode) if retcode is not None else 0,
                     message=redact_tokens_in_string(detail, self.settings),
-                    # Preserve SnowLuma list payloads and any other JSON value.
                     data=data,
                 )
             return ActionResult(
@@ -136,7 +138,9 @@ class AstrBotAdapterActionClient:
                 ),
                 data=data,
             )
-        return ActionResult(ok=True, retcode=0, message="ok")
+        # aiocqhttp may already unwrap and return action data directly
+        # (e.g. SnowLuma get_group_system_msg → list).
+        return ActionResult(ok=True, retcode=0, message="ok", data=response)
 
     async def call_action(
         self, action: str, params: dict[str, Any], event: Any | None = None

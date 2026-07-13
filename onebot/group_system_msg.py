@@ -135,7 +135,10 @@ def describe_group_system_msg_result(result: Any) -> dict[str, Any]:
     ok = bool(getattr(result, "ok", False))
     retcode = getattr(result, "retcode", None)
     data = getattr(result, "data", None)
-    parsed = parse_group_system_msg_data(data) if ok else None
+    if ok:
+        parsed = parse_group_system_msg_data(data)
+    else:
+        parsed = None
     return {
         "action_status": "ok" if ok else "failed",
         "retcode": retcode,
@@ -146,6 +149,7 @@ def describe_group_system_msg_result(result: Any) -> dict[str, Any]:
             ",".join(parsed.first_request_fields) if parsed and parsed.first_request_fields else ""
         ),
         "parser_variant": parsed.variant if parsed else "unavailable",
+        "group_system_msg_action_available": "yes" if ok else "no",
     }
 
 

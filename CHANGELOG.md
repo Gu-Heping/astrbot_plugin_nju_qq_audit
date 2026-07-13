@@ -2,6 +2,14 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.3.21] - 2026-07-13
+
+### 修复
+
+- **`get_group_system_msg` data 丢失**：aiocqhttp 解包后直接返回 list 时，`_normalize_response` 未写入 `ActionResult.data`，导致 debug 显示 `NoneType` / `parse_failed`，`/audit list` 对账失效
+- 完整 OneBot 信封与解包后的 list/dict/scalar/null 均原样保留 `data`
+- `/audit debug` 拆分 `adapter_found` 与 `group_system_msg_action_available`，避免 login_info probe 失败误报 adapter 不可用
+
 ## [v0.3.20] - 2026-07-13
 
 ### 新增

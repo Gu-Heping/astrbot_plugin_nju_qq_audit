@@ -60,6 +60,41 @@ def test_normalize_preserves_snowluma_list_data():
     assert result.data[0]["flag"] == SNOWLUMA_FLAG
 
 
+def test_normalize_preserves_aiocqhttp_unwrapped_list():
+    """aiocqhttp may return action data already unwrapped as a bare list."""
+    settings = load_settings(DummyConfig())
+    client = AstrBotAdapterActionClient(MagicMock(), settings)
+    unwrapped = [
+        {
+            "flag": SNOWLUMA_FLAG,
+            "group_id": 796836121,
+            "request_id": 123,
+            "requester_uin": 0,
+            "message": "测试",
+        }
+    ]
+    result = client._normalize_response("get_group_system_msg", unwrapped)
+    assert result.ok is True
+    assert result.retcode == 0
+    assert isinstance(result.data, list)
+    assert result.data[0]["flag"] == SNOWLUMA_FLAG
+
+
+def test_normalize_empty_list_is_list_not_none():
+    settings = load_settings(DummyConfig())
+    client = AstrBotAdapterActionClient(MagicMock(), settings)
+    for response in ([], {"status": "ok", "retcode": 0, "data": []}):
+        result = client._normalize_response("get_group_system_msg", response)
+        assert result.ok is True
+        assert isinstance(result.data, list)
+        assert result.data == []
+        probe = describe_group_system_msg_result(result)
+        assert probe["data_type"] == "list"
+        assert probe["top_level_shape"] == "list"
+        assert probe["parser_variant"] == "snowluma_list"
+        assert probe["group_system_msg_action_available"] == "yes"
+
+
 def test_parse_snowluma_top_level_list():
     parsed = parse_group_system_msg_data(SNOWLUMA_RESPONSE["data"])
     assert parsed.variant == "snowluma_list"
@@ -208,3 +243,100 @@ async def test_real_call_chain_normalize_get_parse_reconcile(tmp_path):
     assert summary.unchanged == 1
     assert (await requests.get_by_id(req.id)).status == "pending"
     bot.api.call_action.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unwrapped_list_call_chain_parser_variant_snowluma(tmp_path):
+    """Bare list from aiocqhttp must reach snowluma_list parser via get_group_system_msg."""
+    settings = load_settings(
+        DummyConfig({"target_group_ids": GROUP_ID, "admin_notify": False})
+    )
+    client = AstrBotAdapterActionClient(MagicMock(), settings)
+    unwrapped = [
+        {
+            "group_id": 796836121,
+            "request_id": 123,
+            "requester_uin": 0,
+            "message": "测试",
+            "flag": SNOWLUMA_FLAG,
+        }
+    ]
+    bot = MagicMock()
+    bot.api.call_action = AsyncMock(return_value=unwrapped)
+
+    async def fake_get_bot(event=None):
+        return bot
+
+    client._get_bot_client = fake_get_bot
+
+    result = await client.get_group_system_msg(GROUP_ID)
+    assert isinstance(result.data, list)
+    probe = describe_group_system_msg_result(result)
+    assert probe["parser_variant"] == "snowluma_list"
+    assert probe["data_type"] == "list"
+
+    requests = RequestsStore(tmp_path / "requests.json")
+    audit = AuditLog(tmp_path / "audit.jsonl", settings)
+    runtime = RuntimeStore(tmp_path / "runtime.json")
+    pipe = AuditPipeline(
+        settings, requests, audit, runtime, MagicMock(), client, MagicMock()
+    )
+    await requests.upsert(
+        PendingRequest(
+            id=new_request_id(),
+            group_id=GROUP_ID,
+            user_id=USER_ID,
+            comment="测试",
+            flag=SNOWLUMA_FLAG,
+            sub_type="add",
+            parsed={},
+            match={},
+            decision="manual_review",
+            confidence=0.5,
+            reason="待人工",
+            mode="record-only",
+            status="pending",
+            created_at="2026-07-13T04:00:00+00:00",
+        )
+    )
+    summary = await pipe.reconcile_active_pending(
+        source="audit_list",
+        list_cache=AdminListCacheStore(tmp_path / "list_cache.json"),
+    )
+    assert summary.failed is False
+    assert summary.unchanged == 1
+
+
+def test_debug_shows_adapter_found_and_gsm_available():
+    from admin.formatter import format_status
+    from data_source.student_cache import SyncState
+
+    settings = load_settings(DummyConfig())
+    text = format_status(
+        settings,
+        effective_mode="record-only",
+        mode_source="plugin_config",
+        student_count=0,
+        pending_count=0,
+        sync_state=SyncState(),
+        probe_count=0,
+        data_dir="/tmp",
+        adapter_probe={"adapter_found": "no", "adapter_action_available": "no"},
+        group_system_msg_probe={
+            "action_status": "ok",
+            "retcode": 0,
+            "data_type": "list",
+            "request_count": 0,
+            "top_level_shape": "list",
+            "first_request_fields": "",
+            "parser_variant": "snowluma_list",
+            "group_system_msg_action_available": "yes",
+        },
+    )
+    assert "adapter_found: yes" in text
+    assert "group_system_msg_action_available: yes" in text
+    assert "adapter_action_available: no" not in text
+    assert "parser_variant: snowluma_list" in text
+    assert "data_type: list" in text
+    assert "NoneType" not in text
+    assert "parse_failed" not in text

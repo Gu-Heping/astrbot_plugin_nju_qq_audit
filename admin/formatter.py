@@ -124,7 +124,19 @@ def format_status(
 ) -> str:
     adapter_probe = adapter_probe or {}
     admin_session_stats = admin_session_stats or {"cached": 0, "total": 0}
-    adapter_available = adapter_probe.get("adapter_action_available", "unknown")
+    adapter_found = str(adapter_probe.get("adapter_found") or "unknown")
+    gsm_available = "unknown"
+    if group_system_msg_probe:
+        if group_system_msg_probe.get("action_status") == "ok":
+            gsm_available = "yes"
+            if adapter_found in {"no", "unknown", ""}:
+                adapter_found = "yes"
+        elif group_system_msg_probe.get("action_status") == "failed":
+            gsm_available = "no"
+        elif group_system_msg_probe.get("group_system_msg_action_available"):
+            gsm_available = str(
+                group_system_msg_probe.get("group_system_msg_action_available")
+            )
     lines = [
         "NJU QQ Audit 状态（debug）",
     ]
@@ -144,7 +156,8 @@ def format_status(
         f"mode_source: {mode_source}",
         "event_source: astrbot_adapter",
         f"action_backend: {settings.onebot_action_backend}",
-        f"adapter_action_available: {adapter_available}",
+        f"adapter_found: {adapter_found}",
+        f"group_system_msg_action_available: {gsm_available}",
         f"student_source: {settings.student_source}",
         f"target_group_ids: {', '.join(sorted(settings.target_group_ids)) or '(未配置)'}",
         "target_group_ids_source: plugin_config",
@@ -169,6 +182,7 @@ def format_status(
             "top_level_shape",
             "first_request_fields",
             "parser_variant",
+            "group_system_msg_action_available",
         ):
             if key in group_system_msg_probe:
                 lines.append(f"  {key}: {group_system_msg_probe[key]}")

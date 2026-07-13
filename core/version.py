@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-PLUGIN_VERSION = "v0.3.20"
+PLUGIN_VERSION = "v0.3.21"
 RECONCILE_LOGIC_VERSION = "v2-invite-matches-pending"
 DUPLICATE_POLICY_VERSION = "v7-terminal-reapply-fingerprint"
 PENDING_UPDATE_POLICY_VERSION = "v1-update-pending-on-comment-change"
