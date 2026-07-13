@@ -60,7 +60,7 @@ from probe.formatter import format_event_summary, format_raw_event, format_recen
 from probe.sanitizer import build_missing_raw_summary, classify_raw_message, sanitize
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
-PLUGIN_VERSION = "v0.3.4"
+PLUGIN_VERSION = "v0.3.5"
 
 
 @register(
@@ -183,13 +183,16 @@ class NjuQqAuditPlugin(Star):
         if raw and is_notice_event(raw):
             increase = extract_group_increase(raw)
             if increase:
-                await self.ctx.pipeline.reconcile_external_join(
-                    increase.group_id,
-                    increase.user_id,
-                    notice_sub_type=increase.sub_type,
-                    operator_id=increase.operator_id,
-                    list_cache=self.ctx.list_cache,
-                )
+                try:
+                    await self.ctx.pipeline.reconcile_external_join(
+                        increase.group_id,
+                        increase.user_id,
+                        notice_sub_type=increase.sub_type,
+                        operator_id=increase.operator_id,
+                        list_cache=self.ctx.list_cache,
+                    )
+                except Exception:
+                    logger.exception("[audit] reconcile external join failed")
             return
         join_req = extract_group_request(raw)
         if join_req:

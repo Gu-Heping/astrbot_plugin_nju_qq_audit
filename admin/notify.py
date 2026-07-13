@@ -103,23 +103,30 @@ class AdminNotifier:
     async def notify_external_handled(
         self,
         *,
+        request_id: str,
         group_id: str,
         user_id: str,
         summary: str | None = None,
+        comment: str | None = None,
+        operator_id: str | None = None,
     ) -> None:
         if not self.settings.admin_notify:
             return
+        short_id = request_id[:12] if request_id else ""
         label = summary or user_id
-        message = "\n".join(
-            [
-                "[入群审核] 申请已在 QQ 侧通过",
-                f"群：{group_id}",
-                f"用户：{user_id}",
-                f"摘要：{label}",
-                "队列已标记为 external。",
-            ]
-        )
-        await self._notify_admins(message, exclude_user_id=user_id)
+        comment_line = (comment or "")[:80]
+        lines = [
+            "[入群审核] 入群申请已在 QQ 侧通过，队列已标记为 external。",
+            f"申请：{short_id}",
+            f"群：{group_id}",
+            f"用户：{user_id}",
+            f"摘要：{label}",
+        ]
+        if comment_line:
+            lines.append(f"验证：{comment_line}")
+        if operator_id:
+            lines.append(f"操作者：{operator_id}")
+        await self._notify_admins("\n".join(lines), exclude_user_id=user_id)
 
     async def _notify_admins(self, message: str, exclude_user_id: str | None = None) -> None:
         for admin_id in self.settings.admin_qq_ids:

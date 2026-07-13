@@ -377,13 +377,29 @@ class AuditPipeline:
             }
         )
         if list_cache is not None:
-            await list_cache.remove_request_everywhere(req.id)
+            try:
+                await list_cache.remove_request_id(req.id)
+            except Exception:
+                logger.warning(
+                    "[audit] list_cache cleanup failed for request=%s",
+                    req.id,
+                    exc_info=True,
+                )
         if self.settings.admin_notify:
-            await self.notifier.notify_external_handled(
-                group_id=req.group_id,
-                user_id=req.user_id,
-                summary=req.parsed.get("name") if req.parsed else None,
-            )
+            try:
+                await self.notifier.notify_external_handled(
+                    request_id=req.id,
+                    group_id=req.group_id,
+                    user_id=req.user_id,
+                    summary=req.parsed.get("name") if req.parsed else None,
+                    comment=(req.comment or "")[:120],
+                )
+            except Exception:
+                logger.warning(
+                    "[audit] mark_external notify failed request=%s",
+                    req.id,
+                    exc_info=True,
+                )
 
     async def process_strong_pending(self, admin_user_id: str) -> list[str]:
         from admin.release import ReleaseService
@@ -413,6 +429,7 @@ class AuditPipeline:
         notice_sub_type: str | None = None,
         operator_id: str | None = None,
         list_cache: AdminListCacheStore | None = None,
+        notifier: AdminNotifier | None = None,
     ) -> bool:
         if not self.settings.target_group_ids:
             return False
@@ -458,13 +475,35 @@ class AuditPipeline:
             }
         )
         if list_cache is not None:
-            await list_cache.remove_request_everywhere(pending.id)
-        if self.settings.admin_notify:
-            await self.notifier.notify_external_handled(
-                group_id=group_id,
-                user_id=user_id,
-                summary=(pending.parsed or {}).get("name"),
-            )
+            try:
+                await list_cache.remove_request_id(pending.id)
+            except Exception:
+                logger.warning(
+                    "[audit] list_cache cleanup failed for request=%s",
+                    pending.id,
+                    exc_info=True,
+                )
+
+        notify = notifier if notifier is not None else self.notifier
+        if self.settings.admin_notify and notify is not None:
+            try:
+                parsed = pending.parsed or {}
+                summary = parsed.get("name") or parsed.get("student_id")
+                await notify.notify_external_handled(
+                    request_id=pending.id,
+                    group_id=group_id,
+                    user_id=user_id,
+                    summary=str(summary) if summary else None,
+                    comment=(pending.comment or "")[:120],
+                    operator_id=operator_id,
+                )
+            except Exception:
+                logger.warning(
+                    "[audit] external handled notify failed request=%s",
+                    pending.id,
+                    exc_info=True,
+                )
+
         logger.info(
             "[audit] external join reconciled request=%s group=%s user=%s",
             pending.id,

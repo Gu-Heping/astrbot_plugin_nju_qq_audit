@@ -134,6 +134,10 @@ class AdminListCacheStore:
                 return int(key)
         return None
 
+    async def remove_request_id(self, request_id: str) -> None:
+        """从所有管理员 list cache 中移除 request id（别名）。"""
+        await self.remove_request_everywhere(request_id)
+
     async def remove_request_everywhere(self, request_id: str) -> None:
         if not request_id:
             return
