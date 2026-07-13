@@ -10,7 +10,8 @@ sys.modules.setdefault("astrbot", MagicMock())
 sys.modules.setdefault("astrbot.api", MagicMock())
 sys.modules["astrbot.api"].logger = MagicMock()
 
-from admin.command_resolver import map_action_error, resolve_request_ref
+from admin.action_error import format_action_outcome_message
+from admin.command_resolver import resolve_request_ref
 from config import load_settings
 from core.pipeline import AuditPipeline
 from data_source.student_cache import StudentCache
@@ -88,7 +89,7 @@ async def test_scenario_a_external_approve_reconciles_pending(tmp_path):
         notice_sub_type="approve",
         operator_id="10001",
     )
-    assert reconciled is True
+    assert reconciled.handled is True
 
     updated = await requests.get_by_id(req.id)
     assert updated.status == "external"
@@ -104,31 +105,30 @@ async def test_scenario_a_external_approve_reconciles_pending(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_scenario_b_admin_ok_after_external_fails_gracefully(tmp_path):
-    """QQ 侧已同意后 bot 再 /audit ok → API 失败、保持 pending、可重试。"""
+async def test_scenario_b_admin_ok_after_external_fails_marks_stale(tmp_path):
+    """QQ 侧已同意后 bot 再 /audit ok → flag 失效，标 stale 并从 pending 列表移除。"""
     pipeline, requests, _, actions = _make_pipeline(tmp_path)
     req = _pending()
     await requests.upsert(req)
     cache = AdminListCacheStore(tmp_path / "list_cache.json")
     await cache.refresh("111", [req.id])
 
-    result = await pipeline.admin_approve(req, "111")
+    result = await pipeline.admin_approve(req, "111", list_cache=cache)
     assert result.ok is False
 
     updated = await requests.get_by_id(req.id)
-    assert updated.status == "pending"
-    assert updated.processed_at is None
-    assert updated.retry_count == 1
+    assert updated.status == "stale"
+    assert updated.processed_at is not None
 
-    msg = map_action_error(result.message)
-    assert "mark-external" in msg
-    assert "adapter" not in msg
+    msg = format_action_outcome_message(
+        result.message, result.retcode, final_status=updated.status
+    )
+    assert "stale" in msg
 
     resolved = await resolve_request_ref(
         "111", "1", list_cache=cache, requests=requests
     )
-    assert resolved.ok
-    assert resolved.request.status == "pending"
+    assert not resolved.ok
 
     actions.set_group_add_request.assert_awaited_once()
 
@@ -159,8 +159,11 @@ async def test_scenario_d_reapply_supersedes_old_pending(tmp_path):
 
 @pytest.mark.asyncio
 async def test_scenario_f_auto_race_leaves_single_outcome(tmp_path):
-    """auto 与人工竞态 → 仅一条 API 调用，失败时保持 pending 可重试。"""
+    """auto 与人工竞态 → 仅一条 API 调用，临时失败时保持 pending 可重试。"""
     pipeline, requests, _, actions = _make_pipeline(tmp_path, mode="auto")
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(ok=False, retcode=1, message="connection timeout")
+    )
     from data_source.mock_provider import generate_mock_students
 
     pipeline.cache.save_students(generate_mock_students())
@@ -210,7 +213,7 @@ async def test_reconcile_skips_invite_notice(tmp_path):
         req.user_id,
         notice_sub_type="invite",
     )
-    assert reconciled is False
+    assert reconciled.handled is False
     updated = await requests.get_by_id(req.id)
     assert updated.status == "pending"
 
@@ -226,4 +229,4 @@ async def test_reconcile_skips_non_target_group(tmp_path):
         req.user_id,
         notice_sub_type="approve",
     )
-    assert reconciled is False
+    assert reconciled.handled is False

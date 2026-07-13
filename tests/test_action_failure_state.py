@@ -63,8 +63,9 @@ def _pipeline(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_admin_reject_failure_keeps_pending(tmp_path):
-    pipeline, requests, _, _ = _pipeline(tmp_path)
+async def test_admin_reject_stale_failure_marks_stale(tmp_path):
+    pipeline, requests, _, notifier = _pipeline(tmp_path)
+    notifier.notify_stale_request = AsyncMock()
     req = _pending()
     await requests.upsert(req)
 
@@ -72,11 +73,8 @@ async def test_admin_reject_failure_keeps_pending(tmp_path):
     assert result.ok is False
 
     updated = await requests.get_by_id(req.id)
-    assert updated.status == "pending"
-    assert updated.processed_at is None
-    assert updated.last_action_result is not None
-    assert updated.last_action_result.ok is False
-    assert updated.retry_count == 1
+    assert updated.status == "stale"
+    assert updated.processed_at is not None
 
 
 @pytest.mark.asyncio
@@ -169,13 +167,13 @@ async def test_reconcile_external_and_notify(tmp_path):
     await requests.upsert(req)
     await list_cache.refresh("111", [req.id])
 
-    ok = await pipeline.reconcile_external_join(
+    result = await pipeline.reconcile_external_join(
         req.group_id,
         req.user_id,
         notice_sub_type="approve",
         list_cache=list_cache,
     )
-    assert ok is True
+    assert result.handled is True
     updated = await requests.get_by_id(req.id)
     assert updated.status == "external"
     assert list_cache.resolve("111", 1) is None

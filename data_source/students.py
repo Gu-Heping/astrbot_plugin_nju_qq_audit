@@ -4,8 +4,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 Decision = Literal["approve", "manual_review", "reject", "ignored"]
-PendingStatus = Literal["pending", "processed", "failed", "ignored", "external"]
-TERMINAL_REQUEST_STATUSES = frozenset({"processed", "external", "ignored"})
+PendingStatus = Literal["pending", "processed", "failed", "ignored", "external", "stale"]
+TERMINAL_REQUEST_STATUSES = frozenset({"processed", "external", "ignored", "stale"})
 MatchStrength = Literal["strong", "weak", "none", "auxiliary"]
 
 SENSITIVE_FIELD_NAMES = frozenset(

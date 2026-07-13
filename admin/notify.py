@@ -126,12 +126,44 @@ class AdminNotifier:
             lines.append(f"验证：{comment_line}")
         if operator_id:
             lines.append(f"操作者：{operator_id}")
-        await self._notify_admins("\n".join(lines), exclude_user_id=user_id)
+        await self._notify_admins("\n".join(lines), exclude_user_id=None)
+
+    async def notify_stale_request(
+        self,
+        *,
+        request_id: str,
+        group_id: str,
+        user_id: str,
+        reason: str,
+        summary: str | None = None,
+        comment: str | None = None,
+    ) -> None:
+        if not self.settings.admin_notify:
+            return
+        short_id = request_id[:12] if request_id else ""
+        label = summary or user_id
+        comment_line = (comment or "")[:80]
+        lines = [
+            "[入群审核] QQ 侧已无此入群申请，队列已标记为 stale。",
+            "请到 QQ 群管理后台确认是否已处理或已入群。",
+            f"申请：{short_id}",
+            f"群：{group_id}",
+            f"用户：{user_id}",
+            f"摘要：{label}",
+            f"原因：{reason[:120]}",
+        ]
+        if comment_line:
+            lines.append(f"验证：{comment_line}")
+        await self._notify_admins("\n".join(lines), exclude_user_id=None)
 
     async def _notify_admins(self, message: str, exclude_user_id: str | None = None) -> None:
-        for admin_id in self.settings.admin_qq_ids:
-            if exclude_user_id and admin_id == exclude_user_id:
-                continue
+        admin_ids = list(self.settings.admin_qq_ids)
+        targets = admin_ids
+        if exclude_user_id:
+            targets = [a for a in admin_ids if a != exclude_user_id]
+        if not targets and admin_ids:
+            targets = admin_ids
+        for admin_id in targets:
             sent = await self._send_to_admin(admin_id, message)
             if not sent:
                 logger.warning(

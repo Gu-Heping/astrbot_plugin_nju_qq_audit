@@ -11,7 +11,7 @@ def format_help(
     releasable_count: int | None = None,
 ) -> str:
     lines = [
-        "NJU QQ Audit v0.3.3 管理命令（私聊）",
+        "NJU QQ Audit v0.3.6 管理命令（私聊）",
         "",
         "推荐流程：",
         "1. /audit record          日常只记录（默认，勿用 off）",
@@ -40,6 +40,9 @@ def format_help(
             "/audit view <n>             查看详情",
             "/audit ok <n>               同意（无需 confirm）",
             "/audit no <n> [理由]        拒绝，可附理由",
+            "/audit stale [n]            查看 stale 队列（QQ 侧已失效）",
+            "/audit restore <n> confirm  将 stale 恢复 pending",
+            "/audit mark-external <n> confirm  确认 QQ 侧已处理",
             "",
             "分批放人（仅 strong 26 级 pending，不改变 mode）：",
             "/audit release              帮助 + 当前可释放数",

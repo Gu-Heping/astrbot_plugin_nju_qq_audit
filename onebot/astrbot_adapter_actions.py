@@ -179,6 +179,19 @@ class AstrBotAdapterActionClient:
     async def get_group_list(self, event: Any | None = None) -> ActionResult:
         return await self.call_action("get_group_list", {}, event=event)
 
+    async def get_group_member_info(
+        self,
+        group_id: str,
+        user_id: str,
+        *,
+        no_cache: bool = True,
+        event: Any | None = None,
+    ) -> ActionResult:
+        params: dict = {"group_id": int(group_id), "user_id": int(user_id)}
+        if no_cache:
+            params["no_cache"] = True
+        return await self.call_action("get_group_member_info", params, event=event)
+
     async def send_private_msg_safe(self, user_id: str, message: str) -> ActionResult:
         return ActionResult(
             ok=False,

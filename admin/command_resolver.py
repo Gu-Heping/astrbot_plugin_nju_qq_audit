@@ -25,11 +25,23 @@ ERROR_MESSAGES = {
 def processed_request_message(request: PendingRequest) -> str:
     if request.status == "external":
         return "这条申请已在 QQ 客户端被其他管理员处理，不能重复操作。"
+    if request.status == "stale":
+        return (
+            "这条申请已标记为 stale（QQ 侧已无此申请）。"
+            "可用 /audit restore <编号> confirm 恢复 pending，"
+            "或 /audit mark-external <编号> confirm 确认已入群。"
+        )
     if request.status == "processed":
         return ERROR_MESSAGES["already_processed"]
     if request.status == "ignored":
         return "这条申请已被新申请取代或忽略，不能重复操作。"
     return ERROR_MESSAGES["already_processed"]
+
+
+def list_cache_key(admin_id: str, namespace: str | None = None) -> str:
+    if namespace:
+        return f"{admin_id}:{namespace}"
+    return admin_id
 
 
 def sanitize_action_message(message: str | None) -> str:
@@ -98,6 +110,9 @@ async def resolve_request_ref(
     list_cache: AdminListCacheStore,
     requests: RequestsStore,
     for_view: bool = False,
+    allow_stale: bool = False,
+    for_restore: bool = False,
+    list_namespace: str | None = None,
 ) -> ResolveResult:
     ref = (ref or "").strip()
     if not ref:
@@ -108,9 +123,22 @@ async def resolve_request_ref(
 
     if ref.isdigit():
         index = int(ref)
-        if list_cache.is_expired(admin_id):
-            return ResolveResult(index=index, error="expired_index")
-        req_id = list_cache.resolve(admin_id, index)
+        cache_keys: list[str] = []
+        if list_namespace:
+            cache_keys.append(list_cache_key(admin_id, list_namespace))
+        elif for_view or allow_stale or for_restore:
+            cache_keys.extend(
+                [list_cache_key(admin_id, None), list_cache_key(admin_id, "stale")]
+            )
+        else:
+            cache_keys.append(list_cache_key(admin_id, None))
+        req_id = None
+        for key in cache_keys:
+            if list_cache.is_expired(key):
+                continue
+            req_id = list_cache.resolve(key, index)
+            if req_id:
+                break
         if not req_id:
             return ResolveResult(index=index, error="expired_index")
         request = await requests.get_by_id(req_id)
@@ -120,15 +148,32 @@ async def resolve_request_ref(
         request = await requests.resolve_by_id_or_prefix(ref)
         if not request:
             return ResolveResult(error="not_found")
-        index = list_cache.find_index(admin_id, request.id)
+        for ns in (list_namespace, "stale", None):
+            key = list_cache_key(admin_id, ns)
+            index = list_cache.find_index(key, request.id)
+            if index is not None:
+                break
 
     if for_view:
+        return ResolveResult(request=request, index=index)
+
+    if for_restore:
+        if request.status != "stale":
+            return ResolveResult(
+                request=request,
+                index=index,
+                error="already_processed",
+                detail_message="仅 stale 状态的申请可 restore。",
+            )
         return ResolveResult(request=request, index=index)
 
     if request.status == "failed":
         request = await requests.ensure_retryable(request.id)
         if request is None:
             return ResolveResult(error="not_found")
+
+    if allow_stale and request.status == "stale":
+        return ResolveResult(request=request, index=index)
 
     if request.status in TERMINAL_REQUEST_STATUSES:
         return ResolveResult(

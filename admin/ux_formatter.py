@@ -137,6 +137,31 @@ def format_list(items: list, index_map: dict[int, str]) -> str:
     return "\n".join(lines)
 
 
+def format_stale_list(items: list, index_map: dict[int, str]) -> str:
+    if not items:
+        return "目前没有 stale 申请。"
+    lines = [f"stale 申请：{len(items)} 条", ""]
+    for idx, item in enumerate(items, start=1):
+        public = item.to_public_dict()
+        summary = applicant_summary(item)
+        comment = (public.get("comment") or "")[:80]
+        last_action = public.get("last_action_result") or {}
+        reason = sanitize_action_message(last_action.get("message"))
+        lines.extend(
+            [
+                f"[{idx}] {summary}",
+                f"群：{public.get('group_id', '')}",
+                f"验证：{comment or '（空）'}",
+                f"原因：{reason}",
+            ]
+        )
+        lines.append(f"/audit view {idx}  |  /audit restore {idx} confirm")
+        lines.append(f"/audit mark-external {idx} confirm")
+        lines.append("")
+    lines.append("编号来自本次 /audit stale 列表，30 分钟内有效。")
+    return "\n".join(lines)
+
+
 def _parsed_line(label: str, value) -> str:
     if value is None or value == "":
         return f"{label}：未提供"
@@ -176,6 +201,12 @@ def format_view(item, index: int | None = None) -> str:
         msg = sanitize_action_message((action_result or last_action).get("message"))
         if msg and msg != "（无详情）":
             lines.append(f"说明：{msg}")
+    elif status == "stale":
+        lines.append("QQ 侧已无此申请（stale），无法确认是否已入群。")
+        msg = sanitize_action_message((action_result or last_action).get("message"))
+        if msg and msg != "（无详情）":
+            lines.append(f"原因：{msg}")
+        lines.append("请到 QQ 群管理后台确认；可 restore 恢复 pending 或 mark-external 确认已入群。")
     elif last_action:
         if last_action.get("ok"):
             lines.append("上次审批结果：成功")
@@ -199,6 +230,13 @@ def format_view(item, index: int | None = None) -> str:
     lines.append("可操作：")
     if status == "external":
         lines.append("（已在 QQ 侧处理，无需 ok/no）")
+    elif status == "stale":
+        if index is not None:
+            lines.append(f"/audit restore {index} confirm")
+            lines.append(f"/audit mark-external {index} confirm")
+        else:
+            lines.append(f"/audit restore {public.get('id')} confirm")
+            lines.append(f"/audit mark-external {public.get('id')} confirm")
     elif status == "processed":
         lines.append("（已处理完成）")
     elif index is not None:

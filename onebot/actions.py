@@ -30,6 +30,10 @@ class ActionClient(Protocol):
 
     async def send_private_msg_safe(self, user_id: str, message: str) -> ActionResult: ...
 
+    async def get_group_member_info(
+        self, group_id: str, user_id: str, *, no_cache: bool = True
+    ) -> ActionResult: ...
+
     def backend_name(self) -> str: ...
 
 

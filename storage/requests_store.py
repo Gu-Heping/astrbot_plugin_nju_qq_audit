@@ -252,6 +252,17 @@ class RequestsStore:
             },
         )
 
+    async def list_stale(self, limit: int = 20) -> list[PendingRequest]:
+        async with self._lock:
+            store = self._read_unlocked()
+            items = [
+                self._to_request(data)
+                for data in store["by_id"].values()
+                if data.get("status") == "stale"
+            ]
+        items.sort(key=lambda r: r.last_action_at or r.created_at, reverse=True)
+        return items[:limit]
+
     async def list_pending(self, limit: int = 10) -> list[PendingRequest]:
         async with self._lock:
             store = self._read_unlocked()
@@ -336,6 +347,7 @@ class RequestsStore:
             "admin_approved": 0,
             "failed": 0,
             "external": 0,
+            "stale": 0,
         }
         for req in records:
             if req.status == "pending":
@@ -350,4 +362,6 @@ class RequestsStore:
                 stats["failed"] += 1
             if req.status == "external":
                 stats["external"] += 1
+            if req.status == "stale":
+                stats["stale"] += 1
         return stats

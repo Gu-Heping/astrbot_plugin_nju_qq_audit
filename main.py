@@ -13,8 +13,8 @@ from astrbot.api.platform import MessageType
 from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
+from admin.action_error import format_action_outcome_message
 from admin.command_resolver import (
-    map_action_error,
     parse_no_command_reason,
     resolve_request_ref,
 )
@@ -33,11 +33,12 @@ from admin.ux_formatter import (
     format_no_result,
     format_off_warning,
     format_ok_result,
+    format_stale_list,
     format_view,
 )
 from admin.handlers import PluginContext
 from admin.ctx_compat import ensure_ctx_compat
-from admin.pending import fetch_pending_for_admin
+from admin.pending import fetch_pending_for_admin, fetch_stale_for_admin
 from admin.release import (
     format_release_help,
     format_release_preview,
@@ -60,7 +61,7 @@ from probe.formatter import format_event_summary, format_raw_event, format_recen
 from probe.sanitizer import build_missing_raw_summary, classify_raw_message, sanitize
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
-PLUGIN_VERSION = "v0.3.5"
+PLUGIN_VERSION = "v0.3.6"
 
 
 @register(
@@ -175,6 +176,15 @@ class NjuQqAuditPlugin(Star):
                 {"source": "astrbot_adapter", "received_at": utc_now_iso(), **summary}
             )
 
+    async def _format_action_failure(self, request_id: str, result) -> str:
+        updated = await self.ctx.requests.get_by_id(request_id)
+        final_status = updated.status if updated else "pending"
+        return format_action_outcome_message(
+            result.message,
+            result.retcode,
+            final_status=final_status,
+        )
+
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_all_events(self, event: AstrMessageEvent):
         self._remember_event_platform(event)
@@ -183,14 +193,33 @@ class NjuQqAuditPlugin(Star):
         if raw and is_notice_event(raw):
             increase = extract_group_increase(raw)
             if increase:
+                logger.info(
+                    "[audit] notice.group_increase group_id=%s user_id=%s sub_type=%s operator_id=%s",
+                    increase.group_id,
+                    increase.user_id,
+                    increase.sub_type,
+                    increase.operator_id,
+                )
                 try:
-                    await self.ctx.pipeline.reconcile_external_join(
+                    reconcile = await self.ctx.pipeline.reconcile_external_join(
                         increase.group_id,
                         increase.user_id,
                         notice_sub_type=increase.sub_type,
                         operator_id=increase.operator_id,
                         list_cache=self.ctx.list_cache,
                     )
+                    logger.info(
+                        "[audit] reconcile_external_join handled=%s reason=%s request_id=%s",
+                        reconcile.handled,
+                        reconcile.reason,
+                        reconcile.request_id,
+                    )
+                    if not reconcile.handled:
+                        logger.debug(
+                            "[audit] reconcile not handled: reason=%s message=%s",
+                            reconcile.reason,
+                            reconcile.message,
+                        )
                 except Exception:
                     logger.exception("[audit] reconcile external join failed")
             return
@@ -330,11 +359,17 @@ class NjuQqAuditPlugin(Star):
         if not resolved.ok:
             yield event.plain_result(resolved.message)
             return
-        result = await self.ctx.pipeline.admin_approve(resolved.request, event.get_sender_id())
+        result = await self.ctx.pipeline.admin_approve(
+            resolved.request,
+            event.get_sender_id(),
+            list_cache=self.ctx.list_cache,
+        )
         if result.ok:
             yield event.plain_result(format_ok_result(resolved.request, resolved.index))
         else:
-            yield event.plain_result(map_action_error(result.message))
+            yield event.plain_result(
+                await self._format_action_failure(resolved.request.id, result)
+            )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("no")
@@ -355,12 +390,17 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(resolved.message)
             return
         result = await self.ctx.pipeline.admin_reject(
-            resolved.request, event.get_sender_id(), reject_reason
+            resolved.request,
+            event.get_sender_id(),
+            reject_reason,
+            list_cache=self.ctx.list_cache,
         )
         if result.ok:
             yield event.plain_result(format_no_result(resolved.request, resolved.index, reject_reason))
         else:
-            yield event.plain_result(map_action_error(result.message))
+            yield event.plain_result(
+                await self._format_action_failure(resolved.request.id, result)
+            )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("mark-external")
@@ -378,6 +418,7 @@ class NjuQqAuditPlugin(Star):
             ref,
             list_cache=self.ctx.list_cache,
             requests=self.ctx.requests,
+            allow_stale=True,
         )
         if not resolved.ok:
             yield event.plain_result(resolved.message)
@@ -389,6 +430,42 @@ class NjuQqAuditPlugin(Star):
         )
         label = f"[{resolved.index}]" if resolved.index is not None else resolved.request.id
         yield event.plain_result(f"已将申请 {label} 标记为 external（QQ 侧已处理）。")
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("stale")
+    async def audit_stale(self, event: AstrMessageEvent, limit: int = 10):
+        allowed, message = can_run_command(self._settings(), "stale", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        items, index_map = await fetch_stale_for_admin(self.ctx, event.get_sender_id(), limit)
+        yield event.plain_result(format_stale_list(items, index_map))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("restore")
+    async def audit_restore(self, event: AstrMessageEvent, ref: str, confirm: str = ""):
+        allowed, message = can_run_command(self._settings(), "restore", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        if confirm != "confirm":
+            yield event.plain_result("请使用 /audit restore <编号> confirm")
+            return
+        resolved = await resolve_request_ref(
+            event.get_sender_id(),
+            ref,
+            list_cache=self.ctx.list_cache,
+            requests=self.ctx.requests,
+            for_restore=True,
+        )
+        if not resolved.ok:
+            yield event.plain_result(resolved.message)
+            return
+        await self.ctx.pipeline.restore_stale(resolved.request, event.get_sender_id())
+        label = f"[{resolved.index}]" if resolved.index is not None else resolved.request.id
+        yield event.plain_result(f"已将申请 {label} 恢复为 pending，可重新 /audit ok/no。")
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("cleanup")
@@ -679,11 +756,17 @@ class NjuQqAuditPlugin(Star):
         if not resolved.ok:
             yield event.plain_result(resolved.message)
             return
-        result = await self.ctx.pipeline.admin_approve(resolved.request, event.get_sender_id())
+        result = await self.ctx.pipeline.admin_approve(
+            resolved.request,
+            event.get_sender_id(),
+            list_cache=self.ctx.list_cache,
+        )
         if result.ok:
             yield event.plain_result(format_ok_result(resolved.request, resolved.index))
         else:
-            yield event.plain_result(map_action_error(result.message))
+            yield event.plain_result(
+                await self._format_action_failure(resolved.request.id, result)
+            )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("reject")
@@ -706,12 +789,17 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(resolved.message)
             return
         result = await self.ctx.pipeline.admin_reject(
-            resolved.request, event.get_sender_id(), "管理员人工拒绝"
+            resolved.request,
+            event.get_sender_id(),
+            "管理员人工拒绝",
+            list_cache=self.ctx.list_cache,
         )
         if result.ok:
             yield event.plain_result(format_no_result(resolved.request, resolved.index, "管理员人工拒绝"))
         else:
-            yield event.plain_result(map_action_error(result.message))
+            yield event.plain_result(
+                await self._format_action_failure(resolved.request.id, result)
+            )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("process")

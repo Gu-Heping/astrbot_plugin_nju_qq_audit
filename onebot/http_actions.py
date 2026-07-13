@@ -142,6 +142,14 @@ class HttpActionClient:
     async def get_group_list(self) -> ActionResult:
         return await self.call_action("get_group_list", {})
 
+    async def get_group_member_info(
+        self, group_id: str, user_id: str, *, no_cache: bool = True
+    ) -> ActionResult:
+        params: dict = {"group_id": int(group_id), "user_id": int(user_id)}
+        if no_cache:
+            params["no_cache"] = True
+        return await self.call_action("get_group_member_info", params)
+
 
 # Backward compatibility alias for tests/imports
 OneBotHttpActions = HttpActionClient

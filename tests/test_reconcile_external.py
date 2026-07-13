@@ -33,6 +33,7 @@ sys.modules["astrbot.core.utils.astrbot_path"].get_astrbot_data_path = MagicMock
     return_value="/tmp/astrbot"
 )
 
+from core.reconcile import ReconcileResult
 from admin.command_resolver import processed_request_message, resolve_request_ref
 from config import load_settings
 from core.pipeline import AuditPipeline
@@ -109,10 +110,10 @@ async def test_reconcile_without_list_cache_or_notifier(tmp_path):
     req = _pending()
     await requests.upsert(req)
 
-    ok = await pipe.reconcile_external_join(
+    result = await pipe.reconcile_external_join(
         req.group_id, req.user_id, notice_sub_type="approve"
     )
-    assert ok is True
+    assert result.handled is True
     updated = await requests.get_by_id(req.id)
     assert updated.status == "external"
     assert updated.processed_at
@@ -129,7 +130,7 @@ async def test_reconcile_with_list_cache_and_notifier(tmp_path):
     await requests.upsert(req)
     await list_cache.refresh("111", [req.id])
 
-    ok = await pipe.reconcile_external_join(
+    result = await pipe.reconcile_external_join(
         req.group_id,
         req.user_id,
         notice_sub_type="approve",
@@ -137,7 +138,7 @@ async def test_reconcile_with_list_cache_and_notifier(tmp_path):
         list_cache=list_cache,
         notifier=notifier,
     )
-    assert ok is True
+    assert result.handled is True
     assert list_cache.resolve("111", 1) is None
     notifier.notify_external_handled.assert_awaited_once()
     kwargs = notifier.notify_external_handled.await_args.kwargs
@@ -155,13 +156,13 @@ async def test_notifier_exception_still_marks_external(tmp_path):
     await requests.upsert(req)
     notifier.notify_external_handled = AsyncMock(side_effect=RuntimeError("notify boom"))
 
-    ok = await pipe.reconcile_external_join(
+    result = await pipe.reconcile_external_join(
         req.group_id,
         req.user_id,
         notice_sub_type="approve",
         notifier=notifier,
     )
-    assert ok is True
+    assert result.handled is True
     assert (await requests.get_by_id(req.id)).status == "external"
 
 
@@ -173,13 +174,13 @@ async def test_list_cache_failure_still_marks_external(tmp_path):
     bad_cache = MagicMock()
     bad_cache.remove_request_id = AsyncMock(side_effect=OSError("cache io error"))
 
-    ok = await pipe.reconcile_external_join(
+    result = await pipe.reconcile_external_join(
         req.group_id,
         req.user_id,
         notice_sub_type="approve",
         list_cache=bad_cache,
     )
-    assert ok is True
+    assert result.handled is True
     assert (await requests.get_by_id(req.id)).status == "external"
 
 
@@ -188,7 +189,9 @@ async def test_reconcile_skips_non_target_group(tmp_path):
     pipe, requests, _, _ = _pipeline(tmp_path)
     req = _pending(group_id="999999")
     await requests.upsert(req)
-    assert not await pipe.reconcile_external_join("999999", req.user_id)
+    result = await pipe.reconcile_external_join("999999", req.user_id)
+    assert not result.handled
+    assert result.reason == "non_target_group"
 
 
 @pytest.mark.asyncio
@@ -196,16 +199,20 @@ async def test_reconcile_skips_invite(tmp_path):
     pipe, requests, _, _ = _pipeline(tmp_path)
     req = _pending()
     await requests.upsert(req)
-    assert not await pipe.reconcile_external_join(
+    result = await pipe.reconcile_external_join(
         req.group_id, req.user_id, notice_sub_type="invite"
     )
+    assert not result.handled
+    assert result.reason == "invite_notice_ignored"
     assert (await requests.get_by_id(req.id)).status == "pending"
 
 
 @pytest.mark.asyncio
 async def test_reconcile_no_pending_returns_false(tmp_path):
     pipe, _, _, _ = _pipeline(tmp_path)
-    assert not await pipe.reconcile_external_join("796836121", "0000000000")
+    result = await pipe.reconcile_external_join("796836121", "0000000000")
+    assert not result.handled
+    assert result.reason == "no_matching_pending"
 
 
 @pytest.mark.asyncio
