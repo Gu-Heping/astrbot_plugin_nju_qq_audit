@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from typing import Awaitable, Callable
 
 from admin.labels import applicant_summary
 from config import PluginSettings
 from core.normalize import has_non_grade26_keyword, is_grade26_student_id
+from core.pipeline import RematchSummary
+from data_source.student_cache import SyncState
 from data_source.students import PendingRequest
 
 
@@ -22,6 +25,7 @@ class ReleaseItemPreview:
 class ReleasePreview:
     items: list[ReleaseItemPreview]
     total_releasable: int
+    rematch: RematchSummary | None = None
 
 
 @dataclass
@@ -42,6 +46,26 @@ class ReleaseResult:
     remaining: int
     lines: list[ReleaseLineResult] = field(default_factory=list)
     cancelled: bool = False
+    rematch: RematchSummary | None = None
+
+
+@dataclass
+class CatchupPreview:
+    sync_ok: bool
+    sync_message: str
+    sync_state: SyncState | None = None
+    rematch: RematchSummary | None = None
+    release_preview: ReleasePreview | None = None
+
+
+@dataclass
+class CatchupResult:
+    sync_ok: bool
+    sync_message: str
+    sync_state: SyncState | None = None
+    rematch: RematchSummary | None = None
+    release: ReleaseResult | None = None
+    busy: bool = False
 
 
 def _effective_student_id(req: PendingRequest) -> str | None:
@@ -99,6 +123,22 @@ async def list_releasable(
     return releasable
 
 
+async def rematch_and_list_releasable(
+    pipeline,
+    requests_store,
+    settings: PluginSettings,
+    *,
+    source: str,
+    limit: int | None = None,
+) -> tuple[RematchSummary, list[PendingRequest]]:
+    pending_before = await requests_store.list_pending(limit=1000)
+    before_ids = {r.id for r in pending_before if is_releasable(r, settings)}
+    summary = await pipeline.rematch_active_pending(source=source)
+    items = await list_releasable(requests_store, settings, limit=limit)
+    summary.newly_releasable = sum(1 for r in items if r.id not in before_ids)
+    return summary, items
+
+
 def build_preview(items: list[PendingRequest]) -> ReleasePreview:
     previews = []
     for idx, req in enumerate(items, start=1):
@@ -114,6 +154,16 @@ def build_preview(items: list[PendingRequest]) -> ReleasePreview:
     return ReleasePreview(items=previews, total_releasable=len(items))
 
 
+def _format_rematch_lines(rematch: RematchSummary | None) -> list[str]:
+    if rematch is None:
+        return []
+    return [
+        f"已按当前名单重算 pending：{rematch.scanned} 条",
+        f"更新：{rematch.changed}，新升为 strong：{rematch.upgraded_to_strong}，"
+        f"新可放行：{rematch.newly_releasable}",
+    ]
+
+
 def format_release_help(count: int, settings: PluginSettings) -> str:
     interval_sec = settings.batch_approve_interval_ms / 1000
     return "\n".join(
@@ -125,27 +175,61 @@ def format_release_help(count: int, settings: PluginSettings) -> str:
             f"间隔：{interval_sec:g} 秒",
             "",
             "命令：",
-            "/audit release preview        预览",
+            "/audit release preview        预览（会先按当前缓存重算 pending）",
             "/audit release 10 confirm     通过最多 10 条",
             "/audit release all confirm    通过最多上限条数",
+            "",
+            "同步名单并补放：",
+            "/audit catchup preview        拉最新名单 + 重算 + 预览",
+            "/audit catchup confirm        拉最新名单 + 重算 + 放行（上限内）",
             "",
             "说明：",
             "- 仅 strong match + 26级 + 目标群 + pending",
             "- 不改变当前运行模式（不是长期 auto）",
             "- 建议先发欢迎消息，再分批执行",
+            "- 校对表更新后优先使用 /audit catchup preview",
+        ]
+    )
+
+
+def format_catchup_help(settings: PluginSettings) -> str:
+    interval_sec = settings.batch_approve_interval_ms / 1000
+    return "\n".join(
+        [
+            "catchup：同步 NJUTable 名单 → 重算 pending → 补放 strong",
+            "",
+            f"单次上限：{settings.batch_approve_max_count} 条",
+            f"间隔：{interval_sec:g} 秒",
+            "",
+            "命令：",
+            "/audit catchup preview        同步 + 重算 + 预览（不放人）",
+            "/audit catchup confirm        同步 + 重算 + 放行最多上限条",
+            "/audit catchup 10 confirm     同步 + 重算 + 放行最多 10 条",
+            "",
+            "说明：",
+            "- 同步失败时不会重算或放行",
+            "- 仅放行 strong + 26 级 + 目标群 pending",
+            "- 不改变当前运行模式",
         ]
     )
 
 
 def format_release_preview(preview: ReleasePreview, settings: PluginSettings) -> str:
+    lines: list[str] = []
+    lines.extend(_format_rematch_lines(preview.rematch))
+    if lines:
+        lines.append("")
     if not preview.items:
-        return "当前没有可分批通过的 strong match 申请。"
-    lines = [
-        f"可分批通过：{preview.total_releasable} 条（预览）",
-        f"条件：strong match + 26级 + 目标群 + pending",
-        f"间隔：{settings.batch_approve_interval_ms / 1000:g} 秒",
-        "",
-    ]
+        lines.append("当前没有可分批通过的 strong match 申请。")
+        return "\n".join(lines)
+    lines.extend(
+        [
+            f"可分批通过：{preview.total_releasable} 条（预览）",
+            f"条件：strong match + 26级 + 目标群 + pending",
+            f"间隔：{settings.batch_approve_interval_ms / 1000:g} 秒",
+            "",
+        ]
+    )
     for item in preview.items:
         lines.extend(
             [
@@ -160,19 +244,30 @@ def format_release_preview(preview: ReleasePreview, settings: PluginSettings) ->
 
 
 def format_release_result(result: ReleaseResult, settings: PluginSettings) -> str:
+    lines: list[str] = []
+    rematch_lines = _format_rematch_lines(result.rematch)
+    if rematch_lines:
+        lines.extend(rematch_lines)
+        lines.append("")
+
     if result.cancelled:
         prefix = "分批通过已取消"
     elif result.processed == 0 and result.requested == 0:
+        if lines:
+            lines.append("没有可分批通过的申请。")
+            return "\n".join(lines)
         return "没有可分批通过的申请。"
     else:
         prefix = f"准备分批通过 {result.requested} 条申请"
 
-    lines = [
-        prefix,
-        f"间隔：{settings.batch_approve_interval_ms / 1000:g} 秒",
-        "条件：仅 strong match + 26级 + 目标群 + pending",
-        "",
-    ]
+    lines.extend(
+        [
+            prefix,
+            f"间隔：{settings.batch_approve_interval_ms / 1000:g} 秒",
+            "条件：仅 strong match + 26级 + 目标群 + pending",
+            "",
+        ]
+    )
     if result.lines:
         lines.append("正在处理：")
         for line in result.lines:
@@ -193,6 +288,83 @@ def format_release_result(result: ReleaseResult, settings: PluginSettings) -> st
     return "\n".join(lines)
 
 
+def _format_sync_header(sync_ok: bool, sync_message: str, sync_state: SyncState | None) -> list[str]:
+    if not sync_ok:
+        return [
+            f"名单同步失败：{sync_message}",
+            "未对 pending 重算或放行。请先 /audit sync status 排查。",
+        ]
+    if sync_state is not None:
+        cached = sync_state.filtered_count or sync_state.row_count
+        return [
+            f"名单同步：成功，缓存 {cached} 人"
+            f"（filtered {sync_state.filtered_count}，source={sync_state.source}）",
+        ]
+    return [f"名单同步：成功。{sync_message}"]
+
+
+def format_catchup_preview(preview: CatchupPreview, settings: PluginSettings) -> str:
+    lines = _format_sync_header(preview.sync_ok, preview.sync_message, preview.sync_state)
+    if not preview.sync_ok:
+        return "\n".join(lines)
+    lines.append("")
+    rematch = preview.rematch
+    if rematch is not None:
+        lines.append(
+            f"重算 pending：共 {rematch.scanned} 条，新升为 strong：{rematch.upgraded_to_strong}，"
+            f"本次可放行：{(preview.release_preview.total_releasable if preview.release_preview else 0)}"
+        )
+        lines.append("")
+    rp = preview.release_preview
+    if rp is None or not rp.items:
+        lines.append("当前没有可补放的 strong match 申请。")
+        return "\n".join(lines)
+    for item in rp.items:
+        lines.extend(
+            [
+                f"[{item.index}] {item.summary}",
+                f"群：{item.group_id}",
+                f"验证：{item.comment or '（空）'}",
+                "",
+            ]
+        )
+    lines.append("执行：/audit catchup confirm")
+    return "\n".join(lines)
+
+
+def format_catchup_result(result: CatchupResult, settings: PluginSettings) -> str:
+    if result.busy:
+        return "已有分批任务进行中，请稍后再试。"
+    lines = _format_sync_header(result.sync_ok, result.sync_message, result.sync_state)
+    if not result.sync_ok:
+        return "\n".join(lines)
+    lines.append("")
+    if result.rematch is not None:
+        lines.extend(_format_rematch_lines(result.rematch))
+        lines.append("")
+    if result.release is None:
+        lines.append("没有可分批通过的申请。")
+        return "\n".join(lines)
+    # Avoid duplicating rematch block from format_release_result
+    release_copy = ReleaseResult(
+        requested=result.release.requested,
+        processed=result.release.processed,
+        success=result.release.success,
+        failed=result.release.failed,
+        remaining=result.release.remaining,
+        lines=result.release.lines,
+        cancelled=result.release.cancelled,
+        rematch=None,
+    )
+    lines.append(format_release_result(release_copy, settings))
+    return "\n".join(lines)
+
+
+def _is_sync_failure(message: str) -> bool:
+    text = (message or "").strip()
+    return text.startswith("同步失败")
+
+
 class ReleaseService:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
@@ -206,10 +378,29 @@ class ReleaseService:
     def request_cancel(self) -> None:
         self._cancel.set()
 
-    async def preview(self, requests_store, settings: PluginSettings) -> ReleasePreview:
+    async def preview(
+        self,
+        requests_store,
+        settings: PluginSettings,
+        *,
+        pipeline=None,
+        rematch_source: str = "release_preview",
+    ) -> ReleasePreview:
         max_count = settings.batch_approve_max_count
-        items = await list_releasable(requests_store, settings, limit=max_count)
-        return build_preview(items)
+        rematch: RematchSummary | None = None
+        if pipeline is not None:
+            rematch, items = await rematch_and_list_releasable(
+                pipeline,
+                requests_store,
+                settings,
+                source=rematch_source,
+                limit=max_count,
+            )
+        else:
+            items = await list_releasable(requests_store, settings, limit=max_count)
+        preview = build_preview(items)
+        preview.rematch = rematch
+        return preview
 
     async def run_batch(
         self,
@@ -220,11 +411,21 @@ class ReleaseService:
         admin_user_id: str,
         count: int | None,
         audit_log=None,
+        rematch_source: str | None = "release_batch",
+        skip_rematch: bool = False,
     ) -> ReleaseResult | None:
         if not await self._try_begin():
             return None
         try:
-            return await self._run_batch_unlocked(
+            rematch: RematchSummary | None = None
+            if not skip_rematch and rematch_source and pipeline is not None:
+                rematch, _ = await rematch_and_list_releasable(
+                    pipeline,
+                    requests_store,
+                    settings,
+                    source=rematch_source,
+                )
+            result = await self._run_batch_unlocked(
                 requests_store=requests_store,
                 pipeline=pipeline,
                 settings=settings,
@@ -232,8 +433,88 @@ class ReleaseService:
                 count=count,
                 audit_log=audit_log,
             )
+            result.rematch = rematch
+            return result
         finally:
             await self._finish()
+
+    async def catchup_preview(
+        self,
+        *,
+        run_sync: Callable[..., Awaitable[str]],
+        pipeline,
+        requests_store,
+        settings: PluginSettings,
+        cache,
+    ) -> CatchupPreview:
+        sync_message = await run_sync(source="catchup")
+        if _is_sync_failure(sync_message):
+            return CatchupPreview(
+                sync_ok=False,
+                sync_message=sync_message,
+                sync_state=cache.load_sync_state(),
+            )
+        sync_state = cache.load_sync_state()
+        rematch, items = await rematch_and_list_releasable(
+            pipeline,
+            requests_store,
+            settings,
+            source="catchup_preview",
+            limit=settings.batch_approve_max_count,
+        )
+        release_preview = build_preview(items)
+        release_preview.rematch = rematch
+        return CatchupPreview(
+            sync_ok=True,
+            sync_message=sync_message,
+            sync_state=sync_state,
+            rematch=rematch,
+            release_preview=release_preview,
+        )
+
+    async def catchup_batch(
+        self,
+        *,
+        run_sync: Callable[..., Awaitable[str]],
+        pipeline,
+        requests_store,
+        settings: PluginSettings,
+        cache,
+        admin_user_id: str,
+        count: int | None,
+        audit_log=None,
+    ) -> CatchupResult:
+        sync_message = await run_sync(source="catchup")
+        if _is_sync_failure(sync_message):
+            return CatchupResult(
+                sync_ok=False,
+                sync_message=sync_message,
+                sync_state=cache.load_sync_state(),
+            )
+        sync_state = cache.load_sync_state()
+        release = await self.run_batch(
+            requests_store=requests_store,
+            pipeline=pipeline,
+            settings=settings,
+            admin_user_id=admin_user_id,
+            count=count,
+            audit_log=audit_log,
+            rematch_source="catchup_batch",
+        )
+        if release is None:
+            return CatchupResult(
+                sync_ok=True,
+                sync_message=sync_message,
+                sync_state=sync_state,
+                busy=True,
+            )
+        return CatchupResult(
+            sync_ok=True,
+            sync_message=sync_message,
+            sync_state=sync_state,
+            rematch=release.rematch,
+            release=release,
+        )
 
     async def _try_begin(self) -> bool:
         async with self._lock:

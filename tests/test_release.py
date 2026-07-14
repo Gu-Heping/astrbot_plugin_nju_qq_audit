@@ -11,6 +11,7 @@ from admin.release import (
     list_releasable,
 )
 from config import load_settings
+from core.pipeline import RematchSummary
 from data_source.students import ActionResult, PendingRequest
 from storage.requests_store import RequestsStore, new_request_id
 
@@ -40,6 +41,15 @@ def _strong_req(**kwargs) -> PendingRequest:
     )
     defaults.update(kwargs)
     return PendingRequest(**defaults)
+
+
+def _mock_pipeline():
+    pipeline = MagicMock()
+    pipeline.admin_approve = AsyncMock(return_value=ActionResult(ok=True, retcode=0, message="ok"))
+    pipeline.rematch_active_pending = AsyncMock(
+        return_value=RematchSummary(scanned=0, changed=0, upgraded_to_strong=0)
+    )
+    return pipeline
 
 
 @pytest.mark.asyncio
@@ -110,10 +120,14 @@ async def test_release_batch_respects_max_count(tmp_path):
     )
     store = RequestsStore(tmp_path / "requests.json")
     for i in range(3):
-        await store.upsert(_strong_req(id=new_request_id(), parsed={"name": f"用户{i}", "student_id": f"2612200{i:02d}"}))
+        await store.upsert(
+            _strong_req(
+                id=new_request_id(),
+                parsed={"name": f"用户{i}", "student_id": f"2612200{i:02d}"},
+            )
+        )
 
-    pipeline = MagicMock()
-    pipeline.admin_approve = AsyncMock(return_value=ActionResult(ok=True, retcode=0, message="ok"))
+    pipeline = _mock_pipeline()
     service = ReleaseService()
     result = await service.run_batch(
         requests_store=store,
@@ -126,18 +140,26 @@ async def test_release_batch_respects_max_count(tmp_path):
     assert result is not None
     assert result.processed <= 2
     assert pipeline.admin_approve.await_count <= 2
+    pipeline.rematch_active_pending.assert_awaited()
 
 
 @pytest.mark.asyncio
 async def test_release_fail_continue(tmp_path):
-    settings = load_settings(DummyConfig({"target_group_ids": "796836121", "batch_approve_interval_ms": 0}))
+    settings = load_settings(
+        DummyConfig({"target_group_ids": "796836121", "batch_approve_interval_ms": 0})
+    )
     store = RequestsStore(tmp_path / "requests.json")
     await store.upsert(_strong_req(id="REQ-1"))
-    await store.upsert(_strong_req(id="REQ-2", parsed={"name": "李四", "student_id": "261220002"}))
+    await store.upsert(
+        _strong_req(id="REQ-2", parsed={"name": "李四", "student_id": "261220002"})
+    )
 
-    pipeline = MagicMock()
+    pipeline = _mock_pipeline()
     pipeline.admin_approve = AsyncMock(
-        side_effect=[ActionResult(ok=False, retcode=1, message="expired"), ActionResult(ok=True, retcode=0, message="ok")]
+        side_effect=[
+            ActionResult(ok=False, retcode=1, message="expired"),
+            ActionResult(ok=True, retcode=0, message="ok"),
+        ]
     )
     service = ReleaseService()
     result = await service.run_batch(
@@ -154,10 +176,14 @@ async def test_release_fail_continue(tmp_path):
 
 @pytest.mark.asyncio
 async def test_release_concurrent_rejected(tmp_path):
-    settings = load_settings(DummyConfig({"target_group_ids": "796836121", "batch_approve_interval_ms": 50}))
+    settings = load_settings(
+        DummyConfig({"target_group_ids": "796836121", "batch_approve_interval_ms": 50})
+    )
     store = RequestsStore(tmp_path / "requests.json")
     await store.upsert(_strong_req(id="REQ-1"))
-    await store.upsert(_strong_req(id="REQ-2", parsed={"name": "李四", "student_id": "261220002"}))
+    await store.upsert(
+        _strong_req(id="REQ-2", parsed={"name": "李四", "student_id": "261220002"})
+    )
 
     started = asyncio.Event()
     release = asyncio.Event()
@@ -167,7 +193,7 @@ async def test_release_concurrent_rejected(tmp_path):
         await release.wait()
         return ActionResult(ok=True, retcode=0, message="ok")
 
-    pipeline = MagicMock()
+    pipeline = _mock_pipeline()
     pipeline.admin_approve = AsyncMock(side_effect=slow_approve)
     service = ReleaseService()
 
@@ -198,7 +224,6 @@ async def test_release_concurrent_rejected(tmp_path):
 
 def test_format_release_result_no_flag():
     from admin.release import ReleaseLineResult, ReleaseResult
-    from config import load_settings
 
     settings = load_settings(DummyConfig())
     text = format_release_result(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from astrbot.api import logger
@@ -95,6 +96,15 @@ def _match_to_dict(match) -> dict:
 
 
 _MAX_PREVIOUS_COMMENTS = 5
+
+
+@dataclass
+class RematchSummary:
+    scanned: int = 0
+    changed: int = 0
+    upgraded_to_strong: int = 0
+    newly_releasable: int = 0
+    sync_failed: bool = False
 
 
 def _event_context(event: GroupJoinRequest) -> tuple[str | None, str]:
@@ -414,6 +424,96 @@ class AuditPipeline:
         decision = make_decision(parsed, match, is_target_group=True)
         decision = apply_auto_approve_flag(decision, mode, match)
         return mode, parsed, match, decision
+
+    def _evaluate_pending_fields(self, req: PendingRequest):
+        """Re-parse and rematch a stored pending against the current student cache."""
+        mode, _ = self._effective_mode()
+        students = load_students_for_audit(self.settings, self.cache)
+        parsed = parse_application_comment(req.comment or "")
+        match = match_student(parsed, students, applicant_user_id=req.user_id)
+        decision = make_decision(parsed, match, is_target_group=True)
+        decision = apply_auto_approve_flag(decision, mode, match)
+        return mode, parsed, match, decision
+
+    async def rematch_active_pending(self, *, source: str = "manual") -> RematchSummary:
+        """Re-evaluate all active pending against the current student cache.
+
+        Does not call QQ APIs or send admin notifications.
+        """
+        summary = RematchSummary()
+        pending = await self.requests.list_pending(limit=1000)
+        summary.scanned = len(pending)
+        now = utc_now_iso()
+
+        for req in pending:
+            if req.status != "pending" or req.processed_at:
+                continue
+            old_strength = req.match_strength or (req.match or {}).get("strength") or "none"
+            old_decision = req.decision
+            old_reason = req.reason or ""
+            old_parsed = req.parsed or {}
+            old_match = req.match or {}
+
+            mode, parsed, match, decision = self._evaluate_pending_fields(req)
+            new_parsed = _parsed_to_dict(parsed)
+            new_match = _match_to_dict(match)
+
+            changed = (
+                decision.decision != old_decision
+                or match.strength != old_strength
+                or decision.reason != old_reason
+                or new_parsed != old_parsed
+                or new_match.get("strength") != old_match.get("strength")
+                or new_match.get("matched_student_key") != old_match.get("matched_student_key")
+                or new_match.get("matched_student_id") != old_match.get("matched_student_id")
+                or new_match.get("matched_by") != old_match.get("matched_by")
+            )
+            if not changed:
+                continue
+
+            summary.changed += 1
+            if old_strength != "strong" and match.strength == "strong":
+                summary.upgraded_to_strong += 1
+
+            await self.requests.update_by_id(
+                req.id,
+                {
+                    "parsed": new_parsed,
+                    "match": new_match,
+                    "decision": decision.decision,
+                    "confidence": decision.confidence,
+                    "reason": decision.reason,
+                    "mode": mode,
+                    "match_strength": match.strength,
+                    "matched_student_key": decision.matched_student_key,
+                    "updated_at": now,
+                },
+            )
+            await self.audit.append(
+                {
+                    "type": "pending_rematched",
+                    "source": source,
+                    "request_id": req.id,
+                    "group_id": req.group_id,
+                    "user_id": req.user_id,
+                    "old_decision": old_decision,
+                    "new_decision": decision.decision,
+                    "old_match_strength": old_strength,
+                    "new_match_strength": match.strength,
+                    "reason": decision.reason,
+                }
+            )
+            logger.info(
+                "[audit] pending rematched request=%s source=%s %s/%s -> %s/%s",
+                req.id,
+                source,
+                old_decision,
+                old_strength,
+                decision.decision,
+                match.strength,
+            )
+
+        return summary
 
     async def _audit_and_update_pending(
         self, event: GroupJoinRequest, existing: PendingRequest

@@ -42,6 +42,9 @@ from admin.ctx_compat import ensure_ctx_compat
 from admin.labels import applicant_summary
 from admin.pending import fetch_pending_for_admin
 from admin.release import (
+    format_catchup_help,
+    format_catchup_preview,
+    format_catchup_result,
     format_release_help,
     format_release_preview,
     format_release_result,
@@ -792,7 +795,11 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(format_release_help(len(releasable), settings))
             return
         if arg1 == "preview":
-            preview = await self.ctx.release_service.preview(self.ctx.requests, settings)
+            preview = await self.ctx.release_service.preview(
+                self.ctx.requests,
+                settings,
+                pipeline=self.ctx.pipeline,
+            )
             yield event.plain_result(format_release_preview(preview, settings))
             return
         if arg2 != "confirm":
@@ -807,6 +814,61 @@ class NjuQqAuditPlugin(Star):
                 yield event.plain_result("数量无效，请使用数字或 all")
                 return
         yield event.plain_result(await self._run_release_batch(event, count))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("catchup")
+    async def audit_catchup(
+        self, event: AstrMessageEvent, arg1: str = "", arg2: str = ""
+    ):
+        allowed, message = can_run_command(self._settings(), "release", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        settings = self._settings()
+        if not arg1:
+            yield event.plain_result(format_catchup_help(settings))
+            return
+        if arg1 == "preview":
+            preview = await self.ctx.release_service.catchup_preview(
+                run_sync=self.ctx.run_sync,
+                pipeline=self.ctx.pipeline,
+                requests_store=self.ctx.requests,
+                settings=settings,
+                cache=self.ctx.cache,
+            )
+            yield event.plain_result(format_catchup_preview(preview, settings))
+            return
+        # /audit catchup confirm  |  /audit catchup 10 confirm  |  /audit catchup all confirm
+        if arg1 == "confirm" and not arg2:
+            count = None
+        elif arg2 == "confirm":
+            if arg1 == "all":
+                count = None
+            else:
+                try:
+                    count = max(1, int(arg1))
+                except ValueError:
+                    yield event.plain_result(
+                        "请使用 /audit catchup preview 或 /audit catchup [数量|all] confirm"
+                    )
+                    return
+        else:
+            yield event.plain_result(
+                "请使用 /audit catchup preview 或 /audit catchup [数量|all] confirm"
+            )
+            return
+        result = await self.ctx.release_service.catchup_batch(
+            run_sync=self.ctx.run_sync,
+            pipeline=self.ctx.pipeline,
+            requests_store=self.ctx.requests,
+            settings=settings,
+            cache=self.ctx.cache,
+            admin_user_id=event.get_sender_id(),
+            count=count,
+            audit_log=self.ctx.audit,
+        )
+        yield event.plain_result(format_catchup_result(result, settings))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("batch")

@@ -105,6 +105,7 @@ def format_home(
             "下一步：",
             "- 看待处理：/audit list",
             "- 分批通过：/audit release preview",
+            "- 同步并补放：/audit catchup preview",
             "- 同步学生：/audit sync",
             "- 复盘报告：/audit report",
         ]
