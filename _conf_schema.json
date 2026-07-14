@@ -160,9 +160,24 @@
     "default": false
   },
   "reapply_debounce_seconds": {
-    "description": "终态处理后极短 burst 窗口（秒）：阻止 QQ 平台连发重复 group_request；窗口外同 flag 再申请一律允许",
+    "description": "终态同答案 burst 窗口（秒）：仅拦 QQ 平台连发/重放同一 comment；改答案重申立即允许。窗口外同 flag 再申请一律允许",
     "type": "int",
     "default": 15
+  },
+  "audit_list_reconcile_timeout_ms": {
+    "description": "/audit list 对账拉取 get_group_system_msg 的超时（毫秒）",
+    "type": "int",
+    "default": 4000
+  },
+  "audit_list_reject_confirm_snapshots": {
+    "description": "推断 QQ 侧外部拒绝所需连续空快照次数（SnowLuma 截断饱和时不会推断）",
+    "type": "int",
+    "default": 2
+  },
+  "audit_list_reject_wait_seconds": {
+    "description": "推断 QQ 侧外部拒绝前的等待窗口（秒）",
+    "type": "int",
+    "default": 30
   },
   "njutable_col_qq": {
     "description": "列名：QQ（可选，仅辅助参考）",

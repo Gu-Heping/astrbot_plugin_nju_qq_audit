@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from core.version import PLUGIN_VERSION
 from config import PluginSettings, mask_http_url
 from data_source.student_cache import SyncState
 
@@ -11,7 +12,7 @@ def format_help(
     releasable_count: int | None = None,
 ) -> str:
     lines = [
-        "NJU QQ Audit v0.3.6 管理命令（私聊）",
+        f"NJU QQ Audit {PLUGIN_VERSION} 管理命令（私聊）",
         "",
         "推荐流程：",
         "1. /audit record          日常只记录（默认，勿用 off）",

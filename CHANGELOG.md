@@ -4,11 +4,25 @@
 
 ## [v0.3.22] - 2026-07-14
 
+### 新增
+
+- **`/audit catchup`**：先同步校对表，再 rematch 全部 pending，preview/confirm 补放新 strong；校对表刚更新时优先于 `release`
+- **`/audit dismiss <n> confirm <原因>`**：本地关闭无效 pending（不调 QQ）；与 `no`（QQ 拒绝）、`mark-external`（QQ 侧已处理）区分
+- **`/audit lookup <姓名> <学号> [专业]`**：用当前本地缓存诊断匹配（strong/weak/none），不改 pending、不调 QQ
+- **`/audit release preview|confirm`**：放人前也会按当前本地缓存 rematch pending
+
 ### 修复
 
-- **拒绝后改答案立即重申被 debounce 永久丢掉**：终态 15 秒 burst 窗口本意只挡 `/audit ok` 后平台连发；拒绝后用户修改验证信息再申请时若仍被拦截，QQ 不会重推该事件，导致 auto 下 strong 也不会自动通过
-- 现仅在 **comment 未变** 时应用 burst；comment 已变则立即新建 attempt（auto + strong 仍会自动通过）
+- **拒绝后改答案立即重申被 debounce 永久丢掉**：15 秒 burst 仅拦**同 comment** 平台连发；comment 已变则立即新建 attempt（`auto` + strong 仍自动通过）
+- **定时同步双重加锁伪失败**：`SyncScheduler` 回调改为 `execute_sync`（无锁正文），忙时不覆盖上次成功状态；失败保留 `failed:异常类型`
+- **SnowLuma 约 20 条截断**：达到 `FetchGroupRequests` 上限时标 `snapshot_saturated`，禁止「缺失即拒绝」推断
+- **入群验证解析**：禁止把「学号」等标签当姓名；支持「我是/我叫…」「专业是…」自然语言
+
+### 变更
+
 - `duplicate_policy_version` 升至 `v8-reject-comment-change-bypass-burst`
+- 插件版本 / metadata 升至 `v0.3.22`
+- README、`/audit help`、`_conf_schema.json` 与当前命令集/配置对齐
 
 ## [v0.3.21] - 2026-07-13
 
