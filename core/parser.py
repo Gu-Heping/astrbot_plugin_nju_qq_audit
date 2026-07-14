@@ -67,6 +67,29 @@ _TEMPLATE_TOKENS = frozenset(
     }
 )
 
+# Compact 「汉字+学号」不得把字段标签当成姓名
+_NON_PERSON_NAME_TOKENS = frozenset(
+    {
+        "学号",
+        "姓名",
+        "名字",
+        "专业",
+        "书院",
+        "学院",
+        "编号",
+        "通知书",
+        "录取号",
+        "录取",
+        "答案",
+        "回答",
+        "问题",
+    }
+)
+
+SELF_INTRO_NAME_PATTERN = re.compile(
+    r"(?:我是|我叫|本人是|名叫)([\u4e00-\u9fa5·]{2,4})(?=$|[，,。.\s；;、]|学号|专业|书院)"
+)
+
 
 @dataclass
 class ParsedApplication:
@@ -164,6 +187,27 @@ def _find_student_id_in_text(text: str) -> str | None:
     return None
 
 
+def _looks_like_person_name(value: str | None) -> bool:
+    if not value:
+        return False
+    name = normalize_name(value)
+    if not CHINESE_NAME_PATTERN.match(name):
+        return False
+    if name in _NON_PERSON_NAME_TOKENS or name in _TEMPLATE_TOKENS:
+        return False
+    if _is_template_token(name):
+        return False
+    return True
+
+
+def _assign_name_if_better(result: ParsedApplication, value: str) -> None:
+    name = normalize_name(value)
+    if not _looks_like_person_name(name):
+        return
+    if not result.name or not _looks_like_person_name(result.name):
+        result.name = name
+
+
 def parse_application_comment(raw: str) -> ParsedApplication:
     full = normalize_whitespace(raw)
     text = normalize_whitespace(extract_answer_segment(raw))
@@ -176,7 +220,11 @@ def parse_application_comment(raw: str) -> ParsedApplication:
 
     name_label = NAME_LABEL_PATTERN.search(text)
     if name_label:
-        result.name = normalize_name(name_label.group(1))
+        _assign_name_if_better(result, name_label.group(1))
+
+    intro = SELF_INTRO_NAME_PATTERN.search(text)
+    if intro:
+        _assign_name_if_better(result, intro.group(1))
 
     sid_label = STUDENT_ID_LABEL_PATTERN.search(text)
     if sid_label:
@@ -192,7 +240,10 @@ def parse_application_comment(raw: str) -> ParsedApplication:
 
     major_label = MAJOR_LABEL_PATTERN.search(text)
     if major_label:
-        result.major = major_label.group(1).strip()
+        major = major_label.group(1).strip()
+        if major.startswith("是"):
+            major = major[1:].strip()
+        result.major = major or result.major
 
     academy_label = ACADEMY_LABEL_PATTERN.search(text)
     if academy_label:
@@ -222,7 +273,11 @@ def parse_application_comment(raw: str) -> ParsedApplication:
             elif re.search(r"[A-Za-z]", loose):
                 _add_notice_candidate(result, loose)
 
-    if not result.name or not result.major:
+    if not result.name or not result.major or not _looks_like_person_name(result.name):
+        _parse_by_tokens(text, result)
+
+    if result.name and not _looks_like_person_name(result.name):
+        result.name = None
         _parse_by_tokens(text, result)
 
     if not result.name and not result.student_id and not result.notice_no and not result.major:
@@ -236,15 +291,17 @@ def _extract_compact_credentials(text: str, result: ParsedApplication) -> None:
     if not result.student_id:
         sid_compact = re.search(r"([\u4e00-\u9fa5·]{2,4})(2[0-9]1\d{5,6})", text)
         if sid_compact:
-            if not result.name:
-                result.name = normalize_name(sid_compact.group(1))
+            candidate_name = sid_compact.group(1)
+            if _looks_like_person_name(candidate_name):
+                _assign_name_if_better(result, candidate_name)
             result.student_id = sid_compact.group(2)
 
     if not result.notice_no:
         notice_compact = re.search(r"([\u4e00-\u9fa5·]{2,4})(202[56]\d{4})", text)
         if notice_compact:
-            if not result.name:
-                result.name = normalize_name(notice_compact.group(1))
+            candidate_name = notice_compact.group(1)
+            if _looks_like_person_name(candidate_name):
+                _assign_name_if_better(result, candidate_name)
             if not result.student_id or notice_compact.group(2) != result.student_id:
                 _add_notice_candidate(result, notice_compact.group(2))
 
@@ -255,24 +312,32 @@ def _split_mixed_token(token: str) -> dict[str, str]:
         token,
     )
     if glued_major:
-        return {
-            "name": normalize_name(glued_major.group(1)),
+        out = {
             "student_id": glued_major.group(2),
             "major": glued_major.group(3).strip(),
         }
+        if _looks_like_person_name(glued_major.group(1)):
+            out["name"] = normalize_name(glued_major.group(1))
+        return out
 
     sid_match = re.match(r"^([\u4e00-\u9fa5·]{2,4})(261\d{5,6})$", token)
     if sid_match:
-        return {"name": normalize_name(sid_match.group(1)), "student_id": sid_match.group(2)}
+        out = {"student_id": sid_match.group(2)}
+        if _looks_like_person_name(sid_match.group(1)):
+            out["name"] = normalize_name(sid_match.group(1))
+        return out
     sid_match = re.match(r"^([\u4e00-\u9fa5·]{2,4})(2[0-9]1\d{6})$", token)
     if sid_match:
-        return {"name": normalize_name(sid_match.group(1)), "student_id": sid_match.group(2)}
+        out = {"student_id": sid_match.group(2)}
+        if _looks_like_person_name(sid_match.group(1)):
+            out["name"] = normalize_name(sid_match.group(1))
+        return out
     notice_match = re.match(r"^([\u4e00-\u9fa5·]{2,4})(202[56]\d{4})$", token)
     if notice_match:
-        return {
-            "name": normalize_name(notice_match.group(1)),
-            "notice_no": normalize_notice_no(notice_match.group(2)),
-        }
+        out = {"notice_no": normalize_notice_no(notice_match.group(2))}
+        if _looks_like_person_name(notice_match.group(1)):
+            out["name"] = normalize_name(notice_match.group(1))
+        return out
     return {}
 
 
@@ -310,10 +375,15 @@ def _parse_by_tokens(text: str, result: ParsedApplication) -> None:
             majors.append(token)
             continue
         if CHINESE_NAME_PATTERN.match(token) and not names:
-            names.append(normalize_name(token))
+            if _looks_like_person_name(token):
+                names.append(normalize_name(token))
+            continue
+        intro = SELF_INTRO_NAME_PATTERN.match(token) or SELF_INTRO_NAME_PATTERN.search(token)
+        if intro and _looks_like_person_name(intro.group(1)):
+            names.append(normalize_name(intro.group(1)))
             continue
         if re.search(r"[\u4e00-\u9fa5]", token) and len(token) >= 2:
-            if not names:
+            if not names and _looks_like_person_name(token):
                 names.append(normalize_name(token))
             else:
                 majors.append(token)

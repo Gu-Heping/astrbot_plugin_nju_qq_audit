@@ -41,6 +41,12 @@ from admin.handlers import PluginContext
 from admin.ctx_compat import ensure_ctx_compat
 from admin.labels import applicant_summary
 from admin.pending import fetch_pending_for_admin
+from admin.lookup import (
+    format_lookup_help,
+    format_lookup_result,
+    parse_lookup_args,
+    run_lookup,
+)
 from admin.release import (
     format_catchup_help,
     format_catchup_preview,
@@ -456,6 +462,39 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(resolved.message)
             return
         yield event.plain_result(format_view(resolved.request, resolved.index))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("lookup")
+    async def audit_lookup(self, event: AstrMessageEvent, arg1: str = "", arg2: str = "", arg3: str = ""):
+        allowed, message = can_run_command(self._settings(), "lookup", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        raw = (event.message_str or "").strip()
+        payload = raw
+        for prefix in ("/audit lookup", "audit lookup"):
+            if payload.lower().startswith(prefix):
+                payload = payload[len(prefix) :].strip()
+                break
+        else:
+            # Framework may only pass split args when message_str unavailable
+            payload = " ".join(p for p in (arg1, arg2, arg3) if p).strip()
+        if not payload:
+            yield event.plain_result(format_lookup_help())
+            return
+        name, student_id, major = parse_lookup_args(payload)
+        if not name and not student_id and not major:
+            yield event.plain_result(format_lookup_help())
+            return
+        result = run_lookup(
+            self._settings(),
+            self.ctx.cache,
+            name=name,
+            student_id=student_id,
+            major=major,
+        )
+        yield event.plain_result(format_lookup_result(result))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("ok")
