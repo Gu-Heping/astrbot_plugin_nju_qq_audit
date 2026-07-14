@@ -98,7 +98,7 @@ class PluginContext:
         await self.sync_scheduler.start(
             self.settings,
             self.cache,
-            self.run_sync,
+            self.execute_sync,
             notify_on_failure=_notify,
         )
 
@@ -144,30 +144,42 @@ class PluginContext:
 
         return get_effective_mode(self.settings, self.runtime.get_mode_override())
 
-    async def run_sync(self, *, source: str = "manual") -> str:
+    async def execute_sync(self, *, source: str = "manual") -> str:
+        """Pull student list without acquiring the sync lock.
+
+        Used as the SyncScheduler callback (scheduler holds the lock),
+        and by run_sync after acquiring the lock.
+        """
         from data_source.njutable_provider import sync_students
 
-        async def _do_sync() -> str:
-            session = self._http_session or aiohttp.ClientSession()
-            own = self._http_session is None
-            try:
-                state = await sync_students(self.settings, self.cache, session)
-                state.last_sync_source = source
-                self.cache.save_sync_state(state)
-                return (
-                    f"同步成功: source={state.source}, "
-                    f"raw={state.raw_row_count or state.row_count}, "
-                    f"mapped={state.mapped_count or state.row_count}, "
-                    f"filtered={state.filtered_count}"
-                    f"{', ignore_status=on' if self.settings.njutable_ignore_status_filter else ''}"
-                )
-            except Exception as exc:
-                cached = self.cache.load_students()
-                return (
-                    f"同步失败: {type(exc).__name__}。已保留旧缓存 {len(cached)} 条。"
-                )
-            finally:
-                if own:
-                    await session.close()
+        session = self._http_session or aiohttp.ClientSession()
+        own = self._http_session is None
+        try:
+            state = await sync_students(self.settings, self.cache, session)
+            state.last_sync_source = source
+            self.cache.save_sync_state(state)
+            return (
+                f"同步成功: source={state.source}, "
+                f"raw={state.raw_row_count or state.row_count}, "
+                f"mapped={state.mapped_count or state.row_count}, "
+                f"filtered={state.filtered_count}"
+                f"{', ignore_status=on' if self.settings.njutable_ignore_status_filter else ''}"
+            )
+        except Exception as exc:
+            cached = self.cache.load_students()
+            return (
+                f"同步失败: {type(exc).__name__}。已保留旧缓存 {len(cached)} 条。"
+            )
+        finally:
+            if own:
+                await session.close()
 
-        return await self.sync_scheduler.run_once(_do_sync, self.cache, source=source)
+    async def run_sync(self, *, source: str = "manual") -> str:
+        async def _locked() -> str:
+            return await self.execute_sync(source=source)
+
+        return await self.sync_scheduler.run_once(
+            _locked,
+            self.cache,
+            source=source,
+        )

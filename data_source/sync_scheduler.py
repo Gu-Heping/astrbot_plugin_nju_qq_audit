@@ -1,10 +1,26 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Awaitable
+from typing import Awaitable, Callable
 
-from data_source.student_cache import SyncState, utc_now_iso
+from data_source.student_cache import SyncState
+
+
+_FAIL_EXC_RE = re.compile(r"同步失败:\s*([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _resolve_failure_result(message: str, existing: str | None) -> str:
+    """Prefer detailed failed:Exc over bare failed."""
+    if existing and existing.startswith("failed:") and existing != "failed":
+        return existing
+    match = _FAIL_EXC_RE.search(message or "")
+    if match:
+        return f"failed: {match.group(1)}"
+    if existing and existing.startswith("failed"):
+        return existing
+    return "failed"
 
 
 class SyncScheduler:
@@ -33,7 +49,9 @@ class SyncScheduler:
             return
 
         if settings.auto_sync_on_startup:
-            await self.run_once(run_sync, cache, source="auto_startup", notify_on_failure=notify_on_failure)
+            await self.run_once(
+                run_sync, cache, source="auto_startup", notify_on_failure=notify_on_failure
+            )
 
         if settings.auto_sync_enabled:
             self._cancel.clear()
@@ -60,17 +78,24 @@ class SyncScheduler:
         notify_on_failure: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         if self._lock.locked():
+            # Do not overwrite last successful sync metadata.
             return "同步正在进行中，请稍后再试。"
         async with self._lock:
             self._running = True
             try:
                 message = await run_sync()
+                # Nested lock mistake may return the busy string from the callback;
+                # never treat that as a completed sync.
+                if "正在进行" in message:
+                    return message
                 state = cache.load_sync_state()
                 state.last_sync_source = source
                 if message.startswith("同步成功"):
                     state.last_sync_result = "success"
                 else:
-                    state.last_sync_result = "failed"
+                    state.last_sync_result = _resolve_failure_result(
+                        message, state.last_sync_result
+                    )
                     if notify_on_failure and "失败" in message:
                         await notify_on_failure(message)
                 cache.save_sync_state(state)
