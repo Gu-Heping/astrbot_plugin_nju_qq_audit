@@ -25,11 +25,11 @@ def _cache_with(tmp_path: Path, students: list[Student]) -> tuple:
 
 
 def test_parse_lookup_args():
-    assert parse_lookup_args("马至成 261200008") == ("马至成", "261200008", None)
-    name, sid, major = parse_lookup_args("马至成 261200008 环境科学与工程类")
-    assert name == "马至成"
-    assert sid == "261200008"
-    assert major == "环境科学与工程类"
+    assert parse_lookup_args("张三 261220001") == ("张三", "261220001", None)
+    name, sid, major = parse_lookup_args("张三 261220001 计算机科学与技术")
+    assert name == "张三"
+    assert sid == "261220001"
+    assert major == "计算机科学与技术"
 
 
 def test_lookup_strong_hit(tmp_path):
@@ -37,20 +37,20 @@ def test_lookup_strong_hit(tmp_path):
         tmp_path,
         [
             Student(
-                name="马至成",
-                student_id="261200008",
-                major="环境科学与工程类",
+                name="张三",
+                student_id="261220001",
+                major="计算机科学与技术",
                 updated_at="t",
                 status="已确认",
             )
         ],
     )
-    result = run_lookup(settings, cache, name="马至成", student_id="261200008")
+    result = run_lookup(settings, cache, name="张三", student_id="261220001")
     assert result.match.strength == "strong"
     text = format_lookup_result(result)
     assert "匹配强度：strong" in text
-    assert "马至成" in text
-    assert "261200008" in text
+    assert "张三" in text
+    assert "261220001" in text
 
 
 def test_lookup_partial_name_only(tmp_path):
@@ -58,14 +58,14 @@ def test_lookup_partial_name_only(tmp_path):
         tmp_path,
         [
             Student(
-                name="马至成",
-                student_id="261200009",
-                major="环境科学与工程类",
+                name="张三",
+                student_id="261220009",
+                major="计算机科学与技术",
                 updated_at="t",
             )
         ],
     )
-    result = run_lookup(settings, cache, name="马至成", student_id="261200008")
+    result = run_lookup(settings, cache, name="张三", student_id="261220001")
     assert result.match.strength != "strong"
     assert len(result.name_hits) == 1
     text = format_lookup_result(result)

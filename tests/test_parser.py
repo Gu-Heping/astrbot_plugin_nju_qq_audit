@@ -116,15 +116,15 @@ def test_verify_prefix_multiline():
 
 def test_natural_language_self_intro_not_label_as_name():
     parsed = parse_application_comment(
-        "问题：姓名 学号/录取号 专业\n答案：我是马至成，学号261200008，专业是环境科学与工程类"
+        "问题：姓名 学号/录取号 专业\n答案：我是张三，学号261220001，专业是计算机科学与技术"
     )
-    assert parsed.name == "马至成"
-    assert parsed.student_id == "261200008"
-    assert parsed.major == "环境科学与工程类"
+    assert parsed.name == "张三"
+    assert parsed.student_id == "261220001"
+    assert parsed.major == "计算机科学与技术"
     assert parsed.name != "学号"
 
 
 def test_xuehao_glued_id_does_not_become_name():
-    parsed = parse_application_comment("学号261200008")
-    assert parsed.student_id == "261200008"
+    parsed = parse_application_comment("学号261220001")
+    assert parsed.student_id == "261220001"
     assert parsed.name != "学号"

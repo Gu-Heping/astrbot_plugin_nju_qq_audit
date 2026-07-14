@@ -97,7 +97,7 @@ def parse_lookup_args(args: str) -> tuple[str | None, str | None, str | None]:
             continue
         major_parts.append(part)
 
-    # Allow "马至成261200008" glued
+    # Allow "张三261220001" glued name+id
     if not student_id and name is None and len(parts) == 1:
         from core.parser import parse_application_comment
 
@@ -166,8 +166,8 @@ def format_lookup_result(result: LookupResult) -> str:
     lines.extend(
         [
             "",
-            "用法：/audit lookup 马至成 261200008",
-            "     /audit lookup 马至成 261200008 环境科学与工程类",
+            "用法：/audit lookup 张三 261220001",
+            "     /audit lookup 张三 261220001 计算机科学与技术",
         ]
     )
     return "\n".join(lines)
@@ -182,8 +182,8 @@ def format_lookup_help() -> str:
             "/audit lookup <姓名> <学号> [专业]",
             "",
             "示例：",
-            "/audit lookup 马至成 261200008",
-            "/audit lookup 马至成 261200008 环境科学与工程类",
+            "/audit lookup 张三 261220001",
+            "/audit lookup 张三 261220001 计算机科学与技术",
             "",
             "说明：",
             "- 用当前本地缓存比对，返回 strong/weak/none 与部分命中",
