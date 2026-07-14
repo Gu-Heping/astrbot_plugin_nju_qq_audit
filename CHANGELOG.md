@@ -2,6 +2,14 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.3.22] - 2026-07-14
+
+### 修复
+
+- **拒绝后改答案立即重申被 debounce 永久丢掉**：终态 15 秒 burst 窗口本意只挡 `/audit ok` 后平台连发；拒绝后用户修改验证信息再申请时若仍被拦截，QQ 不会重推该事件，导致 auto 下 strong 也不会自动通过
+- 现仅在 **comment 未变** 时应用 burst；comment 已变则立即新建 attempt（auto + strong 仍会自动通过）
+- `duplicate_policy_version` 升至 `v8-reject-comment-change-bypass-burst`
+
 ## [v0.3.21] - 2026-07-13
 
 ### 修复

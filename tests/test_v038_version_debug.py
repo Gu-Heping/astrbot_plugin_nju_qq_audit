@@ -42,5 +42,5 @@ def test_debug_shows_logic_versions():
 
 def test_reconcile_logic_version_constant():
     assert RECONCILE_LOGIC_VERSION == "v2-invite-matches-pending"
-    assert DUPLICATE_POLICY_VERSION == "v7-terminal-reapply-fingerprint"
+    assert DUPLICATE_POLICY_VERSION == "v8-reject-comment-change-bypass-burst"
     assert PENDING_UPDATE_POLICY_VERSION == "v1-update-pending-on-comment-change"

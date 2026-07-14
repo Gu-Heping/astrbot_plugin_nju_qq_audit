@@ -3,9 +3,9 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-PLUGIN_VERSION = "v0.3.21"
+PLUGIN_VERSION = "v0.3.22"
 RECONCILE_LOGIC_VERSION = "v2-invite-matches-pending"
-DUPLICATE_POLICY_VERSION = "v7-terminal-reapply-fingerprint"
+DUPLICATE_POLICY_VERSION = "v8-reject-comment-change-bypass-burst"
 PENDING_UPDATE_POLICY_VERSION = "v1-update-pending-on-comment-change"
 
 # 同 flag 永久忽略：stale、ignored、dismissed

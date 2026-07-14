@@ -250,8 +250,12 @@ class AuditPipeline:
 
         elapsed = self._seconds_since_processed(existing)
         fallback = "no_event_time" if not event_time else None
+        # Burst window only suppresses platform double-fire / replay of the *same*
+        # answer. A corrected comment after reject must proceed immediately —
+        # QQ will not redeliver the request once we drop it.
+        comment_changed = (event.comment or "") != (existing.comment or "")
 
-        if elapsed < self.settings.reapply_debounce_seconds:
+        if elapsed < self.settings.reapply_debounce_seconds and not comment_changed:
             if event_time and existing.processed_at:
                 et = parse_iso_datetime(event_time)
                 pt = parse_iso_datetime(existing.processed_at)
@@ -290,6 +294,8 @@ class AuditPipeline:
             pt = parse_iso_datetime(existing.processed_at)
             if et and pt and et <= pt:
                 reapply_fallback = "recycled_event_time"
+        if comment_changed and elapsed < self.settings.reapply_debounce_seconds:
+            reapply_fallback = reapply_fallback or "comment_changed_bypass_burst"
 
         await self._audit_and_act_reapply(
             event,

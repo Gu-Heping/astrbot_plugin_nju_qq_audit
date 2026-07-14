@@ -98,6 +98,7 @@ def _pipeline(tmp_path, *, admin_notify=False, debounce_seconds=120):
     notifier = MagicMock()
     notifier.notify_manual_review = AsyncMock()
     notifier.notify_pending_comment_updated = AsyncMock()
+    notifier.notify_auto_result = AsyncMock()
     pipe = AuditPipeline(
         settings, requests, audit, runtime, cache, actions, notifier
     )
@@ -359,12 +360,14 @@ async def test_reject_recycled_event_time_reapplies_after_burst_window(tmp_path)
 
 @pytest.mark.asyncio
 async def test_reject_event_time_before_processed_burst_blocked(tmp_path):
+    """同答案 + 回收旧 event.time：窗口内仍拦截（平台重放）。"""
     pipe, requests, audit, notifier = _pipeline(
         tmp_path, admin_notify=True, debounce_seconds=3600
     )
     from storage.audit_log import utc_now_iso
 
     old = _pending(
+        comment="入群申请测试",
         status="processed",
         decision="reject",
         processed_at=utc_now_iso(),
@@ -457,6 +460,124 @@ async def test_new_flag_after_reject_keeps_existing_behavior(tmp_path):
     assert new.reapply_of is None
     assert (await requests.get_by_id(old.id)).status == "processed"
     notifier.notify_manual_review.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reject_comment_changed_within_debounce_auto_approves_strong(tmp_path):
+    """拒绝后立刻改答案重申：不应被 15s burst 丢掉，auto+strong 应自动通过。"""
+    pipe, requests, audit, notifier = _pipeline(
+        tmp_path, admin_notify=True, debounce_seconds=15
+    )
+    await pipe.runtime.set_mode("auto", "1")
+    actions = pipe.actions
+    from unittest.mock import AsyncMock
+
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(ok=True, message="ok")
+    )
+
+    old = _pending(
+        id="REQ-reject",
+        comment="张三",
+        status="processed",
+        decision="reject",
+        processed_at=utc_now_iso(),
+        action_result=ActionResult(ok=True, message="reject"),
+        mode="auto",
+    )
+    await requests.upsert(old)
+
+    import time
+
+    event = _event(
+        comment="张三 261122001",
+        time=int(time.time()) + 1,
+    )
+    await pipe.handle_group_request(event)
+
+    latest = await requests.get_by_flag("flag-1")
+    assert latest.id != old.id
+    assert latest.status == "processed"
+    assert latest.decision == "approve"
+    assert latest.match_strength == "strong"
+    assert latest.reapply_of == old.id
+    actions.set_group_add_request.assert_awaited()
+    assert actions.set_group_add_request.await_args.args[2] is True
+    assert any(r.get("type") == "reapplication_created" for r in audit.read_all())
+    assert any(
+        r.get("type") == "reapplication_created"
+        and r.get("fallback") == "comment_changed_bypass_burst"
+        for r in audit.read_all()
+    )
+    notifier.notify_auto_result.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reject_same_comment_within_debounce_still_blocked(tmp_path):
+    pipe, requests, audit, notifier = _pipeline(
+        tmp_path, admin_notify=True, debounce_seconds=3600
+    )
+    old = _pending(
+        comment="张三",
+        status="processed",
+        decision="reject",
+        processed_at=utc_now_iso(),
+        action_result=ActionResult(ok=True, message="reject"),
+    )
+    await requests.upsert(old)
+
+    import time
+
+    await pipe.handle_group_request(_event(comment="张三", time=int(time.time()) + 1))
+
+    assert (await requests.get_by_flag("flag-1")).id == old.id
+    assert any(
+        r.get("type") == "duplicate_event_replayed"
+        and r.get("reason") == "reapply_burst_after_terminal"
+        for r in audit.read_all()
+    )
+    notifier.notify_manual_review.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reject_comment_changed_recycled_event_time_within_debounce(tmp_path):
+    """NapCat 复用旧 time + 改答案：窗口内也应放行。"""
+    pipe, requests, audit, _ = _pipeline(
+        tmp_path, admin_notify=False, debounce_seconds=15
+    )
+    await pipe.runtime.set_mode("auto", "1")
+    from unittest.mock import AsyncMock
+
+    pipe.actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(ok=True, message="ok")
+    )
+
+    old = _pending(
+        comment="张三",
+        status="processed",
+        decision="reject",
+        processed_at=utc_now_iso(),
+        action_result=ActionResult(ok=True, message="reject"),
+        mode="auto",
+    )
+    await requests.upsert(old)
+
+    await pipe.handle_group_request(
+        _event(
+            comment="张三 261122001",
+            time=_unix_after(utc_now_iso(), -3600),
+        )
+    )
+
+    latest = await requests.get_by_flag("flag-1")
+    assert latest.id != old.id
+    assert latest.status == "processed"
+    assert latest.decision == "approve"
+    assert any(
+        r.get("type") == "reapplication_created"
+        and r.get("fallback") == "recycled_event_time"
+        for r in audit.read_all()
+    )
 
 
 def utc_now_iso() -> str:
