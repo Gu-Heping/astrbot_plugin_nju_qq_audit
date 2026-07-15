@@ -2,6 +2,19 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.3.23] - 2026-07-15
+
+### 新增
+
+- **`/audit sweep`**：本地批量 dismiss **非 strong** pending（不调 QQ），保留 strong 给 auto / release / catchup
+- `/audit sweep preview` 会先按当前缓存 rematch，再列出候选与将保留的 strong 数
+- `/audit sweep confirm <原因>`：统一原因关闭全部候选；写审计 `bulk_dismiss_non_strong`
+
+### 说明
+
+- 适用：其他管理员在 QQ 客户端拒绝后框架不上报，导致 auto 下 weak/none 僵尸 pending 堆积
+- 仍在 QQ 等待审核请用 `/audit no`；确认已入群用 `/audit mark-external`；单条本地关闭仍用 `/audit dismiss`
+
 ## [v0.3.22] - 2026-07-14
 
 ### 新增

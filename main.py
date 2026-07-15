@@ -56,6 +56,14 @@ from admin.release import (
     format_release_result,
     list_releasable,
 )
+from admin.sweep import (
+    collect_sweep_preview,
+    format_sweep_help,
+    format_sweep_preview,
+    format_sweep_result,
+    parse_sweep_command,
+    run_sweep,
+)
 from admin.report import build_report_data, format_report, format_unknown
 from admin.permissions import can_run_command
 from data_source.njutable_provider import load_students_for_audit
@@ -642,6 +650,43 @@ class NjuQqAuditPlugin(Star):
             f"已本地关闭申请 {label}（dismissed，未调用 QQ 拒绝接口）。\n"
             f"原因：{dismiss_reason}"
         )
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("sweep")
+    async def audit_sweep(
+        self, event: AstrMessageEvent, arg1: str = "", arg2: str = ""
+    ):
+        allowed, message = can_run_command(self._settings(), "dismiss", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        action, reason = parse_sweep_command(event.message_str or "", arg1, arg2)
+        if action == "help":
+            yield event.plain_result(format_sweep_help())
+            return
+        if action == "bad_usage":
+            yield event.plain_result(
+                "请使用 /audit sweep preview 或 /audit sweep confirm <原因>"
+            )
+            return
+        if action == "need_reason":
+            yield event.plain_result(
+                "原因不能为空。请使用 /audit sweep confirm <原因>"
+            )
+            return
+        if action == "preview":
+            preview = await collect_sweep_preview(self.ctx.pipeline)
+            yield event.plain_result(format_sweep_preview(preview))
+            return
+        result = await run_sweep(
+            pipeline=self.ctx.pipeline,
+            admin_user_id=event.get_sender_id(),
+            reason=reason,
+            list_cache=self.ctx.list_cache,
+            audit_log=self.ctx.audit,
+        )
+        yield event.plain_result(format_sweep_result(result))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("stale")

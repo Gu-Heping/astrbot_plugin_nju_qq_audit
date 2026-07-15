@@ -1,6 +1,6 @@
 # astrbot_plugin_nju_qq_audit
 
-南京大学 26 级新生 QQ 群入群审核 **AstrBot 插件**（非独立 Node 服务）。当前版本 **v0.3.22**。
+南京大学 26 级新生 QQ 群入群审核 **AstrBot 插件**（非独立 Node 服务）。当前版本 **v0.3.23**。
 
 ## 快速开始（管理员）
 
@@ -44,6 +44,8 @@
 | `/audit ok <n>` | 同意第 n 条（无需 confirm） |
 | `/audit no <n> [理由]` | 向 QQ 发起拒绝，可附理由 |
 | `/audit dismiss <n> confirm <原因>` | **本地**关闭无效申请（不调 QQ）；原因必填 |
+| `/audit sweep preview` | 预览将本地关闭的**非 strong** pending（先 rematch，保留 strong） |
+| `/audit sweep confirm <原因>` | 一键 dismiss 全部非 strong（不调 QQ） |
 | `/audit mark-external <n> confirm` | 确认 QQ 侧已处理，标为 external |
 | `/audit stale [n]` | 查看 stale 队列（QQ 侧已失效） |
 | `/audit restore <n> confirm` | 将 stale 恢复为 pending |
@@ -73,7 +75,8 @@
 |------|------|
 | `/audit no` | 向 QQ 发起拒绝 |
 | `/audit mark-external` | QQ 侧已处理，本地记 external |
-| `/audit dismiss` | 本地认定无效并关闭，**不调用 QQ** |
+| `/audit dismiss` | 本地认定无效并关闭单条，**不调用 QQ** |
+| `/audit sweep` | 本地批量关闭**非 strong** pending，**不调用 QQ**（保留 strong） |
 
 **不提供** `/audit group *`。修改目标群请编辑插件配置 `target_group_ids` 后重启。
 
@@ -120,6 +123,7 @@
 
 - **`processed`(approve/reject)**、**`external`**：同 flag 允许新建 attempt（`reapply_of` / `attempt_no`），旧记录保留
 - **`stale` / `ignored` / `dismissed`**：同 flag 永久忽略，不自动复活
+- **`/audit sweep`**：清理 QQ 侧已拒但未上报留下的非 strong 僵尸 pending（本地 dismiss）
 - **15 秒 burst**（`reapply_debounce_seconds`，默认 15）：仅拦**同一答案**的平台连发/重放
 - **comment 已变**（如拒绝后改正文重申）：立即新建 attempt；`auto` + strong 会自动通过
 - 退群（`group_decrease`）后带 `reapply_eligible` 时，可立即再申请（绕过 debounce）
@@ -304,6 +308,7 @@ pytest tests/
 ## 升级注意
 
 - 升级后请 **完整重启 AstrBot**，勿仅热重载插件
+- **v0.3.23**：新增 `/audit sweep` 批量本地关闭非 strong pending
 - **v0.3.22**：拒绝后改答案重申的 debounce 行为变更；`duplicate_policy_version=v8-reject-comment-change-bypass-burst`
 - **v0.3.20+**：`/audit list` 依赖 `get_group_system_msg`；SnowLuma 20 条上限时不会把缺失当成外部拒绝
 - `requests.json` / `sync_state.json` 新增字段向后兼容
