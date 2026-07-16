@@ -1,6 +1,8 @@
 # astrbot_plugin_nju_qq_audit
 
-南京大学 26 级新生 QQ 群入群审核 **AstrBot 插件**（非独立 Node 服务）。当前版本 **v0.3.23**。
+南京大学 26 级新生 QQ 群入群审核 **AstrBot 插件**（非独立 Node 服务）。当前版本 **v0.4.0**。
+
+支持 **本科** 与 **研究生** 两套独立审核通道（群号 / NJUTable / 缓存分离；共用事件接入与管理员命令）。
 
 ## 快速开始（管理员）
 
@@ -13,7 +15,7 @@
 7. 收到通知后发送 `/audit list`，用 `/audit ok 1` 或 `/audit no 1 理由` 处理
 8. 名单刚更新、历史 pending 未匹配时用 **`/audit catchup preview`**，再 **`/audit catchup confirm`** 补放
 9. 仅用当前本地缓存分批时用 **`/audit release preview`** / **`/audit release 10 confirm`**
-10. 确认流程无误后，可选 `/audit auto confirm` 开启自动强匹配（仅 26 级 strong）
+10. 确认流程无误后，可选 `/audit auto confirm` 开启自动强匹配（本科 26 级 strong；若启用研究生则含研究生 strong）
 
 > 短编号来自最近一次 `/audit list` 或入群通知；**30 分钟内有效**。无需复制 `REQ-xxx` 长 ID。
 
@@ -59,8 +61,11 @@
 | `/audit catchup 10 confirm` | 同上，最多 10 条 |
 | `/audit unknown [N]` | 近 7 天未识别汇总 + 样例 |
 | `/audit report` | 运营统计（今日/累计、原因分布、同步摘要） |
-| `/audit sync` | 手动同步 NJUTable / mock 学生数据 |
-| `/audit sync status` | 定时同步状态与下次计划时间 |
+| `/audit sync` | 手动同步本科 NJUTable / mock |
+| `/audit sync grad` / `/audit sync-grad` | 同步研究生名单（独立表/token） |
+| `/audit list [n]` | 全部待处理 |
+| `/audit list grad` / `undergraduate` | 按 profile 筛选 pending |
+
 | `/audit record` | 只记录，不自动放人（**日常推荐**） |
 | `/audit manual` | 人工审核模式 |
 | `/audit auto confirm` | 自动通过强匹配（需 confirm） |
@@ -159,6 +164,14 @@
 - 姓名 + 学号 或 姓名 + 通知书编号 → strong（需 26 级）
 - 专业可选；专业别名支持模糊（电子→电子信息类等），但仍为 weak，不 auto approve
 - QQ 仅作辅助匹配，单独 QQ 或 QQ+专业 **不会** 自动通过
+
+## 研究生审核（v0.4.0）
+
+- 配置：`grad_enabled`、`grad_target_group_ids`、独立 `grad_njutable_*`（勿与本科 token/表/群重叠）
+- 缓存：`grad_students.cache.json`、`grad_sync_state.json`
+- 强匹配：姓名 + 硕士/博士 + 专业名称（模糊）或专业代码，且唯一
+- **不读取**「证件号码末三位」；不自动 reject
+- 命令：`/audit sync-grad`、`/audit list grad`
 
 ## 定时同步
 
@@ -308,6 +321,7 @@ pytest tests/
 ## 升级注意
 
 - 升级后请 **完整重启 AstrBot**，勿仅热重载插件
+- **v0.4.0**：新增研究生通道；`grad_*` 配置与本科分离；重叠群不处理
 - **v0.3.23**：新增 `/audit sweep` 批量本地关闭非 strong pending
 - **v0.3.22**：拒绝后改答案重申的 debounce 行为变更；`duplicate_policy_version=v8-reject-comment-change-bypass-burst`
 - **v0.3.20+**：`/audit list` 依赖 `get_group_system_msg`；SnowLuma 20 条上限时不会把缺失当成外部拒绝

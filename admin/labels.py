@@ -62,6 +62,16 @@ def list_action_hint(item) -> str:
 def applicant_summary(item) -> str:
     parsed = getattr(item, "parsed", {}) or {}
     name = parsed.get("name") or "未识别"
+    profile = getattr(item, "profile", None) or (getattr(item, "to_public_dict", lambda: {})() or {}).get("profile")
+    if profile == "graduate" or parsed.get("admission_type"):
+        major = parsed.get("major_text") or parsed.get("major")
+        adm = parsed.get("admission_type")
+        bits = [str(name)]
+        if adm:
+            bits.append(str(adm))
+        if major:
+            bits.append(str(major))
+        return " / ".join(bits)
     student_id = parsed.get("student_id")
     notice_no = parsed.get("notice_no")
     major = parsed.get("major")

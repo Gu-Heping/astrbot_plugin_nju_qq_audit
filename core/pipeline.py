@@ -38,6 +38,18 @@ from core.version import (
 )
 from data_source.njutable_provider import load_students_for_audit
 from data_source.students import ActionResult, PendingRequest
+from graduate.cache import GraduateStudentCache
+from graduate.decision import apply_graduate_auto_approve_flag, make_graduate_decision
+from graduate.matcher import GraduateMatchResult, match_graduate
+from graduate.models import GraduateParsedApplication
+from graduate.njutable_provider import load_graduates_for_audit
+from graduate.parser import parse_graduate_comment
+from profiles.router import (
+    AuditProfile,
+    configured_audit_group_ids,
+    overlapping_group_ids,
+    resolve_profile,
+)
 from onebot.event_extract import GroupJoinRequest, GroupMemberDecrease, GroupMemberIncrease
 from storage.audit_log import utc_now_iso
 from storage.requests_store import RequestsStore, new_request_id
@@ -71,6 +83,8 @@ def _external_join_message(
 
 
 def _parsed_to_dict(parsed) -> dict:
+    if isinstance(parsed, GraduateParsedApplication):
+        return parsed.to_dict()
     return {
         "name": parsed.name,
         "student_id": parsed.student_id,
@@ -82,6 +96,21 @@ def _parsed_to_dict(parsed) -> dict:
 
 
 def _match_to_dict(match) -> dict:
+    if isinstance(match, GraduateMatchResult):
+        student = match.matched_student
+        return {
+            "strength": match.strength,
+            "confidence": match.confidence,
+            "reason": match.reason,
+            "matched_by": match.matched_by,
+            "matched_student_key": match.matched_student_key,
+            "matched_student_id": None,
+            "candidate_count": match.candidate_count,
+            "admission_type": student.admission_type if student else None,
+            "major_name": student.major_name if student else None,
+            "college": student.college if student else None,
+            "qq_match": False,
+        }
     return {
         "strength": match.strength,
         "confidence": match.confidence,
@@ -107,6 +136,15 @@ class RematchSummary:
     sync_failed: bool = False
 
 
+@dataclass
+class AuditEvaluation:
+    profile: AuditProfile
+    mode: str
+    parsed: Any
+    match: Any
+    decision: Any
+
+
 def _event_context(event: GroupJoinRequest) -> tuple[str | None, str]:
     event_time = extract_event_time_iso(event.raw_event)
     fingerprint = compute_event_fingerprint(
@@ -130,12 +168,14 @@ class AuditPipeline:
         cache: StudentCache,
         actions: ActionClient,
         notifier: AdminNotifier,
+        grad_cache: GraduateStudentCache | None = None,
     ) -> None:
         self.settings = settings
         self.requests = requests
         self.audit = audit
         self.runtime = runtime
         self.cache = cache
+        self.grad_cache = grad_cache
         self.actions = actions
         self.notifier = notifier
 
@@ -330,10 +370,29 @@ class AuditPipeline:
         )
 
     async def handle_group_request(self, event: GroupJoinRequest) -> None:
-        if not self.settings.target_group_ids:
-            logger.debug("[audit] target_group_ids empty, skip request")
+        has_undergrad = bool(self.settings.target_group_ids)
+        has_grad = self.settings.grad_enabled and bool(self.settings.grad_target_group_ids)
+        if not has_undergrad and not has_grad:
+            logger.debug("[audit] no target groups configured, skip request")
             return
-        if event.group_id not in self.settings.target_group_ids:
+
+        profile = resolve_profile(event.group_id, self.settings)
+        if profile is None:
+            overlap = overlapping_group_ids(self.settings)
+            if event.group_id in overlap:
+                logger.warning(
+                    "[audit] overlap group ignored: %s", event.group_id
+                )
+                await self.audit.append(
+                    {
+                        "type": "request_received",
+                        "group_id": event.group_id,
+                        "user_id": event.user_id,
+                        "decision": "ignored",
+                        "reason": "本科/研究生目标群重叠，拒绝处理",
+                    }
+                )
+                return
             logger.debug("[audit] non-target group ignored: %s", event.group_id)
             await self.audit.append(
                 {
@@ -402,6 +461,7 @@ class AuditPipeline:
                     request_id=existing.id,
                     event_time=event_time,
                     fingerprint=fingerprint,
+                    profile=profile,
                 )
                 return
 
@@ -420,31 +480,76 @@ class AuditPipeline:
             event,
             event_time=event_time,
             fingerprint=fingerprint,
+            profile=profile,
         )
 
-    def _evaluate_request(self, event: GroupJoinRequest):
+    def _evaluate_undergraduate_request(self, event: GroupJoinRequest):
         mode, _ = self._effective_mode()
         students = load_students_for_audit(self.settings, self.cache)
         parsed = parse_application_comment(event.comment or "")
         match = match_student(parsed, students, applicant_user_id=event.user_id)
         decision = make_decision(parsed, match, is_target_group=True)
         decision = apply_auto_approve_flag(decision, mode, match)
-        return mode, parsed, match, decision
+        return AuditEvaluation(
+            profile="undergraduate",
+            mode=mode,
+            parsed=parsed,
+            match=match,
+            decision=decision,
+        )
+
+    def _evaluate_graduate_request(self, event: GroupJoinRequest):
+        mode, _ = self._effective_mode()
+        cache = self.grad_cache
+        students = load_graduates_for_audit(self.settings, cache) if cache else []
+        parsed = parse_graduate_comment(event.comment or "")
+        match = match_graduate(parsed, students)
+        decision = make_graduate_decision(parsed, match, is_target_group=True)
+        decision = apply_graduate_auto_approve_flag(decision, mode, match)
+        return AuditEvaluation(
+            profile="graduate",
+            mode=mode,
+            parsed=parsed,
+            match=match,
+            decision=decision,
+        )
+
+    def _evaluate_request(
+        self, event: GroupJoinRequest, *, profile: AuditProfile | None = None
+    ):
+        resolved = profile or resolve_profile(event.group_id, self.settings) or "undergraduate"
+        if resolved == "graduate":
+            return self._evaluate_graduate_request(event)
+        return self._evaluate_undergraduate_request(event)
 
     def _evaluate_pending_fields(self, req: PendingRequest):
         """Re-parse and rematch a stored pending against the current student cache."""
-        mode, _ = self._effective_mode()
-        students = load_students_for_audit(self.settings, self.cache)
-        parsed = parse_application_comment(req.comment or "")
-        match = match_student(parsed, students, applicant_user_id=req.user_id)
-        decision = make_decision(parsed, match, is_target_group=True)
-        decision = apply_auto_approve_flag(decision, mode, match)
-        return mode, parsed, match, decision
+        profile = getattr(req, "profile", None) or "undergraduate"
+        # Synthetic event for shared evaluators
+        event = GroupJoinRequest(
+            group_id=req.group_id,
+            user_id=req.user_id,
+            comment=req.comment or "",
+            flag=req.flag,
+            sub_type=req.sub_type or "add",
+        )
+        if profile == "graduate":
+            ev = self._evaluate_graduate_request(event)
+        else:
+            ev = self._evaluate_undergraduate_request(event)
+        return ev.mode, ev.parsed, ev.match, ev.decision
 
-    async def rematch_active_pending(self, *, source: str = "manual") -> RematchSummary:
-        """Re-evaluate all active pending against the current student cache.
+    async def rematch_active_pending(
+        self,
+        *,
+        source: str = "manual",
+        profiles: frozenset[str] | None = None,
+    ) -> RematchSummary:
+        """Re-evaluate active pending against the current student cache.
 
         Does not call QQ APIs or send admin notifications.
+        When ``profiles`` is set, only those request profiles are rematched
+        (e.g. undergraduate-only for release/sweep).
         """
         summary = RematchSummary()
         pending = await self.requests.list_pending(limit=1000)
@@ -453,6 +558,9 @@ class AuditPipeline:
 
         for req in pending:
             if req.status != "pending" or req.processed_at:
+                continue
+            req_profile = getattr(req, "profile", None) or "undergraduate"
+            if profiles is not None and req_profile not in profiles:
                 continue
             old_strength = req.match_strength or (req.match or {}).get("strength") or "none"
             old_decision = req.decision
@@ -526,7 +634,18 @@ class AuditPipeline:
     ) -> None:
         old_comment = existing.comment or ""
         new_comment = event.comment or ""
-        mode, parsed, match, decision = self._evaluate_request(event)
+        profile = (
+            getattr(existing, "profile", None)
+            or resolve_profile(event.group_id, self.settings)
+            or "undergraduate"
+        )
+        evaluation = self._evaluate_request(event, profile=profile)
+        mode, parsed, match, decision = (
+            evaluation.mode,
+            evaluation.parsed,
+            evaluation.match,
+            evaluation.decision,
+        )
         now = utc_now_iso()
 
         previous = list(existing.previous_comments or [])
@@ -550,6 +669,7 @@ class AuditPipeline:
             "updated_at": now,
             "comment_revision": int(existing.comment_revision or 0) + 1,
             "previous_comments": previous,
+            "profile": profile,
         }
         pending = await self.requests.update_by_id(existing.id, update)
         if pending is None:
@@ -568,6 +688,7 @@ class AuditPipeline:
                 "decision": decision.decision,
                 "reason": decision.reason,
                 "match_strength": match.strength,
+                "profile": profile,
             }
         )
         logger.info(
@@ -631,8 +752,20 @@ class AuditPipeline:
         attempt_no: int = 1,
         event_time: str | None = None,
         fingerprint: str | None = None,
+        profile: AuditProfile | None = None,
     ) -> str:
-        mode, parsed, match, decision = self._evaluate_request(event)
+        resolved_profile = (
+            profile
+            or resolve_profile(event.group_id, self.settings)
+            or "undergraduate"
+        )
+        evaluation = self._evaluate_request(event, profile=resolved_profile)
+        mode, parsed, match, decision = (
+            evaluation.mode,
+            evaluation.parsed,
+            evaluation.match,
+            evaluation.decision,
+        )
 
         req_id = request_id or new_request_id()
         pending = PendingRequest(
@@ -656,6 +789,7 @@ class AuditPipeline:
             attempt_no=attempt_no,
             received_event_time=event_time,
             event_fingerprint=fingerprint,
+            profile=resolved_profile,
         )
         if resubmit:
             update_dict = RequestsStore._request_to_dict(pending)
@@ -665,6 +799,7 @@ class AuditPipeline:
             update_dict["retry_count"] = 0
             update_dict["processed_at"] = None
             update_dict["status"] = "pending"
+            update_dict["profile"] = resolved_profile
             if fingerprint:
                 update_dict["event_fingerprint"] = fingerprint
             if event_time:
@@ -695,12 +830,14 @@ class AuditPipeline:
                 "match_strength": match.strength,
                 "reapply_of": reapply_of,
                 "attempt_no": attempt_no,
+                "profile": resolved_profile,
             }
         )
 
         logger.info(
-            "[audit] request=%s decision=%s mode=%s reason=%s",
+            "[audit] request=%s profile=%s decision=%s mode=%s reason=%s",
             req_id,
+            resolved_profile,
             decision.decision,
             mode,
             decision.reason,
@@ -744,12 +881,17 @@ class AuditPipeline:
                 and decision.decision == "manual_review"
             ):
                 try:
+                    notify_parsed = dict(pending.parsed or {})
+                    notify_parsed["_profile"] = getattr(pending, "profile", None) or "undergraduate"
+                    match_dict = pending.match or {}
+                    if match_dict.get("college") and not notify_parsed.get("college"):
+                        notify_parsed["college"] = match_dict.get("college")
                     await self.notifier.notify_manual_review(
                         request_id=req_id,
                         group_id=event.group_id,
                         user_id=event.user_id,
                         comment=event.comment,
-                        parsed=pending.parsed,
+                        parsed=notify_parsed,
                         reason=decision.reason,
                     )
                 except Exception:
@@ -1189,13 +1331,14 @@ class AuditPipeline:
         list_cache: AdminListCacheStore | None = None,
         notifier: AdminNotifier | None = None,
     ) -> ReconcileResult:
-        if not self.settings.target_group_ids:
+        active_groups = configured_audit_group_ids(self.settings)
+        if not active_groups:
             return ReconcileResult.not_handled(
-                "non_target_group", "target_group_ids empty"
+                "non_target_group", "no configured audit groups"
             )
-        if group_id not in self.settings.target_group_ids:
+        if group_id not in active_groups:
             return ReconcileResult.not_handled(
-                "non_target_group", f"group {group_id} not in target_group_ids"
+                "non_target_group", f"group {group_id} not in audit groups"
             )
 
         pending = await self.requests.find_active_pending_by_user_group(group_id, user_id)
@@ -1239,9 +1382,7 @@ class AuditPipeline:
         return ReconcileResult.success(pending.id, message)
 
     async def handle_group_increase(self, increase: GroupMemberIncrease) -> None:
-        if not self.settings.target_group_ids:
-            return
-        if increase.group_id not in self.settings.target_group_ids:
+        if increase.group_id not in configured_audit_group_ids(self.settings):
             return
 
         await self.requests.update_membership_state(
@@ -1263,9 +1404,7 @@ class AuditPipeline:
         )
 
     async def handle_group_decrease(self, decrease: GroupMemberDecrease) -> None:
-        if not self.settings.target_group_ids:
-            return
-        if decrease.group_id not in self.settings.target_group_ids:
+        if decrease.group_id not in configured_audit_group_ids(self.settings):
             return
 
         if decrease.sub_type == "kick_me" or (
@@ -1313,6 +1452,7 @@ class AuditPipeline:
         *,
         source: str,
         list_cache: AdminListCacheStore | None = None,
+        profiles: frozenset[str] | None = None,
     ) -> PendingReconcileSummary:
         summary = PendingReconcileSummary()
         try:
@@ -1321,6 +1461,7 @@ class AuditPipeline:
                     source=source,
                     list_cache=list_cache,
                     summary=summary,
+                    profiles=profiles,
                 ),
                 timeout=self.settings.audit_list_reconcile_timeout_ms / 1000,
             )
@@ -1354,12 +1495,17 @@ class AuditPipeline:
         source: str,
         list_cache: AdminListCacheStore | None,
         summary: PendingReconcileSummary,
+        profiles: frozenset[str] | None = None,
     ) -> PendingReconcileSummary:
-        pendings = [
-            req
-            for req in await self.requests.list_pending(limit=1000)
-            if req.group_id in self.settings.target_group_ids
-        ]
+        active_groups = configured_audit_group_ids(self.settings)
+        pendings = []
+        for req in await self.requests.list_pending(limit=1000):
+            if req.group_id not in active_groups:
+                continue
+            req_profile = getattr(req, "profile", None) or "undergraduate"
+            if profiles is not None and req_profile not in profiles:
+                continue
+            pendings.append(req)
         if not pendings:
             return summary
 
@@ -1372,24 +1518,32 @@ class AuditPipeline:
             result = await self.actions.get_group_system_msg(group_id)
             fetch = build_group_snapshot_fetch(result)
             if not fetch.ok or not fetch.reliable:
+                # Isolate per-group failure so one profile/group cannot block others.
                 summary.failed = True
-                summary.failure_message = fetch.message or "group system msg failed"
+                if not summary.failure_message:
+                    summary.failure_message = fetch.message or "group system msg failed"
                 await self.audit.append(
                     {
                         "type": "reconcile_failed",
                         "source": source,
                         "reason": "group_system_msg_unavailable",
                         "group_id": group_id,
-                        "message": summary.failure_message,
+                        "message": fetch.message or "group system msg failed",
                     }
                 )
-                return summary
+                continue
             fetches[group_id] = fetch
+
+        if not fetches:
+            return summary
 
         planned: list[tuple[str, PendingRequest]] = []
         now_iso = utc_now_iso()
         for group_id, items in by_group.items():
-            fetch = fetches[group_id]
+            fetch = fetches.get(group_id)
+            if fetch is None:
+                summary.unchanged += len(items)
+                continue
             if fetch.empty_untrusted:
                 summary.snowluma_empty_ambiguity = True
             if fetch.snapshot_saturated:

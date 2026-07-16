@@ -2,6 +2,37 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.0] - 2026-07-16
+
+### 新增
+
+- **研究生群自动审核**（与本科完全分离）：独立 `grad_*` 配置、群号、NJUTable token/表、缓存文件 `grad_students.cache.json` / `grad_sync_state.json`
+- profile 路由：`undergraduate` / `graduate`；重叠群号拒绝处理并报警
+- 研究生 parser / matcher / decision：姓名 + 硕/博 + 专业（或专业代码）唯一命中才 strong approve；不自动 reject
+- `PendingRequest.profile`；`/audit list` / `view` 显示「本科/研究生」
+- `/audit sync grad`、`/audit sync-grad`、`/audit list grad` / `list undergraduate`
+- `/audit debug` 输出 grad_enabled、grad 群、缓存人数、同步状态、重叠警告
+- **永不读取/缓存/展示「证件号码末三位」**
+
+### 修复
+
+- 研究生 parser：显式解析「专业代码」标签；姓名/专业/类型标签在下一字段前停住，避免粘连误吃
+- 专业字段支持「代码+名称」粘连（如 `085400电子信息`）
+- 「硕/博」模板占位（含 `类型：硕/博`）不解析为具体录取类型；多专业代码冲突不 strong
+- 专业代码与专业名称冲突时不 strong（需同时满足）
+- `grad_enabled=false` 时忽略研究生群列表，重叠不再拦截本科；`/audit debug` 重叠警告同步受控
+- 入退群 / 外部同意对账覆盖已启用的研究生目标群；单群对账失败不阻断其他群
+- `/audit list grad|undergraduate` 对账按 profile 过滤
+- 恢复误删的 `run_sync`；研究生同步加独立锁；hot-reload 补齐 `grad_cache` / sync-grad
+- sweep / release rematch 默认仅处理本科，避免误关或改写研究生 pending
+- 人工审核通知在无短编号时回退 `/audit list`，不再输出 `/audit view ?`
+- `/audit auto confirm` 文案明确本科与研究生的自动通过条件
+
+### 说明
+
+- 不改变本科 matcher/parser/decision 与现有状态机
+- 研究生 strong 在 `auto` 下可自动通过；release/catchup 仍仅面向本科 26 级 strong
+
 ## [v0.3.23] - 2026-07-15
 
 ### 新增

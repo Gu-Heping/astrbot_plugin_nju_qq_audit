@@ -141,6 +141,7 @@ class PendingRequest:
     dismissed_at: str | None = None
     dismissed_by: str | None = None
     dismiss_reason: str | None = None
+    profile: str = "undergraduate"  # undergraduate | graduate
 
     @staticmethod
     def _public_action_result(result: ActionResult | None) -> dict[str, Any] | None:
@@ -187,6 +188,7 @@ class PendingRequest:
             "dismissed_at": self.dismissed_at,
             "dismissed_by": self.dismissed_by,
             "dismiss_reason": self.dismiss_reason,
+            "profile": self.profile or "undergraduate",
         }
 
 

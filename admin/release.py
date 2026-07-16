@@ -88,6 +88,8 @@ def _is_grade26_releasable(req: PendingRequest) -> bool:
 
 
 def is_releasable(req: PendingRequest, settings: PluginSettings) -> bool:
+    if getattr(req, "profile", "undergraduate") == "graduate":
+        return False
     if req.status != "pending" or req.processed_at:
         return False
     if req.decision != "approve":
@@ -133,7 +135,9 @@ async def rematch_and_list_releasable(
 ) -> tuple[RematchSummary, list[PendingRequest]]:
     pending_before = await requests_store.list_pending(limit=1000)
     before_ids = {r.id for r in pending_before if is_releasable(r, settings)}
-    summary = await pipeline.rematch_active_pending(source=source)
+    summary = await pipeline.rematch_active_pending(
+        source=source, profiles=frozenset({"undergraduate"})
+    )
     items = await list_releasable(requests_store, settings, limit=limit)
     summary.newly_releasable = sum(1 for r in items if r.id not in before_ids)
     return summary, items

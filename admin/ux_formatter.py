@@ -127,9 +127,11 @@ def format_list(
             public = item.to_public_dict()
             summary = applicant_summary(item)
             comment = (public.get("comment") or "")[:80]
+            profile = public.get("profile") or "undergraduate"
+            profile_label = "研究生" if profile == "graduate" else "本科"
             lines.extend(
                 [
-                    f"[{idx}] {summary}",
+                    f"[{idx}] [{profile_label}] {summary}",
                     f"群：{public.get('group_id', '')}",
                     f"验证：{comment or '（空）'}",
                     f"判断：{human_judgement(item)}",
@@ -164,9 +166,12 @@ def format_view(item, index: int | None = None) -> str:
     parsed = public.get("parsed") or {}
     status = public.get("status", "")
     title = f"申请详情 [{index}]" if index is not None else f"申请详情 {public.get('id', '')}"
+    profile = public.get("profile") or "undergraduate"
+    profile_label = "研究生" if profile == "graduate" else "本科"
     lines = [
         title,
         "",
+        f"类型：{profile_label}",
         f"用户：{public.get('user_id', '')}",
         f"群：{public.get('group_id', '')}",
         f"验证：{public.get('comment', '')[:120]}",
@@ -176,22 +181,40 @@ def format_view(item, index: int | None = None) -> str:
     revision = int(public.get("comment_revision") or 0)
     if revision > 0:
         lines.append(f"历史填写：{revision} 次")
-    lines.extend(
-        [
-            "",
-            "解析结果：",
-            _parsed_line("姓名", parsed.get("name")),
-            _parsed_line("学号", parsed.get("student_id")),
-            _parsed_line("通知书编号", parsed.get("notice_no")),
-            _parsed_line("专业", parsed.get("major")),
-            _parsed_line("书院", parsed.get("academy")),
-            "",
-            "判断：",
-            f"结果：{human_judgement(item)}",
-            f"原因：{public.get('reason') or human_judgement(item)}",
-            "",
-        ]
-    )
+    if profile == "graduate":
+        match = public.get("match") or {}
+        lines.extend(
+            [
+                "",
+                "解析结果：",
+                _parsed_line("姓名", parsed.get("name")),
+                _parsed_line("录取类型", parsed.get("admission_type")),
+                _parsed_line("专业", parsed.get("major_text") or parsed.get("major")),
+                _parsed_line("学院", match.get("college") or parsed.get("college")),
+                "",
+                "判断：",
+                f"结果：{human_judgement(item)}",
+                f"原因：{public.get('reason') or human_judgement(item)}",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "解析结果：",
+                _parsed_line("姓名", parsed.get("name")),
+                _parsed_line("学号", parsed.get("student_id")),
+                _parsed_line("通知书编号", parsed.get("notice_no")),
+                _parsed_line("专业", parsed.get("major")),
+                _parsed_line("书院", parsed.get("academy")),
+                "",
+                "判断：",
+                f"结果：{human_judgement(item)}",
+                f"原因：{public.get('reason') or human_judgement(item)}",
+                "",
+            ]
+        )
     last_action = public.get("last_action_result") or {}
     action_result = public.get("action_result") or {}
     if status == "external":
@@ -291,10 +314,11 @@ def format_auto_warning() -> str:
         [
             "切换到自动审核前请确认：",
             "",
-            "- auto 只会自动通过姓名+学号或姓名+通知书编号的 26 级 strong match",
+            "- 本科：仅自动通过姓名+学号或姓名+通知书编号的 26 级 strong match",
+            "- 研究生（若已启用）：仅自动通过姓名+硕/博+专业（或专业代码）唯一 strong match",
             "- 弱匹配、信息不足不会自动拒绝",
             "- 日常暂停自动放人请用 /audit record，不是 off",
-            "- 建议先完成 /audit sync 并人工抽查几条",
+            "- 建议先 /audit sync（及 /audit sync-grad）并人工抽查几条",
             "",
             "确认切换请发送：",
             "/audit auto confirm",
@@ -330,29 +354,43 @@ def format_manual_review_notice(
     user_id: str,
     comment: str,
     judgement: str,
+    profile: str = "undergraduate",
+    parsed: dict | None = None,
 ) -> str:
+    parsed = parsed or {}
+    ref = str(index) if index is not None else None
     lines = [
         "新的入群申请需要确认",
         "",
     ]
-    if index is not None:
-        lines.append(f"[{index}] 用户：{user_id}")
-    else:
-        lines.append(f"用户：{user_id}")
+    if profile == "graduate":
+        lines.append("类型：研究生")
+        if parsed.get("name"):
+            lines.append(f"姓名：{parsed.get('name')}")
+        if parsed.get("admission_type"):
+            lines.append(f"录取类型：{parsed.get('admission_type')}")
+        major = parsed.get("major_text") or parsed.get("major")
+        if major:
+            lines.append(f"专业：{major}")
+        college = parsed.get("college")
+        if college:
+            lines.append(f"学院：{college}")
+        lines.append("")
     lines.extend(
         [
             f"群：{group_id}",
-            f"验证：{(comment or '')[:80]}",
+            f"用户：{user_id}",
+            f"验证：{(comment or '')[:120] or '（空）'}",
             f"判断：{judgement}",
             "",
         ]
     )
-    if index is not None:
+    if ref is not None:
         lines.extend(
             [
-                f"/audit view {index}",
-                f"/audit ok {index}",
-                f"/audit no {index} 信息不完整",
+                f"/audit view {ref}",
+                f"/audit ok {ref}",
+                f"/audit no {ref}",
                 "",
             ]
         )
@@ -425,6 +463,10 @@ def format_debug(
     pending_update_policy_version: str | None = None,
     git_commit: str | None = None,
     group_system_msg_probe: dict | None = None,
+    grad_cache_count: int | None = None,
+    grad_sync_state: SyncState | None = None,
+    group_overlap_warning: str | None = None,
+    config_warnings: list[str] | None = None,
 ) -> str:
     return format_status(
         settings,
@@ -443,4 +485,8 @@ def format_debug(
         pending_update_policy_version=pending_update_policy_version,
         git_commit=git_commit,
         group_system_msg_probe=group_system_msg_probe,
+        grad_cache_count=grad_cache_count,
+        grad_sync_state=grad_sync_state,
+        group_overlap_warning=group_overlap_warning,
+        config_warnings=config_warnings,
     )

@@ -183,5 +183,60 @@
     "description": "列名：QQ（可选，仅辅助参考）",
     "type": "string",
     "default": "QQ"
-  }
+  },
+  "grad_enabled": {
+    "description": "是否启用研究生群审核（与本科完全分离）",
+    "type": "bool",
+    "default": false
+  },
+  "grad_target_group_ids": {
+    "description": "研究生目标群号，逗号分隔。不得与本科 target_group_ids 重叠",
+    "type": "string",
+    "default": ""
+  },
+  "grad_student_source": {
+    "description": "研究生数据源（当前仅 nju_table）",
+    "type": "string",
+    "default": "nju_table",
+    "options": ["nju_table"]
+  },
+  "grad_njutable_server_url": {
+    "description": "研究生 SeaTable 服务器地址",
+    "type": "string",
+    "default": "https://table.nju.edu.cn"
+  },
+  "grad_njutable_api_token": {
+    "description": "研究生 SeaTable base API Token（独立于本科 token）",
+    "type": "string",
+    "default": "",
+    "hint": "不得写入日志、缓存或管理员回复；不要配置证件号码相关列"
+  },
+  "grad_njutable_table_name": {
+    "description": "研究生 SeaTable 表名",
+    "type": "string",
+    "default": ""
+  },
+  "grad_njutable_view_name": {
+    "description": "研究生 SeaTable 视图名（可选）",
+    "type": "string",
+    "default": ""
+  },
+  "grad_njutable_page_size": {
+    "description": "研究生 SeaTable 分页大小（最大 1000）",
+    "type": "int",
+    "default": 1000
+  },
+  "grad_njutable_timeout_ms": {
+    "description": "研究生 SeaTable 请求超时（毫秒）",
+    "type": "int",
+    "default": 10000
+  },
+  "grad_col_id": { "description": "研究生列名：id", "type": "string", "default": "id" },
+  "grad_col_admission_type": { "description": "研究生列名：录取类型", "type": "string", "default": "录取类型" },
+  "grad_col_college": { "description": "研究生列名：录取学院", "type": "string", "default": "录取学院" },
+  "grad_col_major_code": { "description": "研究生列名：录取专业代码", "type": "string", "default": "录取专业代码" },
+  "grad_col_major_name": { "description": "研究生列名：录取专业名称", "type": "string", "default": "录取专业名称" },
+  "grad_col_name": { "description": "研究生列名：姓名", "type": "string", "default": "姓名" },
+  "grad_col_short_code_id": { "description": "研究生列名：_short_code_id", "type": "string", "default": "_short_code_id" },
+  "grad_col_imported_at": { "description": "研究生列名：_imported_at", "type": "string", "default": "_imported_at" }
 }
