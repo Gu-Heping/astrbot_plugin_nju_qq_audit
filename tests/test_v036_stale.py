@@ -215,7 +215,7 @@ async def test_notify_external_when_admin_is_applicant(tmp_path):
     sys.modules.setdefault("astrbot.api.event", MagicMock())
     chain = MagicMock()
     sys.modules["astrbot.api.event"].MessageChain.return_value = chain
-    chain.message.return_value = chain
+    chain.message.side_effect = lambda msg: msg
 
     user_id = "2492835361"
     settings = load_settings(
@@ -237,6 +237,21 @@ async def test_notify_external_when_admin_is_applicant(tmp_path):
     msg = context.send_message.await_args.args[1]
     assert "flag" not in str(msg)
     assert "secret" not in str(msg)
+    assert "QQ 侧已通过" in msg
+    assert "申请人：" in msg
+    assert "QQ：" in msg
+    assert "群：" in msg
+    assert "验证：" in msg
+    assert "处理：已从待处理列表移除" in msg
+    assert "QQ侧处理人：未记录" in msg
+    assert "/audit view req123456789" in msg
+    # No internal field names / state-machine jargon.
+    lower = str(msg).lower()
+    assert "external" not in lower
+    assert "request_id:" not in lower
+    assert "group_id:" not in lower
+    assert "user_id:" not in lower
+    assert "sub_type" not in lower
 
 
 @pytest.mark.asyncio

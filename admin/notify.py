@@ -11,8 +11,11 @@ except ImportError:  # pragma: no cover - unit tests without astrbot
 
 from admin.ux_formatter import (
     format_auto_result_notice,
+    extract_external_applicant_and_verification,
     format_manual_review_notice,
+    format_external_handled_notice,
     format_pending_comment_updated_notice,
+    resolve_external_notice_labels,
 )
 from config import PluginSettings
 from onebot.actions import ActionClient
@@ -276,26 +279,28 @@ class AdminNotifier:
     ) -> None:
         if not self.settings.admin_notify:
             return
+        # Pure display formatting; never leak internal state-machine fields.
         short_id = request_id[:12] if request_id else ""
-        label = summary or user_id
-        comment_line = (comment or "")[:80]
-        lines = [
-            "[入群审核] 入群申请已在 QQ 侧通过/入群，队列已标记为 external。",
-            f"申请：{short_id}",
-            f"群：{group_id}",
-            f"用户：{user_id}",
-            f"摘要：{label}",
-        ]
-        if comment_line:
-            lines.append(f"验证：{comment_line}")
-        if notice_sub_type:
-            lines.append(
-                f"QQ 事件 sub_type：{notice_sub_type}"
-                "（OneBot 通知类型；搜索入群、邀请、审批通过均可能为 invite，不代表实际入群路径）"
-            )
-        if operator_id:
-            lines.append(f"操作者 QQ：{operator_id}")
-        message = "\n".join(lines)
+        comment_line = (comment or "")[:120]
+        group_label, user_label, operator_label = await resolve_external_notice_labels(
+            self.display,
+            group_id=group_id,
+            user_id=user_id,
+            operator_id=operator_id,
+        )
+        applicant, verification = extract_external_applicant_and_verification(
+            summary=summary,
+            comment=comment_line,
+            user_id=user_id,
+        )
+        message = format_external_handled_notice(
+            request_id=request_id,
+            applicant=applicant,
+            verification=verification,
+            group_label=group_label,
+            user_label=user_label,
+            operator_label=operator_label,
+        )
         admin_ids = list(self.settings.admin_qq_ids)
         if not admin_ids:
             logger.warning("[audit] external notify skipped: admin_qq_ids empty")

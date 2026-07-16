@@ -2,6 +2,12 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.7] - 2026-07-16
+
+### 优化
+
+- 外部（QQ 侧已通过/入群）通知文案人话化：隐藏 request_id/group_id/user_id/sub_type 等技术字段；统一展示申请人/QQ/群/验证/处理/QQ侧处理人，并在底部提供 `/audit view`
+
 ## [v0.4.6] - 2026-07-16
 
 ### 修复

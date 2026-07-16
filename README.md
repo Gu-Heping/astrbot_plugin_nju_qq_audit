@@ -1,6 +1,6 @@
 # astrbot_plugin_nju_qq_audit
 
-南京大学 26 级新生 QQ 群入群审核 **AstrBot 插件**（非独立 Node 服务）。当前版本 **v0.4.5**。
+南京大学 26 级新生 QQ 群入群审核 **AstrBot 插件**（非独立 Node 服务）。当前版本 **v0.4.7**。
 
 支持 **本科** 与 **研究生** 两套独立审核通道（群号 / NJUTable / 缓存分离；共用事件接入与管理员命令）。
 
@@ -321,7 +321,7 @@ pytest tests/
 ## 升级注意
 
 - 升级后请 **完整重启 AstrBot**，勿仅热重载插件
-- **v0.4.5**：研究生 help/首页/list grad/sync grad 管理员 UX 补齐
+- **v0.4.7**：外部（QQ 侧已通过/入群）管理员通知文案人话化
 - **v0.4.4**：管理员 list/view/回执/help 人话化；sweep/release/catchup 去英文黑话
 - **v0.4.3**：通知 QQ 行展示真实昵称（非申请姓名）；群名支持 get_group_info 回退
 - **v0.4.2**：管理员通知统一中文字段，并支持群名缓存展示

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
+from typing import Any
 
 from admin.formatter import admin_configured, format_status
 from admin.labels import (
@@ -502,6 +504,114 @@ def format_no_result(
             f"群：{group_text}",
             f"理由：{reason or DEFAULT_REJECT_REASON}",
             "处理：已向 QQ 发送拒绝",
+        ]
+    )
+
+
+def extract_external_applicant_and_verification(
+    *,
+    summary: str | None,
+    comment: str | None,
+    user_id: str,
+) -> tuple[str, str]:
+    """Best-effort parse applicant fields from `comment`.
+
+    Never raises; returns safe fallbacks.
+    """
+    comment_line = (comment or "").strip().replace("\n", " ")
+    if not comment_line:
+        applicant = (summary or "").strip() or str(user_id or "")
+        return applicant, applicant
+
+    # Split into tokens like: ["张轩玮", "261108002", "德语"]
+    tokens = re.findall(r"[^\d\s,，;；|/]+|\d+", comment_line)
+    tokens = [t.strip() for t in tokens if t and t.strip()]
+
+    if len(tokens) >= 3:
+        applicant = f"{tokens[0]} / {tokens[1]} / {tokens[2]}"
+        verification = f"{tokens[0]}，{tokens[1]}，{tokens[2]}"
+        return applicant, verification
+    if len(tokens) == 2:
+        applicant = f"{tokens[0]} / {tokens[1]}"
+        verification = f"{tokens[0]}，{tokens[1]}"
+        return applicant, verification
+    if len(tokens) == 1:
+        applicant = tokens[0]
+        return applicant, applicant
+
+    applicant = (summary or "").strip() or str(user_id or "")
+    return applicant, applicant
+
+
+async def resolve_external_notice_labels(
+    display: Any | None,
+    *,
+    group_id: str,
+    user_id: str,
+    operator_id: str | None,
+) -> tuple[str, str, str]:
+    """Resolve group/user/operator labels for external-notice messages.
+
+    Must never raise; on any failure, fall back to safe strings.
+    """
+    group_label = None
+    user_label = None
+    operator_label = None
+
+    if display is not None:
+        try:
+            group_label = await display.get_group_label(group_id)
+        except Exception:
+            pass
+        try:
+            user_label = await display.get_user_label(group_id, user_id, {})
+        except Exception:
+            pass
+        if operator_id:
+            try:
+                operator_label = await display.get_user_label(
+                    group_id, operator_id, {}
+                )
+            except Exception:
+                pass
+
+    if not group_label:
+        group_label = f"群 {group_id}"
+    if not user_label:
+        user_label = str(user_id or "")
+    if operator_id:
+        if not operator_label:
+            operator_label = str(operator_id)
+    else:
+        operator_label = "未记录"
+
+    return group_label, user_label, operator_label
+
+
+def format_external_handled_notice(
+    *,
+    request_id: str,
+    applicant: str,
+    verification: str,
+    group_label: str,
+    user_label: str,
+    operator_label: str,
+) -> str:
+    """Admin-facing notice for QQ external pass/enter (pure display)."""
+    return "\n".join(
+        [
+            "[入群审核] QQ 侧已通过 ✅",
+            "",
+            f"申请人：{applicant}",
+            f"QQ：{user_label}",
+            f"群：{group_label}",
+            f"验证：{verification}",
+            "",
+            "处理：已从待处理列表移除，无需重复审批",
+            f"QQ侧处理人：{operator_label}",
+            "",
+            "查看记录：",
+            f"/audit view {request_id}",
         ]
     )
 
