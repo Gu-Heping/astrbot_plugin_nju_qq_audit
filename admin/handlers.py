@@ -7,10 +7,12 @@ import aiohttp
 
 from admin.notify import AdminNotifier
 from admin.release import ReleaseService
-from config import PluginSettings, load_settings
+from config import PluginSettings, load_settings, validate_settings
 from core.pipeline import AuditPipeline
 from data_source.student_cache import StudentCache
 from data_source.sync_scheduler import SyncScheduler
+from graduate.cache import GraduateStudentCache
+from graduate.njutable_provider import sync_graduate_students
 from onebot.actions import ActionClient, create_action_client, create_http_notify_client
 from onebot.compat import invoke_probe_api
 from onebot.platform_cache import cache_event_platform
@@ -28,6 +30,7 @@ class PluginContext:
         self.astrbot_context = astrbot_context
         self.settings = load_settings(config)
         self.cache = StudentCache(data_dir)
+        self.grad_cache = GraduateStudentCache(data_dir)
         self.requests = RequestsStore(data_dir / "requests.json")
         self.audit = AuditLog(data_dir / "audit.jsonl", self.settings)
         self.runtime = RuntimeStore(data_dir / "runtime.json")
@@ -52,6 +55,7 @@ class PluginContext:
             self.cache,
             self.actions,
             self.notifier,
+            grad_cache=self.grad_cache,
         )
         self._http_session: aiohttp.ClientSession | None = None
         self._platform_id: str | None = None
@@ -174,12 +178,34 @@ class PluginContext:
             if own:
                 await session.close()
 
-    async def run_sync(self, *, source: str = "manual") -> str:
-        async def _locked() -> str:
-            return await self.execute_sync(source=source)
+    async def execute_grad_sync(self, *, source: str = "manual") -> str:
+        session = self._http_session or aiohttp.ClientSession()
+        own = self._http_session is None
+        try:
+            state = await sync_graduate_students(
+                self.settings, self.grad_cache, session
+            )
+            state.last_sync_source = source
+            self.grad_cache.save_sync_state(state)
+            return (
+                f"研究生同步成功: source={state.source}, "
+                f"raw={state.raw_row_count or state.row_count}, "
+                f"mapped={state.mapped_count or state.row_count}, "
+                f"filtered={state.filtered_count}"
+            )
+        except Exception as exc:
+            cached = self.grad_cache.load_students()
+            return (
+                f"研究生同步失败: {type(exc).__name__}。"
+                f"已保留旧缓存 {len(cached)} 条。"
+            )
+        finally:
+            if own:
+                await session.close()
 
-        return await self.sync_scheduler.run_once(
-            _locked,
-            self.cache,
-            source=source,
-        )
+    async def run_grad_sync(self, *, source: str = "manual") -> str:
+        # Separate from undergrad lock path: use a simple sequential call.
+        return await self.execute_grad_sync(source=source)
+
+    def config_warnings(self) -> list[str]:
+        return validate_settings(self.settings)

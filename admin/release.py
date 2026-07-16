@@ -88,6 +88,8 @@ def _is_grade26_releasable(req: PendingRequest) -> bool:
 
 
 def is_releasable(req: PendingRequest, settings: PluginSettings) -> bool:
+    if getattr(req, "profile", "undergraduate") == "graduate":
+        return False
     if req.status != "pending" or req.processed_at:
         return False
     if req.decision != "approve":

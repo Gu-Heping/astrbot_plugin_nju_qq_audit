@@ -23,7 +23,7 @@ def test_help_includes_release_and_report():
     assert "/audit report" in text
     assert "推荐流程" in text
     assert "batch strong" in text
-    assert "NJU QQ Audit v0.3." in text
+    assert "NJU QQ Audit v0." in text
     list_pos = text.index("/audit list")
     pending_pos = text.index("/audit pending")
     catchup_pos = text.index("/audit catchup preview")

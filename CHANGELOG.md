@@ -2,6 +2,23 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.0] - 2026-07-16
+
+### 新增
+
+- **研究生群自动审核**（与本科完全分离）：独立 `grad_*` 配置、群号、NJUTable token/表、缓存文件 `grad_students.cache.json` / `grad_sync_state.json`
+- profile 路由：`undergraduate` / `graduate`；重叠群号拒绝处理并报警
+- 研究生 parser / matcher / decision：姓名 + 硕/博 + 专业（或专业代码）唯一命中才 strong approve；不自动 reject
+- `PendingRequest.profile`；`/audit list` / `view` 显示「本科/研究生」
+- `/audit sync grad`、`/audit sync-grad`、`/audit list grad` / `list undergraduate`
+- `/audit debug` 输出 grad_enabled、grad 群、缓存人数、同步状态、重叠警告
+- **永不读取/缓存/展示「证件号码末三位」**
+
+### 说明
+
+- 不改变本科 matcher/parser/decision 与现有状态机
+- 研究生 strong 在 `auto` 下可自动通过；release/catchup 仍仅面向本科 26 级 strong
+
 ## [v0.3.23] - 2026-07-15
 
 ### 新增

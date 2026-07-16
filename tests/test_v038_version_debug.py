@@ -33,7 +33,7 @@ def test_debug_shows_logic_versions():
         git_commit="abc1234",
     )
     assert f"plugin_version: {PLUGIN_VERSION}" in text
-    assert PLUGIN_VERSION.startswith("v0.3.")
+    assert PLUGIN_VERSION.startswith("v0.")
     assert f"reconcile_logic_version: {RECONCILE_LOGIC_VERSION}" in text
     assert f"duplicate_policy_version: {DUPLICATE_POLICY_VERSION}" in text
     assert f"pending_update_policy_version: {PENDING_UPDATE_POLICY_VERSION}" in text

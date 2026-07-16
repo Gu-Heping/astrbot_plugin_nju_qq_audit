@@ -66,7 +66,11 @@ def format_help(
             "/audit unknown [n]          近 7 天未识别汇总 + 样例",
             "/audit report               运营统计（今日/原因分布）",
             "/audit sync                 手动同步 NJUTable / mock",
+            "/audit sync grad            同步研究生名单",
+            "/audit sync-grad            同上（别名）",
             "/audit sync status          定时同步状态",
+            "/audit list grad            仅研究生 pending",
+            "/audit list undergraduate   仅本科 pending",
             "",
             "模式：",
             "/audit record               只记录，不自动放人（推荐日常）",
@@ -135,6 +139,12 @@ def format_status(
     pending_update_policy_version: str | None = None,
     git_commit: str | None = None,
     group_system_msg_probe: dict | None = None,
+    grad_enabled: bool | None = None,
+    grad_target_group_ids: list[str] | None = None,
+    grad_cache_count: int | None = None,
+    grad_sync_state: SyncState | None = None,
+    group_overlap_warning: str | None = None,
+    config_warnings: list[str] | None = None,
 ) -> str:
     adapter_probe = adapter_probe or {}
     admin_session_stats = admin_session_stats or {"cached": 0, "total": 0}
@@ -186,6 +196,25 @@ def format_status(
         f"data_dir: {data_dir}",
         ]
     )
+    ge = settings.grad_enabled if grad_enabled is None else grad_enabled
+    lines.append(f"grad_enabled: {ge}")
+    gids = (
+        grad_target_group_ids
+        if grad_target_group_ids is not None
+        else sorted(settings.grad_target_group_ids)
+    )
+    lines.append(f"grad_target_group_ids: {', '.join(gids) or '(未配置)'}")
+    if grad_cache_count is not None:
+        lines.append(f"grad_cache_count: {grad_cache_count}")
+    if grad_sync_state is not None:
+        lines.append(f"grad_last_sync_at: {grad_sync_state.last_sync_at or '(无)'}")
+        lines.append(
+            f"grad_last_sync_result: {grad_sync_state.last_sync_result or '(无)'}"
+        )
+    if group_overlap_warning:
+        lines.append(f"group_overlap_warning: {group_overlap_warning}")
+    for w in config_warnings or []:
+        lines.append(f"config_warning: {w}")
     if group_system_msg_probe:
         lines.append("group_system_msg_probe:")
         for key in (

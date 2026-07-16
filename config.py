@@ -16,6 +16,7 @@ SECRET_KEYS = frozenset(
     {
         "onebot_access_token",
         "njutable_api_token",
+        "grad_njutable_api_token",
         "flag",
         "token",
         "access_token",
@@ -80,9 +81,31 @@ class PluginSettings:
     audit_list_reconcile_timeout_ms: int = 4000
     audit_list_reject_confirm_snapshots: int = 2
     audit_list_reject_wait_seconds: int = 30
+    # Graduate audit (fully separated from undergraduate NJUTable / groups / cache)
+    grad_enabled: bool = False
+    grad_target_group_ids: frozenset[str] = frozenset()
+    grad_student_source: str = "nju_table"
+    grad_njutable_server_url: str = "https://table.nju.edu.cn"
+    grad_njutable_api_token: str = ""
+    grad_njutable_table_name: str = ""
+    grad_njutable_view_name: str = ""
+    grad_njutable_page_size: int = 1000
+    grad_njutable_timeout_ms: int = 10000
+    grad_col_id: str = "id"
+    grad_col_admission_type: str = "录取类型"
+    grad_col_college: str = "录取学院"
+    grad_col_major_code: str = "录取专业代码"
+    grad_col_major_name: str = "录取专业名称"
+    grad_col_name: str = "姓名"
+    grad_col_short_code_id: str = "_short_code_id"
+    grad_col_imported_at: str = "_imported_at"
 
     def __repr__(self) -> str:
-        return f"PluginSettings(mode={self.mode!r}, student_source={self.student_source!r}, target_groups={len(self.target_group_ids)})"
+        return (
+            f"PluginSettings(mode={self.mode!r}, student_source={self.student_source!r}, "
+            f"target_groups={len(self.target_group_ids)}, "
+            f"grad_enabled={self.grad_enabled}, grad_groups={len(self.grad_target_group_ids)})"
+        )
 
 
 def mask_secret(value: str, visible: int = 4) -> str:
@@ -96,7 +119,11 @@ def mask_secret(value: str, visible: int = 4) -> str:
 def redact_tokens_in_string(text: str, settings: PluginSettings | None = None) -> str:
     result = text
     if settings:
-        for token in (settings.onebot_access_token, settings.njutable_api_token):
+        for token in (
+            settings.onebot_access_token,
+            settings.njutable_api_token,
+            settings.grad_njutable_api_token,
+        ):
             if token:
                 result = result.replace(token, "***")
     for pattern in (r"Bearer\s+\S+", r"access_token['\"]?\s*[:=]\s*\S+"):
@@ -250,6 +277,31 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         audit_list_reject_wait_seconds=_clamp_int(
             config.get("audit_list_reject_wait_seconds"), 30, minimum=0, maximum=3600
         ),
+        grad_enabled=bool(config.get("grad_enabled", False)),
+        grad_target_group_ids=parse_numeric_ids(
+            str(config.get("grad_target_group_ids", "")), "grad_target_group_ids"
+        ),
+        grad_student_source="nju_table",
+        grad_njutable_server_url=str(
+            config.get("grad_njutable_server_url", "https://table.nju.edu.cn")
+        ).strip(),
+        grad_njutable_api_token=str(config.get("grad_njutable_api_token", "")).strip(),
+        grad_njutable_table_name=str(config.get("grad_njutable_table_name", "")).strip(),
+        grad_njutable_view_name=str(config.get("grad_njutable_view_name", "")).strip(),
+        grad_njutable_page_size=_clamp_int(
+            config.get("grad_njutable_page_size"), 1000, minimum=1, maximum=1000
+        ),
+        grad_njutable_timeout_ms=_clamp_int(
+            config.get("grad_njutable_timeout_ms"), 10000, minimum=1
+        ),
+        grad_col_id=str(config.get("grad_col_id", "id")),
+        grad_col_admission_type=str(config.get("grad_col_admission_type", "录取类型")),
+        grad_col_college=str(config.get("grad_col_college", "录取学院")),
+        grad_col_major_code=str(config.get("grad_col_major_code", "录取专业代码")),
+        grad_col_major_name=str(config.get("grad_col_major_name", "录取专业名称")),
+        grad_col_name=str(config.get("grad_col_name", "姓名")),
+        grad_col_short_code_id=str(config.get("grad_col_short_code_id", "_short_code_id")),
+        grad_col_imported_at=str(config.get("grad_col_imported_at", "_imported_at")),
     )
 
 
@@ -259,6 +311,19 @@ def validate_settings(settings: PluginSettings) -> list[str]:
         warnings.append(
             "onebot_action_backend=http 但未配置 onebot_http_url，HTTP action 不可用"
         )
+    overlap = settings.target_group_ids & settings.grad_target_group_ids
+    if overlap:
+        warnings.append(
+            "target_group_ids 与 grad_target_group_ids 重叠："
+            + ",".join(sorted(overlap))
+            + "（重叠群将不处理，避免误审）"
+        )
+    if settings.grad_enabled and not settings.grad_target_group_ids:
+        warnings.append("grad_enabled=true 但未配置 grad_target_group_ids")
+    if settings.grad_enabled and not settings.grad_njutable_api_token:
+        warnings.append("grad_enabled=true 但未配置 grad_njutable_api_token")
+    if settings.grad_enabled and not settings.grad_njutable_table_name:
+        warnings.append("grad_enabled=true 但未配置 grad_njutable_table_name")
     return warnings
 
 
@@ -280,6 +345,11 @@ def sanitize_config_for_display(settings: PluginSettings) -> dict[str, Any]:
         "njutable_api_token": mask_secret(settings.njutable_api_token),
         "njutable_table_name": settings.njutable_table_name,
         "njutable_view_name": settings.njutable_view_name or "(未设置)",
+        "grad_enabled": settings.grad_enabled,
+        "grad_target_group_ids": sorted(settings.grad_target_group_ids),
+        "grad_njutable_server_url": settings.grad_njutable_server_url,
+        "grad_njutable_api_token": mask_secret(settings.grad_njutable_api_token),
+        "grad_njutable_table_name": settings.grad_njutable_table_name or "(未设置)",
         "probe_enabled": settings.probe_enabled,
         "log_raw_event": settings.log_raw_event,
     }

@@ -31,11 +31,18 @@ def format_stale_list(items: list, index_map: dict[int, str]) -> str:
 
 
 async def fetch_pending_for_admin(
-    ctx, admin_id: str, limit: int = 10
+    ctx, admin_id: str, limit: int = 10, *, profile: str | None = None
 ) -> tuple[list, dict[int, str]]:
     ensure_ctx_compat(ctx)
     limit = max(1, min(int(limit), 50))
-    items = await ctx.requests.list_pending(limit=limit)
+    items = await ctx.requests.list_pending(limit=1000)
+    if profile in {"undergraduate", "graduate"}:
+        items = [
+            item
+            for item in items
+            if (getattr(item, "profile", None) or "undergraduate") == profile
+        ]
+    items = items[:limit]
     index_map = await ctx.list_cache.refresh(admin_id, [item.id for item in items])
     return items, index_map
 

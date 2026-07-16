@@ -130,6 +130,7 @@ class RequestsStore:
             dismissed_at=data.get("dismissed_at"),
             dismissed_by=str(data["dismissed_by"]) if data.get("dismissed_by") else None,
             dismiss_reason=str(data["dismiss_reason"]) if data.get("dismiss_reason") else None,
+            profile=str(data.get("profile") or "undergraduate"),
         )
 
     @staticmethod
@@ -167,6 +168,7 @@ class RequestsStore:
             "dismissed_at": req.dismissed_at,
             "dismissed_by": req.dismissed_by,
             "dismiss_reason": req.dismiss_reason,
+            "profile": getattr(req, "profile", None) or "undergraduate",
         }
         if req.action_result:
             data["action_result"] = {

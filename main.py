@@ -167,6 +167,8 @@ class NjuQqAuditPlugin(Star):
             get_git_commit() or "n/a",
             self.data_dir,
         )
+        for warning in self.ctx.config_warnings():
+            logger.warning("[%s] config: %s", PLUGIN_NAME, warning)
 
     async def terminate(self):
         await self.ctx.stop()
@@ -220,10 +222,12 @@ class NjuQqAuditPlugin(Star):
         return format_release_result(result, self._settings())
 
     def _probe_group_matches(self, group_id: str) -> bool:
-        targets = self._settings().target_group_ids
-        if not targets:
+        settings = self._settings()
+        under = settings.target_group_ids
+        grad = settings.grad_target_group_ids if settings.grad_enabled else frozenset()
+        if not under and not grad:
             return True
-        return group_id in targets
+        return group_id in under or group_id in grad
 
     async def _handle_probe(self, event: AstrMessageEvent, raw_message) -> None:
         if not self._settings().probe_enabled:
@@ -429,23 +433,50 @@ class NjuQqAuditPlugin(Star):
                 pending_update_policy_version=PENDING_UPDATE_POLICY_VERSION,
                 git_commit=get_git_commit(),
                 group_system_msg_probe=group_system_msg_probe,
+                grad_cache_count=len(self.ctx.grad_cache.load_students()),
+                grad_sync_state=self.ctx.grad_cache.load_sync_state(),
+                group_overlap_warning=(
+                    ",".join(
+                        sorted(
+                            self._settings().target_group_ids
+                            & self._settings().grad_target_group_ids
+                        )
+                    )
+                    or None
+                ),
+                config_warnings=self.ctx.config_warnings(),
             )
         )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("list")
-    async def audit_list(self, event: AstrMessageEvent, limit: int = 10):
+    async def audit_list(
+        self, event: AstrMessageEvent, arg1: str = "", arg2: str = ""
+    ):
         allowed, message = can_run_command(self._settings(), "list", event)
         if not allowed:
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
+        profile = None
+        limit = 10
+        token = (arg1 or "").strip().lower()
+        if token in {"grad", "graduate", "研究生"}:
+            profile = "graduate"
+            if arg2.isdigit():
+                limit = int(arg2)
+        elif token in {"undergrad", "undergraduate", "本科"}:
+            profile = "undergraduate"
+            if arg2.isdigit():
+                limit = int(arg2)
+        elif token.isdigit():
+            limit = int(token)
         reconcile_summary = await self.ctx.pipeline.reconcile_active_pending(
             source="audit_list",
             list_cache=self.ctx.list_cache,
         )
         items, index_map = await fetch_pending_for_admin(
-            self.ctx, event.get_sender_id(), limit
+            self.ctx, event.get_sender_id(), limit, profile=profile
         )
         yield event.plain_result(
             format_list(items, index_map, reconcile_summary=reconcile_summary)
@@ -854,13 +885,33 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
+        action = (action or "").strip().lower()
         if action == "status":
             sync_state = self.ctx.cache.load_sync_state()
             yield event.plain_result(
                 self.ctx.sync_scheduler.format_status(self._settings(), sync_state)
             )
             return
+        if action in {"grad", "graduate", "研究生"}:
+            result = await self.ctx.run_grad_sync(source="manual")
+            yield event.plain_result(result)
+            return
+        if action in {"undergraduate", "undergrad", "本科"}:
+            result = await self.ctx.run_sync(source="manual")
+            yield event.plain_result(result)
+            return
         result = await self.ctx.run_sync(source="manual")
+        yield event.plain_result(result)
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("sync-grad")
+    async def audit_sync_grad(self, event: AstrMessageEvent):
+        allowed, message = can_run_command(self._settings(), "sync", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        result = await self.ctx.run_grad_sync(source="manual")
         yield event.plain_result(result)
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)

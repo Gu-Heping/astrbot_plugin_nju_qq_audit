@@ -94,6 +94,8 @@ class AdminNotifier:
                 user_id=user_id,
                 comment=comment,
                 judgement=judgement,
+                profile=str((parsed or {}).get("_profile") or "undergraduate"),
+                parsed=parsed,
             )
             if await self._send_to_admin(admin_id, message):
                 sent_count += 1
