@@ -2,6 +2,14 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.3] - 2026-07-16
+
+### 优化
+
+- `DisplayContext` 通过 `get_stranger_info` 获取真实 QQ 昵称；**不再把申请姓名伪装成昵称**
+- 群名在 `get_group_list` 未命中时 fallback `get_group_info`
+- 通知仍分两行：`申请人：姓名/学号` 与 `QQ：昵称（QQ号）`
+
 ## [v0.4.2] - 2026-07-16
 
 ### 优化

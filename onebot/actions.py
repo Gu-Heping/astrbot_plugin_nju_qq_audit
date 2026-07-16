@@ -28,6 +28,14 @@ class ActionClient(Protocol):
 
     async def get_group_list(self) -> ActionResult: ...
 
+    async def get_group_info(
+        self, group_id: str, *, no_cache: bool = False
+    ) -> ActionResult: ...
+
+    async def get_stranger_info(
+        self, user_id: str, *, no_cache: bool = False
+    ) -> ActionResult: ...
+
     async def send_private_msg_safe(self, user_id: str, message: str) -> ActionResult: ...
 
     async def get_group_member_info(

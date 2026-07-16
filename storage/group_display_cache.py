@@ -84,3 +84,18 @@ class GroupDisplayCache:
                 },
             }
             self._write(payload)
+
+    async def upsert_group(self, group_id: str, group_name: str) -> None:
+        gid = str(group_id or "").strip()
+        name = str(group_name or "").strip()
+        if not gid or not name:
+            return
+        async with self._lock:
+            data = self.load()
+            now = utc_now()
+            groups = data.setdefault("groups", {})
+            groups[gid] = {"group_name": name, "updated_at": now.isoformat()}
+            data["updated_at"] = now.isoformat()
+            if not data.get("expires_at") or self.is_expired():
+                data["expires_at"] = (now + timedelta(hours=self.ttl_hours)).isoformat()
+            self._write(data)

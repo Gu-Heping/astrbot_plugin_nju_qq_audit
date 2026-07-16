@@ -148,6 +148,22 @@ class HttpActionClient:
     async def get_group_list(self) -> ActionResult:
         return await self.call_action("get_group_list", {})
 
+    async def get_group_info(
+        self, group_id: str, *, no_cache: bool = False
+    ) -> ActionResult:
+        params: dict[str, Any] = {"group_id": int(group_id)}
+        if no_cache:
+            params["no_cache"] = True
+        return await self.call_action("get_group_info", params)
+
+    async def get_stranger_info(
+        self, user_id: str, *, no_cache: bool = False
+    ) -> ActionResult:
+        params: dict[str, Any] = {"user_id": int(user_id)}
+        if no_cache:
+            params["no_cache"] = True
+        return await self.call_action("get_stranger_info", params)
+
     async def get_group_member_info(
         self, group_id: str, user_id: str, *, no_cache: bool = True
     ) -> ActionResult:
