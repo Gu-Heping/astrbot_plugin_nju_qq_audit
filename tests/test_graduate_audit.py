@@ -93,6 +93,43 @@ def test_grad_disabled_skips_graduate_group():
     assert resolve_profile("200", settings) is None
 
 
+def test_grad_disabled_overlap_still_routes_undergraduate():
+    """When grad is off, listed grad groups must not block undergrad targets."""
+    from profiles.router import configured_audit_group_ids, overlapping_group_ids
+
+    settings = load_settings(
+        DummyConfig(
+            {
+                "target_group_ids": "100,200",
+                "grad_enabled": False,
+                "grad_target_group_ids": "200,300",
+            }
+        )
+    )
+    assert overlapping_group_ids(settings) == frozenset()
+    assert resolve_profile("200", settings) == "undergraduate"
+    assert resolve_profile("100", settings) == "undergraduate"
+    assert resolve_profile("300", settings) is None
+    assert configured_audit_group_ids(settings) == frozenset({"100", "200"})
+    warnings = validate_settings(settings)
+    assert not any("重叠" in w for w in warnings)
+
+
+def test_configured_audit_group_ids_includes_grad_when_enabled():
+    from profiles.router import configured_audit_group_ids
+
+    settings = load_settings(
+        DummyConfig(
+            {
+                "target_group_ids": "100",
+                "grad_enabled": True,
+                "grad_target_group_ids": "200",
+            }
+        )
+    )
+    assert configured_audit_group_ids(settings) == frozenset({"100", "200"})
+
+
 def test_graduate_student_has_no_id_card_tail_field():
     s = _grad_student()
     data = s.to_dict()
@@ -158,6 +195,21 @@ def test_grad_parser_formats(raw, name, major, adm):
         assert parsed.major_text == major
     if "010101" in raw:
         assert "010101" in parsed.major_code_candidates
+
+
+def test_grad_parser_major_code_label_not_eaten_by_major():
+    parsed = parse_graduate_comment("姓名：刘尚明 专业代码：010101 类型：硕")
+    assert parsed.name == "刘尚明"
+    assert parsed.major_text is None or parsed.major_text != "代码"
+    assert "010101" in parsed.major_code_candidates
+    assert parsed.admission_type == "硕士"
+
+
+def test_grad_parser_name_stops_before_major_label():
+    parsed = parse_graduate_comment("姓名：张三专业：马克思主义哲学 类型：硕")
+    assert parsed.name == "张三"
+    assert parsed.major_text == "马克思主义哲学"
+    assert parsed.admission_type == "硕士"
 
 
 def test_grad_parser_does_not_force_graduate_as_master():
@@ -367,3 +419,109 @@ async def test_graduate_comment_update_reparse(tmp_path):
     assert latest.profile == "graduate"
     assert latest.match_strength == "strong"
     assert latest.decision == "approve"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_covers_graduate_group(tmp_path):
+    pipe, requests, _ = _pipeline(tmp_path)
+    req = PendingRequest(
+        id=new_request_id(),
+        group_id="200",
+        user_id="u-ext",
+        comment="刘尚明 马克思主义哲学 硕",
+        flag="f-ext",
+        sub_type="add",
+        decision="approve",
+        confidence=0.9,
+        reason="ok",
+        mode="auto",
+        status="pending",
+        created_at="2026-07-15T00:00:00+00:00",
+        match_strength="strong",
+        profile="graduate",
+    )
+    await requests.upsert(req)
+    result = await pipe.reconcile_external_join("200", "u-ext", notice_sub_type="approve")
+    assert result.handled
+    latest = await requests.get_by_id(req.id)
+    assert latest.status != "pending"
+
+
+@pytest.mark.asyncio
+async def test_sweep_skips_graduate_pending(tmp_path):
+    from admin.sweep import is_sweep_candidate, collect_sweep_preview
+
+    pipe, requests, _ = _pipeline(tmp_path)
+    under = PendingRequest(
+        id=new_request_id(),
+        group_id="100",
+        user_id="u-u",
+        comment="杂讯",
+        flag="fu",
+        sub_type="add",
+        decision="manual_review",
+        confidence=0.2,
+        reason="需人工",
+        mode="auto",
+        status="pending",
+        created_at="2026-07-15T00:00:00+00:00",
+        match_strength="none",
+        profile="undergraduate",
+    )
+    grad = PendingRequest(
+        id=new_request_id(),
+        group_id="200",
+        user_id="u-g",
+        comment="杂讯",
+        flag="fg",
+        sub_type="add",
+        decision="manual_review",
+        confidence=0.2,
+        reason="需人工",
+        mode="auto",
+        status="pending",
+        created_at="2026-07-15T00:00:00+00:00",
+        match_strength="none",
+        profile="graduate",
+    )
+    await requests.upsert(under)
+    await requests.upsert(grad)
+    assert is_sweep_candidate(under)
+    assert not is_sweep_candidate(grad)
+    preview = await collect_sweep_preview(pipe)
+    assert under.id in {r.id for r in preview.candidates}
+    assert grad.id not in {r.id for r in preview.candidates}
+
+
+@pytest.mark.asyncio
+async def test_rematch_can_skip_graduate_profile(tmp_path):
+    pipe, requests, _ = _pipeline(tmp_path)
+    grad = PendingRequest(
+        id=new_request_id(),
+        group_id="200",
+        user_id="u-rm",
+        comment="刘尚明 马克思主义哲学 硕",
+        flag="frm",
+        sub_type="add",
+        decision="manual_review",
+        confidence=0.2,
+        reason="旧",
+        mode="auto",
+        status="pending",
+        created_at="2026-07-15T00:00:00+00:00",
+        match_strength="none",
+        parsed={},
+        match={"strength": "none"},
+        profile="graduate",
+    )
+    await requests.upsert(grad)
+    summary = await pipe.rematch_active_pending(
+        source="test", profiles=frozenset({"undergraduate"})
+    )
+    assert summary.changed == 0
+    latest = await requests.get_by_id(grad.id)
+    assert latest.match_strength == "none"
+    summary2 = await pipe.rematch_active_pending(source="test")
+    assert summary2.changed >= 1
+    latest2 = await requests.get_by_id(grad.id)
+    assert latest2.match_strength == "strong"

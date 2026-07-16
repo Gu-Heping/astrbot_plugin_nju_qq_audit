@@ -9,11 +9,20 @@ from graduate.models import GraduateParsedApplication
 CHINESE_NAME_PATTERN = re.compile(r"^[\u4e00-\u9fa5·]{2,4}$")
 MAJOR_CODE_PATTERN = re.compile(r"^\d{4,8}$")
 NAME_LABEL_PATTERN = re.compile(
-    r"(?:姓名|名字)[:：\s]+([\u4e00-\u9fa5·]{2,4})",
+    # Stop before the next field label; do not use [:：] alone as a stop —
+    # glued 「姓名：张三专业：…」 would otherwise greedily swallow 「张三专业」.
+    r"(?:姓名|名字)[:：\s]+([\u4e00-\u9fa5·]{2,4})"
+    r"(?=\s|专业|类型|录取|$|[，,；;|/／])",
+    re.IGNORECASE,
+)
+# Prefer explicit 专业代码 so 「专业代码：010101」 is not eaten by 专业 label.
+MAJOR_CODE_LABEL_PATTERN = re.compile(
+    r"(?:专业代码|录取专业代码)[:：\s]*(\d{4,8})",
     re.IGNORECASE,
 )
 MAJOR_LABEL_PATTERN = re.compile(
-    r"(?:专业|录取专业|报读专业|专业名称)[:：\s]*([\u4e00-\u9fa5a-zA-Z（）()·\-]{2,40})",
+    r"(?:专业名称|录取专业|报读专业|专业(?!代码))[:：\s]*"
+    r"([\u4e00-\u9fa5a-zA-Z（）()·\-]{2,40})",
     re.IGNORECASE,
 )
 TYPE_LABEL_PATTERN = re.compile(
@@ -120,6 +129,12 @@ def parse_graduate_comment(raw: str) -> GraduateParsedApplication:
     name_label = NAME_LABEL_PATTERN.search(text)
     if name_label:
         result.name = normalize_name(name_label.group(1))
+
+    major_code_label = MAJOR_CODE_LABEL_PATTERN.search(text)
+    if major_code_label:
+        code = major_code_label.group(1)
+        if code not in result.major_code_candidates:
+            result.major_code_candidates.append(code)
 
     major_label = MAJOR_LABEL_PATTERN.search(text)
     if major_label:

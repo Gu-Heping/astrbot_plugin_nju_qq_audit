@@ -44,7 +44,12 @@ from graduate.matcher import GraduateMatchResult, match_graduate
 from graduate.models import GraduateParsedApplication
 from graduate.njutable_provider import load_graduates_for_audit
 from graduate.parser import parse_graduate_comment
-from profiles.router import AuditProfile, overlapping_group_ids, resolve_profile
+from profiles.router import (
+    AuditProfile,
+    configured_audit_group_ids,
+    overlapping_group_ids,
+    resolve_profile,
+)
 from onebot.event_extract import GroupJoinRequest, GroupMemberDecrease, GroupMemberIncrease
 from storage.audit_log import utc_now_iso
 from storage.requests_store import RequestsStore, new_request_id
@@ -534,10 +539,17 @@ class AuditPipeline:
             ev = self._evaluate_undergraduate_request(event)
         return ev.mode, ev.parsed, ev.match, ev.decision
 
-    async def rematch_active_pending(self, *, source: str = "manual") -> RematchSummary:
-        """Re-evaluate all active pending against the current student cache.
+    async def rematch_active_pending(
+        self,
+        *,
+        source: str = "manual",
+        profiles: frozenset[str] | None = None,
+    ) -> RematchSummary:
+        """Re-evaluate active pending against the current student cache.
 
         Does not call QQ APIs or send admin notifications.
+        When ``profiles`` is set, only those request profiles are rematched
+        (e.g. undergraduate-only for release/sweep).
         """
         summary = RematchSummary()
         pending = await self.requests.list_pending(limit=1000)
@@ -546,6 +558,9 @@ class AuditPipeline:
 
         for req in pending:
             if req.status != "pending" or req.processed_at:
+                continue
+            req_profile = getattr(req, "profile", None) or "undergraduate"
+            if profiles is not None and req_profile not in profiles:
                 continue
             old_strength = req.match_strength or (req.match or {}).get("strength") or "none"
             old_decision = req.decision
@@ -1316,13 +1331,14 @@ class AuditPipeline:
         list_cache: AdminListCacheStore | None = None,
         notifier: AdminNotifier | None = None,
     ) -> ReconcileResult:
-        if not self.settings.target_group_ids:
+        active_groups = configured_audit_group_ids(self.settings)
+        if not active_groups:
             return ReconcileResult.not_handled(
-                "non_target_group", "target_group_ids empty"
+                "non_target_group", "no configured audit groups"
             )
-        if group_id not in self.settings.target_group_ids:
+        if group_id not in active_groups:
             return ReconcileResult.not_handled(
-                "non_target_group", f"group {group_id} not in target_group_ids"
+                "non_target_group", f"group {group_id} not in audit groups"
             )
 
         pending = await self.requests.find_active_pending_by_user_group(group_id, user_id)
@@ -1366,9 +1382,7 @@ class AuditPipeline:
         return ReconcileResult.success(pending.id, message)
 
     async def handle_group_increase(self, increase: GroupMemberIncrease) -> None:
-        if not self.settings.target_group_ids:
-            return
-        if increase.group_id not in self.settings.target_group_ids:
+        if increase.group_id not in configured_audit_group_ids(self.settings):
             return
 
         await self.requests.update_membership_state(
@@ -1390,9 +1404,7 @@ class AuditPipeline:
         )
 
     async def handle_group_decrease(self, decrease: GroupMemberDecrease) -> None:
-        if not self.settings.target_group_ids:
-            return
-        if decrease.group_id not in self.settings.target_group_ids:
+        if decrease.group_id not in configured_audit_group_ids(self.settings):
             return
 
         if decrease.sub_type == "kick_me" or (
@@ -1482,10 +1494,11 @@ class AuditPipeline:
         list_cache: AdminListCacheStore | None,
         summary: PendingReconcileSummary,
     ) -> PendingReconcileSummary:
+        active_groups = configured_audit_group_ids(self.settings)
         pendings = [
             req
             for req in await self.requests.list_pending(limit=1000)
-            if req.group_id in self.settings.target_group_ids
+            if req.group_id in active_groups
         ]
         if not pendings:
             return summary

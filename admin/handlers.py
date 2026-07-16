@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +63,7 @@ class PluginContext:
         self._event_bot: Any | None = None
         self.release_service = ReleaseService()
         self.sync_scheduler = SyncScheduler()
+        self._grad_sync_lock = asyncio.Lock()
 
     def reload_settings(self) -> None:
         self.settings = load_settings(self.config)
@@ -203,9 +205,21 @@ class PluginContext:
             if own:
                 await session.close()
 
+    async def run_sync(self, *, source: str = "manual") -> str:
+        async def _locked() -> str:
+            return await self.execute_sync(source=source)
+
+        return await self.sync_scheduler.run_once(
+            _locked,
+            self.cache,
+            source=source,
+        )
+
     async def run_grad_sync(self, *, source: str = "manual") -> str:
-        # Separate from undergrad lock path: use a simple sequential call.
-        return await self.execute_grad_sync(source=source)
+        if self._grad_sync_lock.locked():
+            return "研究生同步正在进行中，请稍后再试。"
+        async with self._grad_sync_lock:
+            return await self.execute_grad_sync(source=source)
 
     def config_warnings(self) -> list[str]:
         return validate_settings(self.settings)

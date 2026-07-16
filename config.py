@@ -311,13 +311,14 @@ def validate_settings(settings: PluginSettings) -> list[str]:
         warnings.append(
             "onebot_action_backend=http 但未配置 onebot_http_url，HTTP action 不可用"
         )
-    overlap = settings.target_group_ids & settings.grad_target_group_ids
-    if overlap:
-        warnings.append(
-            "target_group_ids 与 grad_target_group_ids 重叠："
-            + ",".join(sorted(overlap))
-            + "（重叠群将不处理，避免误审）"
-        )
+    if settings.grad_enabled:
+        overlap = settings.target_group_ids & settings.grad_target_group_ids
+        if overlap:
+            warnings.append(
+                "target_group_ids 与 grad_target_group_ids 重叠："
+                + ",".join(sorted(overlap))
+                + "（重叠群将不处理，避免误审）"
+            )
     if settings.grad_enabled and not settings.grad_target_group_ids:
         warnings.append("grad_enabled=true 但未配置 grad_target_group_ids")
     if settings.grad_enabled and not settings.grad_njutable_api_token:

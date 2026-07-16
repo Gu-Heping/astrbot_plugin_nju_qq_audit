@@ -14,6 +14,14 @@
 - `/audit debug` 输出 grad_enabled、grad 群、缓存人数、同步状态、重叠警告
 - **永不读取/缓存/展示「证件号码末三位」**
 
+### 修复
+
+- 研究生 parser：显式解析「专业代码」标签；姓名标签在「专业」前停住，避免粘连误吃
+- `grad_enabled=false` 时忽略研究生群列表，重叠不再拦截本科
+- 入退群 / 外部同意对账覆盖已启用的研究生目标群
+- 恢复误删的 `run_sync`；研究生同步加独立锁防并发
+- sweep / release rematch 默认仅处理本科，避免误关或改写研究生 pending
+
 ### 说明
 
 - 不改变本科 matcher/parser/decision 与现有状态机

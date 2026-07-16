@@ -24,13 +24,28 @@ def is_active_pending(req: PendingRequest) -> bool:
     return req.status == "pending" and not req.processed_at
 
 
+def _is_undergraduate(req: PendingRequest) -> bool:
+    return (getattr(req, "profile", None) or "undergraduate") == "undergraduate"
+
+
 def is_sweep_candidate(req: PendingRequest) -> bool:
-    """Non-strong active pending — safe to locally dismiss in auto mode."""
-    return is_active_pending(req) and _strength(req) != "strong"
+    """Non-strong undergrad pending — safe to locally dismiss in auto mode.
+
+    Graduate pendings are excluded so undergraduate maintenance cannot close them.
+    """
+    return (
+        _is_undergraduate(req)
+        and is_active_pending(req)
+        and _strength(req) != "strong"
+    )
 
 
 def is_kept_strong(req: PendingRequest) -> bool:
-    return is_active_pending(req) and _strength(req) == "strong"
+    return (
+        _is_undergraduate(req)
+        and is_active_pending(req)
+        and _strength(req) == "strong"
+    )
 
 
 @dataclass
@@ -86,7 +101,9 @@ def parse_sweep_command(message_str: str, arg1: str = "", arg2: str = "") -> tup
 
 
 async def collect_sweep_preview(pipeline: AuditPipeline) -> SweepPreview:
-    rematch = await pipeline.rematch_active_pending(source="sweep")
+    rematch = await pipeline.rematch_active_pending(
+        source="sweep", profiles=frozenset({"undergraduate"})
+    )
     pending = await pipeline.requests.list_pending(limit=1000)
     candidates = [r for r in pending if is_sweep_candidate(r)]
     kept = [r for r in pending if is_kept_strong(r)]
@@ -105,8 +122,9 @@ def format_sweep_help() -> str:
             "/audit sweep confirm <原因>   一键 dismiss（原因必填）",
             "",
             "说明：",
-            "- 仅关闭 match_strength ≠ strong 的 pending",
+            "- 仅关闭本科 match_strength ≠ strong 的 pending",
             "- 保留 strong，留给 auto / release / catchup",
+            "- 不处理研究生 pending（避免本科维护误关）",
             "- 不调用 QQ；适合「别人已在 QQ 拒绝但 bot 未收到事件」",
             "- 仍在 QQ 等待审核要用 /audit no；已入群用 /audit mark-external",
             "- 建议先 /audit sweep preview",
