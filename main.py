@@ -204,14 +204,28 @@ class NjuQqAuditPlugin(Star):
         students = load_students_for_audit(self._settings(), self.ctx.cache)
         pending = await self.ctx.requests.list_pending(limit=1000)
         sync_state = self.ctx.cache.load_sync_state()
+        grad_enabled = bool(self._settings().grad_enabled)
+        grad_students = self.ctx.grad_cache.load_students() if grad_enabled else []
+        grad_sync_state = self.ctx.grad_cache.load_sync_state()
+        grad_pending = sum(
+            1
+            for r in pending
+            if (getattr(r, "profile", None) or "undergraduate") == "graduate"
+        )
+        under_pending = len(pending) - grad_pending
         adapter_probe = await self.ctx.get_adapter_probe()
         releasable = await list_releasable(self.ctx.requests, self._settings())
         return format_home(
             self._settings(),
             effective_mode=mode,
             student_count=len(students),
-            pending_count=len(pending),
+            pending_count=under_pending,
             sync_state=sync_state,
+            grad_enabled=grad_enabled,
+            grad_target_group_ids=sorted(self._settings().grad_target_group_ids),
+            grad_student_count=len(grad_students),
+            grad_pending_count=grad_pending,
+            grad_sync_state=grad_sync_state,
             adapter_probe=adapter_probe,
             releasable_count=len(releasable),
             release_running=self.ctx.release_service.is_running,
@@ -493,6 +507,7 @@ class NjuQqAuditPlugin(Star):
                 reconcile_summary=reconcile_summary,
                 group_labels=group_labels,
                 user_labels=user_labels,
+                list_profile=profile,
             )
         )
 

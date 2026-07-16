@@ -43,6 +43,8 @@ def test_format_home_no_secrets():
         adapter_probe={"adapter_action_available": "yes"},
     )
     assert "NJU QQ Audit" in text
+    assert "本科：" in text
+    assert "研究生：" in text
     assert "/audit list" in text
     assert "flag" not in text
     assert "secret" not in text

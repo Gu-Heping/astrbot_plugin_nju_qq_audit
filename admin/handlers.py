@@ -189,6 +189,9 @@ class PluginContext:
                 await session.close()
 
     async def execute_grad_sync(self, *, source: str = "manual") -> str:
+        from graduate.njutable_provider import sync_graduate_students
+        from admin.ux_formatter import format_grad_sync_result
+
         session = self._http_session or aiohttp.ClientSession()
         own = self._http_session is None
         try:
@@ -197,17 +200,16 @@ class PluginContext:
             )
             state.last_sync_source = source
             self.grad_cache.save_sync_state(state)
-            return (
-                f"研究生同步成功: source={state.source}, "
-                f"raw={state.raw_row_count or state.row_count}, "
-                f"mapped={state.mapped_count or state.row_count}, "
-                f"filtered={state.filtered_count}"
+            cached = self.grad_cache.load_students()
+            return format_grad_sync_result(
+                ok=True, sync_state=state, cached_count=len(cached)
             )
         except Exception as exc:
             cached = self.grad_cache.load_students()
-            return (
-                f"研究生同步失败: {type(exc).__name__}。"
-                f"已保留旧缓存 {len(cached)} 条。"
+            return format_grad_sync_result(
+                ok=False,
+                cached_count=len(cached),
+                error_name=type(exc).__name__,
             )
         finally:
             if own:

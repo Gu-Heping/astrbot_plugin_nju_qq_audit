@@ -13,6 +13,8 @@ def format_help(
     topic: str | None = None,
 ) -> str:
     topic_key = (topic or "").strip().lower()
+    if topic_key in {"grad", "graduate", "研究生"}:
+        return _format_help_grad()
     if topic_key in {"batch", "分批", "release", "catchup"}:
         return _format_help_batch(
             effective_mode=effective_mode,
@@ -66,6 +68,10 @@ def _format_help_default(
         "/audit no 1 信息不完整",
         "/audit sync",
         "/audit report",
+        "",
+        "研究生：",
+        "/audit list grad",
+        "/audit sync grad",
     ]
     lines.extend(
         _help_context(
@@ -79,11 +85,36 @@ def _format_help_default(
             "",
             "更多：",
             "/audit help batch     分批通过/补放",
+            "/audit help grad      研究生审核说明",
             "/audit help debug     排查问题",
             "/audit help advanced  高级维护命令",
         ]
     )
     return "\n".join(lines)
+
+
+def _format_help_grad() -> str:
+    return "\n".join(
+        [
+            f"NJU QQ Audit {PLUGIN_VERSION} · 研究生审核说明",
+            "",
+            "研究生群审核使用独立名单、独立目标群（与本科互不影响）。",
+            "",
+            "常用命令：",
+            "/audit sync grad",
+            "/audit list grad",
+            "/audit view 1",
+            "/audit ok 1",
+            "/audit no 1 信息不完整",
+            "",
+            "自动通过条件：",
+            "- 姓名 + 硕/博 + 专业/专业代码唯一强匹配",
+            "",
+            "说明：",
+            "- 不自动拒绝（弱匹配/信息不足会提示人工确认）",
+            "- release/catchup 当前只处理本科补放，不处理研究生",
+        ]
+    )
 
 
 def _format_help_batch(

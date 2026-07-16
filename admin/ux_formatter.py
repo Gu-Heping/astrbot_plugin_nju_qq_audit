@@ -27,6 +27,41 @@ def _format_local_time(iso_text: str | None) -> str:
         return iso_text
 
 
+def format_grad_sync_result(
+    *,
+    ok: bool,
+    sync_state: SyncState | None = None,
+    cached_count: int = 0,
+    error_name: str | None = None,
+) -> str:
+    """Human-readable result for /audit sync grad (display only)."""
+    state = sync_state or SyncState()
+    if ok:
+        count = state.filtered_count or cached_count
+        lines = [
+            "研究生名单同步成功",
+            f"缓存人数：{count} 人",
+            f"最近同步：{_format_local_time(state.last_sync_at)}",
+        ]
+        if state.source:
+            lines.append(f"来源：{state.source}")
+        result = (state.last_sync_result or "").strip()
+        if result and result not in {"success", "ok"}:
+            lines.append(f"说明：{result}")
+        return "\n".join(lines)
+
+    lines = [
+        f"研究生名单同步失败：{error_name or '未知错误'}",
+        f"已保留旧缓存：{cached_count} 人",
+        "",
+        "建议：",
+        "- 检查 grad_njutable_api_token 与 grad_njutable_table_name 配置",
+        "- 运行 /audit debug 查看研究生通道状态",
+        "- 稍后再试：/audit sync grad",
+    ]
+    return "\n".join(lines)
+
+
 def _adapter_status_text(adapter_probe: dict | None) -> str:
     probe = adapter_probe or {}
     available = probe.get("adapter_action_available", "unknown")
@@ -53,6 +88,11 @@ def format_home(
     student_count: int,
     pending_count: int,
     sync_state: SyncState,
+    grad_enabled: bool | None = None,
+    grad_target_group_ids: list[str] | None = None,
+    grad_student_count: int = 0,
+    grad_pending_count: int = 0,
+    grad_sync_state: SyncState | None = None,
     adapter_probe: dict | None = None,
     releasable_count: int = 0,
     release_running: bool = False,
@@ -95,20 +135,33 @@ def format_home(
             "",
             f"状态：{health}",
             f"模式：{effective_mode}（{mode_label(effective_mode)}）",
-            f"目标群：{', '.join(sorted(settings.target_group_ids)) or '(未配置)'}",
-            f"学生数据：{settings.student_source}，{student_count} 人",
-            f"待处理：{pending_count} 条",
+            "",
+            "本科：",
+            f"- 目标群：{', '.join(sorted(settings.target_group_ids)) or '(未配置)'}",
+            f"- 名单人数：{student_count} 人",
+            f"- 最近同步：{_format_local_time(sync_state.last_sync_at)}，"
+            f"{sync_state.last_sync_result or '(无)'}",
+            f"- 待处理数：{pending_count} 条",
+            "",
+            "研究生：",
+            f"- 启用：{'是' if (settings.grad_enabled if grad_enabled is None else grad_enabled) else '否'}",
+            f"- 目标群：{', '.join(grad_target_group_ids if grad_target_group_ids is not None else sorted(settings.grad_target_group_ids)) or '(未配置)'}",
+            f"- 名单人数：{grad_student_count} 人",
+            f"- 最近同步：{_format_local_time((grad_sync_state or SyncState()).last_sync_at)}，"
+            f"{(grad_sync_state or SyncState()).last_sync_result or '(无)'}",
+            f"- 待处理数：{grad_pending_count} 条",
+            "",
             f"可分批通过：{releasable_count} 条",
             f"分批任务：{'进行中' if release_running else '空闲'}",
-            f"最近同步：{_format_local_time(sync_state.last_sync_at)}，"
-            f"{sync_state.last_sync_result or '(无)'}",
             f"审批接口：{_adapter_status_text(adapter_probe)}",
             "",
             "下一步：",
             "- 看待处理：/audit list",
+            "- 看研究生：/audit list grad",
             "- 分批通过：/audit release preview",
             "- 同步并补放：/audit catchup preview",
             "- 同步学生：/audit sync",
+            "- 同步研究生：/audit sync grad",
             "- 复盘报告：/audit report",
         ]
     )
@@ -122,12 +175,24 @@ def format_list(
     reconcile_summary=None,
     group_labels: dict[str, str] | None = None,
     user_labels: dict[str, str] | None = None,
+    list_profile: str | None = None,
 ) -> str:
     del index_map  # indexes are positional; map used by caller for cache
     group_labels = group_labels or {}
     user_labels = user_labels or {}
     if not items:
-        body = "目前没有待处理申请。"
+        if list_profile == "graduate":
+            body = "\n".join(
+                [
+                    "目前没有研究生待处理申请。",
+                    "可先确认：",
+                    "/audit sync grad",
+                    "或查看全部：",
+                    "/audit list",
+                ]
+            )
+        else:
+            body = "目前没有待处理申请。"
     else:
         lines = [f"待处理申请：{len(items)} 条", ""]
         for idx, item in enumerate(items, start=1):

@@ -64,6 +64,7 @@ def ensure_ctx_compat(ctx) -> None:
         async def _execute_grad_sync(*, source: str = "manual") -> str:
             import aiohttp
 
+            from admin.ux_formatter import format_grad_sync_result
             from graduate.njutable_provider import sync_graduate_students
 
             session = getattr(ctx, "_http_session", None) or aiohttp.ClientSession()
@@ -74,17 +75,16 @@ def ensure_ctx_compat(ctx) -> None:
                 )
                 state.last_sync_source = source
                 ctx.grad_cache.save_sync_state(state)
-                return (
-                    f"研究生同步成功: source={state.source}, "
-                    f"raw={state.raw_row_count or state.row_count}, "
-                    f"mapped={state.mapped_count or state.row_count}, "
-                    f"filtered={state.filtered_count}"
+                cached = ctx.grad_cache.load_students()
+                return format_grad_sync_result(
+                    ok=True, sync_state=state, cached_count=len(cached)
                 )
             except Exception as exc:
                 cached = ctx.grad_cache.load_students()
-                return (
-                    f"研究生同步失败: {type(exc).__name__}。"
-                    f"已保留旧缓存 {len(cached)} 条。"
+                return format_grad_sync_result(
+                    ok=False,
+                    cached_count=len(cached),
+                    error_name=type(exc).__name__,
                 )
             finally:
                 if own:

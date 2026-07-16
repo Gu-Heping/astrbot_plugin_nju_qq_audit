@@ -2,6 +2,15 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.5] - 2026-07-16
+
+### 优化
+
+- 默认 `/audit help` 增加研究生入口（list grad / sync grad / help grad）
+- 新增 `/audit help grad`：研究生独立名单/目标群、自动通过条件与 release/catchup 范围说明
+- `/audit` 首页分区展示本科/研究生目标群、名单人数、同步状态、待处理数
+- `/audit list grad` 空列表专用提示；`/audit sync grad` 同步结果人话化
+
 ## [v0.4.4] - 2026-07-16
 
 ### 优化

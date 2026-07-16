@@ -219,13 +219,18 @@ def test_sweep_release_copy_no_english_jargon():
 def test_help_default_short_with_topics():
     default = format_help()
     advanced = format_help(topic="advanced")
+    grad = format_help(topic="grad")
     assert len(default) < len(advanced) // 2
     assert "/audit list" in default
+    assert "/audit list grad" in default
+    assert "/audit sync grad" in default
     assert "/audit help batch" in default
+    assert "/audit help grad" in default
     assert "/audit help debug" in default
     assert "/audit help advanced" in default
     assert "/audit pending" not in default
     assert "/audit pending" in advanced
+    assert "硕/博" in grad
     assert "/audit release preview" in format_help(topic="batch")
     assert "/audit probe api" in format_help(topic="debug")
 
