@@ -9,6 +9,18 @@ def ensure_ctx_compat(ctx) -> None:
         ctx.list_cache = AdminListCacheStore(ctx.data_dir / "list_cache.json")
         if getattr(ctx, "notifier", None) is not None:
             ctx.notifier.list_cache = ctx.list_cache
+    if not hasattr(ctx, "group_display_cache"):
+        from storage.group_display_cache import GroupDisplayCache
+
+        ctx.group_display_cache = GroupDisplayCache(ctx.data_dir / "group_display_cache.json")
+    if not hasattr(ctx, "display"):
+        from admin.display_context import DisplayContext
+
+        ctx.display = DisplayContext(
+            getattr(ctx, "actions", None), ctx.group_display_cache
+        )
+        if getattr(ctx, "notifier", None) is not None:
+            ctx.notifier.display = ctx.display
     if not hasattr(ctx, "list_pending_for_admin"):
 
         async def _bound(admin_id: str, limit: int = 10):

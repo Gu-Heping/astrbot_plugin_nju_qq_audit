@@ -1,4 +1,4 @@
-"""Tests for readable auto-approve admin notifications (v0.4.1)."""
+"""Tests for readable auto-approve admin notifications (v0.4.1+)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ sys.modules.setdefault("astrbot", MagicMock())
 sys.modules.setdefault("astrbot.api", MagicMock())
 sys.modules["astrbot.api"].logger = MagicMock()
 
-from admin.labels import applicant_summary
 from admin.notify import AdminNotifier
 from admin.ux_formatter import (
     format_auto_result_notice,
@@ -52,13 +51,17 @@ def test_format_auto_result_success_includes_summary():
         comment="张三 26115002",
         match_strength="strong",
     )
-    assert "自动通过成功" in text
+    assert "已自动通过" in text
     assert "申请人：张三 / 26115002" in text
-    assert f"群：{GROUP_ID}" in text
+    assert f"群：群 {GROUP_ID}" in text
     assert f"QQ：{USER_ID}" in text
     assert "验证：张三 26115002" in text
-    assert "强匹配，已自动同意" in text
-    assert "原因：姓名+学号强匹配" in text
+    assert "判断：姓名+学号强匹配" in text
+    assert "处理：已同意入群" in text
+    assert "request_id:" not in text
+    assert "group_id:" not in text
+    assert "user_id:" not in text
+    assert "reason:" not in text
     assert "/audit view REQ-f110eda247dc" in text
     assert "flag" not in text.lower()
     assert "token" not in text.lower()
@@ -118,6 +121,7 @@ def test_format_ok_no_include_applicant_summary():
     assert "申请人：张三 / 26115002" in ok_text
     assert f"QQ：{USER_ID}" in ok_text
     assert f"群：{GROUP_ID}" in ok_text
+    assert "处理：管理员手动通过" in ok_text
     assert "flag" not in ok_text
     no_text = format_no_result(req, 1, "信息不完整")
     assert "申请人：张三 / 26115002" in no_text
@@ -141,9 +145,10 @@ async def test_notify_auto_result_legacy_kwargs_still_work(tmp_path):
         reason="姓名+学号强匹配",
     )
     message = actions.send_private_msg_safe.await_args.args[1]
-    assert "自动通过成功" in message
+    assert "已自动通过" in message
     assert f"申请人：{USER_ID}" in message
     assert "REQ-legacy" in message
+    assert "request_id:" not in message
 
 
 @pytest.mark.asyncio
@@ -171,7 +176,6 @@ async def test_notify_auto_result_rich_payload(tmp_path):
     assert "张三 / 26115002" in message
     assert "backend timeout" in message
     assert "/audit list" in message
-    # comment may contain the word flag as applicant text; ensure we don't dump secrets fields
     assert "token" not in message.lower()
     assert "raw_event" not in message.lower()
 
@@ -204,7 +208,6 @@ async def test_pipeline_passes_summary_to_auto_notify(tmp_path: Path):
     pipe = AuditPipeline(settings, requests, audit, runtime, cache, actions, notifier)
     await runtime.set_mode("auto", ADMIN_ID)
 
-    # Use a known mock student: 张三 261122001 from mock provider
     students = generate_mock_students()
     student = next(s for s in students if s.student_id.startswith("261"))
     comment = f"{student.name} {student.student_id}"
@@ -226,4 +229,5 @@ async def test_pipeline_passes_summary_to_auto_notify(tmp_path: Path):
     assert kwargs["comment"] == comment
     assert kwargs["match_strength"] == "strong"
     assert kwargs["action_message"] == "approved"
+    assert kwargs.get("parsed") is not None
     assert "flag" not in (kwargs["summary"] or "").lower()

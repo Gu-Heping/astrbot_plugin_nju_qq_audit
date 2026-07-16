@@ -937,6 +937,7 @@ class AuditPipeline:
                         or (pending.match or {}).get("strength")
                     ),
                     action_message=action_result.message,
+                    parsed=pending.parsed or {},
                 )
 
     async def _record_action_outcome(

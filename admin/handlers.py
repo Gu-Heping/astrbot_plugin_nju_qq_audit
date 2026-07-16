@@ -7,6 +7,7 @@ from typing import Any
 import aiohttp
 
 from admin.notify import AdminNotifier
+from admin.display_context import DisplayContext
 from admin.release import ReleaseService
 from config import PluginSettings, load_settings, validate_settings
 from core.pipeline import AuditPipeline
@@ -19,6 +20,7 @@ from onebot.compat import invoke_probe_api
 from onebot.platform_cache import cache_event_platform
 from storage.admin_session_store import AdminSessionStore
 from storage.audit_log import AuditLog
+from storage.group_display_cache import GroupDisplayCache
 from storage.list_cache import AdminListCacheStore
 from storage.requests_store import RequestsStore
 from storage.runtime_store import RuntimeStore
@@ -37,9 +39,11 @@ class PluginContext:
         self.runtime = RuntimeStore(data_dir / "runtime.json")
         self.admin_sessions = AdminSessionStore(data_dir / "admin_sessions.json")
         self.list_cache = AdminListCacheStore(data_dir / "list_cache.json")
+        self.group_display_cache = GroupDisplayCache(data_dir / "group_display_cache.json")
         self.actions: ActionClient = create_action_client(astrbot_context, self.settings)
         self._http_notify_client: ActionClient | None = None
         self._adapter_probe: dict[str, Any] = {}
+        self.display = DisplayContext(self.actions, self.group_display_cache)
         self.notifier = AdminNotifier(
             self.settings,
             self.actions,
@@ -47,6 +51,7 @@ class PluginContext:
             self.admin_sessions,
             lambda: self._http_notify_client,
             self.list_cache,
+            display=self.display,
         )
         self.pipeline = AuditPipeline(
             self.settings,
@@ -76,6 +81,8 @@ class PluginContext:
         if isinstance(self.actions, AstrBotAdapterActionClient):
             self.actions.restore_hints(platform_id=old_platform_id, event_bot=old_event_bot)
         self._http_notify_client = create_http_notify_client(self.settings)
+        if getattr(self, "display", None) is not None:
+            self.display.set_actions(self.actions)
         self.notifier.reload_settings(
             self.settings,
             self.actions,
@@ -83,6 +90,7 @@ class PluginContext:
             self.admin_sessions,
             lambda: self._http_notify_client,
             self.list_cache,
+            display=getattr(self, "display", None),
         )
         self.pipeline.reload_settings(self.settings, self.actions, self.notifier)
         self._adapter_probe = {}

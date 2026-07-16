@@ -5,7 +5,6 @@ from datetime import datetime
 from admin.formatter import admin_configured, format_status
 from admin.labels import (
     DEFAULT_REJECT_REASON,
-    STRENGTH_SUMMARY,
     applicant_summary,
     human_judgement,
     list_action_hint,
@@ -292,7 +291,7 @@ def format_ok_result(item, index: int | None = None) -> str:
             f"申请人：{summary}",
             f"QQ：{public.get('user_id', '')}",
             f"群：{public.get('group_id', '')}",
-            "原因：管理员手动通过",
+            "处理：管理员手动通过",
             "状态：processed",
         ]
     )
@@ -326,36 +325,28 @@ def format_auto_result_notice(
     comment: str | None = None,
     match_strength: str | None = None,
     action_message: str | None = None,
+    group_label: str | None = None,
+    user_label: str | None = None,
 ) -> str:
     """Human-readable auto-approve success/failure notice for admins."""
-    label = (summary or "").strip() or str(user_id or "")
+    del match_strength  # reserved for future display; judgement uses reason text
+    applicant = (summary or "").strip() or str(user_id or "")
     comment_line = (comment or "").strip()[:120]
-    strength = (match_strength or "").strip()
-    strength_text = STRENGTH_SUMMARY.get(strength, strength)
+    group_text = (group_label or "").strip() or f"群 {group_id}"
+    qq_text = (user_label or "").strip() or str(user_id or "")
+    judgement = (reason or "").strip() or "（无）"
 
     if ok:
-        title = "[入群审核] 自动通过成功 ✅"
-        if strength == "strong":
-            judgement = "强匹配，已自动同意"
-        elif strength_text:
-            judgement = f"{strength_text}，已自动同意"
-        else:
-            judgement = "已自动同意"
+        title = "[入群审核] 已自动通过 ✅"
     else:
         title = "[入群审核] 自动通过失败 ⚠️"
-        if strength == "strong":
-            judgement = "强匹配，但 QQ 审批接口失败"
-        elif strength_text:
-            judgement = f"{strength_text}，但 QQ 审批接口失败"
-        else:
-            judgement = "QQ 审批接口失败"
 
     lines = [
         title,
         "",
-        f"申请人：{label}",
-        f"群：{group_id}",
-        f"QQ：{user_id}",
+        f"申请人：{applicant}",
+        f"QQ：{qq_text}",
+        f"群：{group_text}",
     ]
     if comment_line:
         lines.append(f"验证：{comment_line}")
@@ -363,10 +354,10 @@ def format_auto_result_notice(
         [
             "",
             f"判断：{judgement}",
-            f"原因：{reason or '（无）'}",
         ]
     )
     if ok:
+        lines.append("处理：已同意入群")
         lines.extend(
             [
                 "",
@@ -434,9 +425,15 @@ def format_manual_review_notice(
     judgement: str,
     profile: str = "undergraduate",
     parsed: dict | None = None,
+    summary: str | None = None,
+    group_label: str | None = None,
+    user_label: str | None = None,
 ) -> str:
     parsed = parsed or {}
     ref = str(index) if index is not None else None
+    group_text = (group_label or "").strip() or f"群 {group_id}"
+    qq_text = (user_label or "").strip() or str(user_id or "")
+    applicant = (summary or "").strip()
     lines = [
         "新的入群申请需要确认",
         "",
@@ -454,10 +451,12 @@ def format_manual_review_notice(
         if college:
             lines.append(f"学院：{college}")
         lines.append("")
+    elif applicant:
+        lines.append(f"申请人：{applicant}")
     lines.extend(
         [
-            f"群：{group_id}",
-            f"用户：{user_id}",
+            f"QQ：{qq_text}",
+            f"群：{group_text}",
             f"验证：{(comment or '')[:120] or '（空）'}",
             f"判断：{judgement}",
             "",
@@ -488,18 +487,27 @@ def format_pending_comment_updated_notice(
     user_id: str,
     comment: str,
     judgement: str,
+    summary: str | None = None,
+    group_label: str | None = None,
+    user_label: str | None = None,
 ) -> str:
+    group_text = (group_label or "").strip() or f"群 {group_id}"
+    qq_text = (user_label or "").strip() or str(user_id or "")
+    applicant = (summary or "").strip()
     lines = [
         "入群申请内容已更新，需要重新确认",
         "",
     ]
     if index is not None:
-        lines.append(f"[{index}] 用户：{user_id}")
+        head = f"[{index}] "
     else:
-        lines.append(f"用户：{user_id}")
+        head = ""
+    if applicant:
+        lines.append(f"{head}申请人：{applicant}")
+    lines.append(f"{head}QQ：{qq_text}" if not applicant else f"QQ：{qq_text}")
     lines.extend(
         [
-            f"群：{group_id}",
+            f"群：{group_text}",
             f"验证：{(comment or '')[:80]}",
             f"判断：{judgement}",
             "",

@@ -2,6 +2,14 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.2] - 2026-07-16
+
+### 优化
+
+- 管理员通知统一中文业务字段（申请人 / QQ / 群 / 验证 / 判断 / 处理），去掉 `request_id:` 等黑话
+- 新增 `DisplayContext` + `group_display_cache.json`：优先展示「群名（群号）」；API 失败安全回退
+- 自动通过 / 人工审核通知支持 `group_label` / `user_label`（可选，失败不影响审核）
+
 ## [v0.4.1] - 2026-07-16
 
 ### 优化

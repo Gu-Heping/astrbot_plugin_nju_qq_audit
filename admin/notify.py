@@ -38,6 +38,7 @@ class AdminNotifier:
         admin_sessions: Any,
         http_notify_client_getter: Callable[[], ActionClient | None],
         list_cache: Any | None = None,
+        display: Any | None = None,
     ) -> None:
         self.settings = settings
         self.actions = actions
@@ -45,6 +46,7 @@ class AdminNotifier:
         self.admin_sessions = admin_sessions
         self._http_notify_client_getter = http_notify_client_getter
         self.list_cache = list_cache
+        self.display = display
 
     def reload_settings(
         self,
@@ -54,6 +56,7 @@ class AdminNotifier:
         admin_sessions: Any,
         http_notify_client_getter: Callable[[], ActionClient | None],
         list_cache: Any | None = None,
+        display: Any | None = None,
     ) -> None:
         self.settings = settings
         self.actions = actions
@@ -62,6 +65,35 @@ class AdminNotifier:
         self._http_notify_client_getter = http_notify_client_getter
         if list_cache is not None:
             self.list_cache = list_cache
+        if display is not None:
+            self.display = display
+        elif self.display is not None and hasattr(self.display, "set_actions"):
+            self.display.set_actions(actions)
+
+    async def _resolve_labels(
+        self,
+        *,
+        group_id: str,
+        user_id: str,
+        parsed: dict | None = None,
+        group_label: str | None = None,
+        user_label: str | None = None,
+    ) -> tuple[str | None, str | None]:
+        if self.display is None:
+            return group_label, user_label
+        try:
+            if group_label is None:
+                group_label = await self.display.get_group_label(group_id)
+        except Exception:
+            logger.debug("[audit] resolve group_label failed", exc_info=True)
+        try:
+            if user_label is None:
+                user_label = await self.display.get_user_label(
+                    group_id, user_id, parsed
+                )
+        except Exception:
+            logger.debug("[audit] resolve user_label failed", exc_info=True)
+        return group_label, user_label
 
     async def notify_manual_review(
         self,
@@ -72,6 +104,9 @@ class AdminNotifier:
         comment: str,
         parsed: dict,
         reason: str,
+        summary: str | None = None,
+        group_label: str | None = None,
+        user_label: str | None = None,
     ) -> None:
         if not self.settings.admin_notify:
             logger.debug("[audit] manual_review notify skipped: admin_notify=false")
@@ -82,6 +117,13 @@ class AdminNotifier:
             return
         targets = _resolve_notify_targets(admin_ids, user_id)
         judgement = reason or "需要人工确认"
+        group_label, user_label = await self._resolve_labels(
+            group_id=group_id,
+            user_id=user_id,
+            parsed=parsed,
+            group_label=group_label,
+            user_label=user_label,
+        )
         sent_count = 0
         logger.info(
             "[audit] manual_review notify request=%s targets=%s",
@@ -100,6 +142,9 @@ class AdminNotifier:
                 judgement=judgement,
                 profile=str((parsed or {}).get("_profile") or "undergraduate"),
                 parsed=parsed,
+                summary=summary,
+                group_label=group_label,
+                user_label=user_label,
             )
             if await self._send_to_admin(admin_id, message):
                 sent_count += 1
@@ -124,6 +169,10 @@ class AdminNotifier:
         user_id: str,
         comment: str,
         reason: str,
+        summary: str | None = None,
+        group_label: str | None = None,
+        user_label: str | None = None,
+        parsed: dict | None = None,
     ) -> None:
         if not self.settings.admin_notify:
             return
@@ -133,6 +182,13 @@ class AdminNotifier:
             return
         targets = list(admin_ids)
         judgement = reason or "需要人工确认"
+        group_label, user_label = await self._resolve_labels(
+            group_id=group_id,
+            user_id=user_id,
+            parsed=parsed,
+            group_label=group_label,
+            user_label=user_label,
+        )
         sent_count = 0
         logger.info(
             "[audit] pending update notify request=%s targets=%s",
@@ -149,6 +205,9 @@ class AdminNotifier:
                 user_id=user_id,
                 comment=comment,
                 judgement=judgement,
+                summary=summary,
+                group_label=group_label,
+                user_label=user_label,
             )
             if await self._send_to_admin(admin_id, message):
                 sent_count += 1
@@ -176,9 +235,19 @@ class AdminNotifier:
         comment: str | None = None,
         match_strength: str | None = None,
         action_message: str | None = None,
+        group_label: str | None = None,
+        user_label: str | None = None,
+        parsed: dict | None = None,
     ) -> None:
         if not self.settings.admin_notify:
             return
+        group_label, user_label = await self._resolve_labels(
+            group_id=group_id,
+            user_id=user_id,
+            parsed=parsed,
+            group_label=group_label,
+            user_label=user_label,
+        )
         message = format_auto_result_notice(
             request_id=request_id,
             group_id=group_id,
@@ -189,6 +258,8 @@ class AdminNotifier:
             comment=comment,
             match_strength=match_strength,
             action_message=action_message,
+            group_label=group_label,
+            user_label=user_label,
         )
         await self._notify_admins(message, exclude_user_id=user_id)
 
