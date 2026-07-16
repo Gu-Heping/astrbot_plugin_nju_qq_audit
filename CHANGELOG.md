@@ -2,6 +2,12 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.11] - 2026-07-16
+
+### 优化
+
+- `/audit help advanced` 标明 mode 全局生效（本科+研究生），并补充各自自动通过规则与 release/catchup 非 mode 说明
+
 ## [v0.4.10] - 2026-07-16
 
 ### 优化

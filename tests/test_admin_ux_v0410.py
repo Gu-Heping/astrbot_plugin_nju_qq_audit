@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from admin.formatter import format_help
+from core.version import PLUGIN_VERSION
 
 
 def test_help_grad_short_copy():
     text = format_help(topic="grad")
-    assert "NJU QQ Audit v0.4.10 · 研究生审核" in text
+    assert f"NJU QQ Audit {PLUGIN_VERSION} · 研究生审核" in text
     assert len(text) < 600
     assert "填写格式：" in text
     assert "规则：" in text
