@@ -117,7 +117,7 @@ def test_is_sweep_candidate():
 
 
 def test_help_mentions_sweep():
-    text = format_help()
+    text = format_help(topic="advanced")
     assert "/audit sweep preview" in text
     assert "/audit sweep confirm" in text
 
@@ -151,7 +151,7 @@ async def test_preview_keeps_strong_lists_non_strong(tmp_path):
     assert "REQ-strong" in kept_ids
     text = format_sweep_preview(preview)
     assert "将本地关闭" in text
-    assert "将保留（strong）" in text
+    assert "将保留（强匹配）" in text
     actions.set_group_add_request.assert_not_awaited()
 
 

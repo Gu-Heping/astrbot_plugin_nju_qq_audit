@@ -2,6 +2,16 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.4] - 2026-07-16
+
+### 优化
+
+- 管理员 UX：`/audit list` / `view` / `ok` / `no` 及 mark-external / dismiss / restore 回执全面人话化
+- 列表优先展示 QQ 昵称与群名（复用 DisplayContext，失败安全降级）
+- 状态黑话翻译：pending→等待处理、external→QQ 侧已处理、stale→QQ 侧已找不到申请 等
+- sweep / release / catchup / report 去掉 strong/pending/non-strong 英文黑话
+- `/audit help` 默认精简；支持 `help batch` / `help debug` / `help advanced`
+
 ## [v0.4.3] - 2026-07-16
 
 ### 优化

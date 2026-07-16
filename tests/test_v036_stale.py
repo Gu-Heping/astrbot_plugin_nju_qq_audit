@@ -247,7 +247,7 @@ async def test_stale_view_shows_status(tmp_path):
         last_action_result=ActionResult(ok=False, message="flag expired token"),
     )
     text = format_view(req, index=1)
-    assert "stale" in text
+    assert "QQ 侧已找不到" in text or "stale" in text
     assert "flag" not in text
     assert "restore" in text
 

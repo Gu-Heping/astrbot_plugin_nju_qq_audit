@@ -115,17 +115,17 @@ async def collect_sweep_preview(pipeline: AuditPipeline) -> SweepPreview:
 def format_sweep_help() -> str:
     return "\n".join(
         [
-            "sweep：本地批量关闭非 strong pending（不调 QQ）",
+            "批量本地关闭「非强匹配」的本科待处理申请",
             "",
             "命令：",
-            "/audit sweep preview          预览将关闭的非 strong",
-            "/audit sweep confirm <原因>   一键 dismiss（原因必填）",
+            "/audit sweep preview          预览将关闭的非强匹配",
+            "/audit sweep confirm <原因>   一键本地关闭（原因必填）",
             "",
             "说明：",
-            "- 仅关闭本科 match_strength ≠ strong 的 pending",
-            "- 保留 strong，留给 auto / release / catchup",
-            "- 不处理研究生 pending（避免本科维护误关）",
-            "- 不调用 QQ；适合「别人已在 QQ 拒绝但 bot 未收到事件」",
+            "- 不会向 QQ 发送拒绝",
+            "- 不影响强匹配申请",
+            "- 不处理研究生申请",
+            "- 适合 QQ 侧已人工拒绝，但机器人没收到回执的情况",
             "- 仍在 QQ 等待审核要用 /audit no；已入群用 /audit mark-external",
             "- 建议先 /audit sweep preview",
         ]
@@ -136,7 +136,7 @@ def _format_rematch_lines(rematch: RematchSummary | None) -> list[str]:
     if rematch is None:
         return []
     return [
-        f"重算：扫描 {rematch.scanned}，变更 {rematch.changed}，升级 strong {rematch.upgraded_to_strong}",
+        f"重算：扫描 {rematch.scanned}，变更 {rematch.changed}，升级强匹配 {rematch.upgraded_to_strong}",
     ]
 
 
@@ -150,8 +150,8 @@ def format_sweep_preview(preview: SweepPreview) -> str:
     kept = len(preview.kept_strong)
     lines.extend(
         [
-            f"将本地关闭（non-strong）：{n} 条",
-            f"将保留（strong）：{kept} 条",
+            f"将本地关闭（非强匹配）：{n} 条",
+            f"将保留（强匹配）：{kept} 条",
         ]
     )
     if n > SWEEP_LARGE_THRESHOLD:
@@ -161,8 +161,8 @@ def format_sweep_preview(preview: SweepPreview) -> str:
         lines.extend(
             [
                 "",
-                "当前没有可 sweep 的非 strong pending。",
-                "仍可用 /audit list 查看 strong，或 /audit release / catchup。",
+                "当前没有可清理的非强匹配待处理申请。",
+                "仍可用 /audit list 查看强匹配，或 /audit release / catchup。",
             ]
         )
         return "\n".join(lines)
@@ -171,8 +171,14 @@ def format_sweep_preview(preview: SweepPreview) -> str:
     lines.append("样例（最多 10 条）：")
     for i, req in enumerate(preview.candidates[:10], start=1):
         strength = _strength(req)
+        strength_cn = {
+            "strong": "强匹配",
+            "weak": "弱匹配",
+            "none": "未匹配",
+            "auxiliary": "辅助匹配",
+        }.get(strength, strength)
         lines.append(
-            f"{i}. {applicant_summary(req)} | {strength} | {req.decision} | {req.id}"
+            f"{i}. {applicant_summary(req)} | {strength_cn} | {req.decision} | {req.id}"
         )
     if n > 10:
         lines.append(f"... 另有 {n - 10} 条")
@@ -195,17 +201,17 @@ def format_sweep_result(result: SweepResult) -> str:
         lines.append("")
     lines.extend(
         [
-            "sweep 完成（本地 dismiss，未调 QQ）",
+            "清理完成（本地关闭，未向 QQ 发送拒绝）",
             f"原因：{result.reason}",
             f"已关闭：{result.dismissed}",
             f"幂等跳过：{result.idempotent}",
-            f"保留 strong：{result.skipped_strong}",
+            f"保留强匹配：{result.skipped_strong}",
             f"已终态跳过：{result.skipped_terminal}",
             f"失败：{result.failed}",
         ]
     )
     if result.sample_ids:
-        lines.append("样例 ID：" + ", ".join(result.sample_ids[:5]))
+        lines.append("样例记录：" + ", ".join(result.sample_ids[:5]))
     return "\n".join(lines)
 
 

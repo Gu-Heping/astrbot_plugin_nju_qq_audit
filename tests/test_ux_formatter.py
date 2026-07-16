@@ -82,7 +82,10 @@ def test_format_view_shows_actions():
 
 
 def test_format_help_common_commands_first():
-    text = format_help()
-    list_pos = text.index("/audit list")
-    pending_pos = text.index("/audit pending")
+    default = format_help()
+    advanced = format_help(topic="advanced")
+    assert "/audit list" in default
+    assert len(default) < len(advanced)
+    list_pos = advanced.index("/audit list")
+    pending_pos = advanced.index("/audit pending")
     assert list_pos < pending_pos

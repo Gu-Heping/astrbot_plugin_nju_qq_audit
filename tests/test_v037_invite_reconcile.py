@@ -200,5 +200,5 @@ async def test_view_by_id_shows_external_after_list_cache_cleared(tmp_path):
     )
     assert by_id.ok
     text = format_view(by_id.request, by_id.index)
-    assert "external" in text
+    assert "QQ 侧已处理" in text
     assert "flag" not in text

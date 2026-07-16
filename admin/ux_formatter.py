@@ -9,6 +9,8 @@ from admin.labels import (
     human_judgement,
     list_action_hint,
     mode_label,
+    qq_match_label,
+    status_label,
 )
 from admin.command_resolver import sanitize_action_message
 from config import PluginSettings, mask_http_url
@@ -118,7 +120,12 @@ def format_list(
     index_map: dict[int, str],
     *,
     reconcile_summary=None,
+    group_labels: dict[str, str] | None = None,
+    user_labels: dict[str, str] | None = None,
 ) -> str:
+    del index_map  # indexes are positional; map used by caller for cache
+    group_labels = group_labels or {}
+    user_labels = user_labels or {}
     if not items:
         body = "目前没有待处理申请。"
     else:
@@ -129,24 +136,37 @@ def format_list(
             comment = (public.get("comment") or "")[:80]
             profile = public.get("profile") or "undergraduate"
             profile_label = "研究生" if profile == "graduate" else "本科"
+            gid = str(public.get("group_id") or "")
+            uid = str(public.get("user_id") or "")
+            group_text = group_labels.get(gid) or f"群 {gid}"
+            qq_text = user_labels.get(f"{gid}:{uid}") or uid
+            hint = list_action_hint(item)
             lines.extend(
                 [
-                    f"[{idx}] [{profile_label}] {summary}",
-                    f"群：{public.get('group_id', '')}",
+                    f"[{idx}] {profile_label}｜{summary}",
+                    f"QQ：{qq_text}",
+                    f"群：{group_text}",
                     f"验证：{comment or '（空）'}",
                     f"判断：{human_judgement(item)}",
+                    "",
+                    "操作：",
                 ]
             )
+            if hint == "ok":
+                lines.append(f"/audit ok {idx}")
+                lines.append(f"/audit view {idx}")
+            else:
+                lines.append(f"/audit view {idx}")
+                lines.append(f"/audit ok {idx}")
             last_action = public.get("last_action_result") or {}
             if last_action and last_action.get("ok") is False:
                 lines.append("提示：上次操作失败，可重试或到 QQ 侧确认。")
-            lines.append(list_action_hint(item).replace("编号", str(idx)))
             lines.append("若已被其他管理员在 QQ 侧处理：")
             lines.append(f"/audit mark-external {idx} confirm")
             lines.append("若申请已过期、重复或为测试数据：")
             lines.append(f"/audit dismiss {idx} confirm <原因>")
             lines.append("")
-        lines.append("编号来自本次列表，30 分钟内有效。无需复制长 request id。")
+        lines.append("编号来自本次列表，30 分钟内有效。")
         body = "\n".join(lines)
 
     if reconcile_summary is not None:
@@ -161,22 +181,34 @@ def _parsed_line(label: str, value) -> str:
     return f"{label}：{value}"
 
 
-def format_view(item, index: int | None = None) -> str:
+def format_view(
+    item,
+    index: int | None = None,
+    *,
+    group_label: str | None = None,
+    user_label: str | None = None,
+) -> str:
     public = item.to_public_dict()
     parsed = public.get("parsed") or {}
     status = public.get("status", "")
-    title = f"申请详情 [{index}]" if index is not None else f"申请详情 {public.get('id', '')}"
+    title = f"申请详情 [{index}]" if index is not None else "申请详情"
     profile = public.get("profile") or "undergraduate"
     profile_label = "研究生" if profile == "graduate" else "本科"
+    gid = str(public.get("group_id") or "")
+    uid = str(public.get("user_id") or "")
+    group_text = (group_label or "").strip() or f"群 {gid}"
+    qq_text = (user_label or "").strip() or uid
+    summary = applicant_summary(item)
     lines = [
         title,
         "",
         f"类型：{profile_label}",
-        f"用户：{public.get('user_id', '')}",
-        f"群：{public.get('group_id', '')}",
+        f"申请人：{summary}",
+        f"QQ：{qq_text}",
+        f"群：{group_text}",
         f"验证：{public.get('comment', '')[:120]}",
         f"时间：{_format_local_time(public.get('created_at'))}",
-        f"状态：{status}",
+        f"状态：{status_label(status)}",
     ]
     revision = int(public.get("comment_revision") or 0)
     if revision > 0:
@@ -218,21 +250,24 @@ def format_view(item, index: int | None = None) -> str:
     last_action = public.get("last_action_result") or {}
     action_result = public.get("action_result") or {}
     if status == "external":
-        lines.append("已在 QQ 客户端处理（external）。")
+        lines.append("已在 QQ 客户端处理，无需再审批。")
         msg = sanitize_action_message((action_result or last_action).get("message"))
         if msg and msg != "（无详情）":
             lines.append(f"说明：{msg}")
     elif status == "dismissed":
-        lines.append("已本地关闭（dismissed），未向 QQ 发起拒绝。")
+        lines.append("已本地关闭，未向 QQ 发起拒绝。")
         lines.append(f"管理员：{public.get('dismissed_by') or public.get('admin_user_id') or '（未知）'}")
         lines.append(f"时间：{_format_local_time(public.get('dismissed_at') or public.get('processed_at'))}")
         lines.append(f"原因：{public.get('dismiss_reason') or '（无）'}")
     elif status == "stale":
-        lines.append("QQ 侧已无此申请（stale），无法确认是否已入群。")
+        lines.append("QQ 侧已找不到此申请，无法确认是否已入群。")
         msg = sanitize_action_message((action_result or last_action).get("message"))
         if msg and msg != "（无详情）":
             lines.append(f"原因：{msg}")
-        lines.append("请到 QQ 群管理后台确认；可 restore 恢复 pending 或 mark-external 确认已入群。")
+        lines.append(
+            "请到 QQ 群管理后台确认；可 /audit restore 恢复为待处理，"
+            "或 /audit mark-external 确认已入群。"
+        )
     elif last_action:
         if last_action.get("ok"):
             lines.append("上次审批结果：成功")
@@ -246,13 +281,7 @@ def format_view(item, index: int | None = None) -> str:
                 )
             else:
                 lines.append("重试建议：可再次操作或使用 mark-external confirm")
-    qq_match = (public.get("match") or {}).get("qq_match")
-    if qq_match is True:
-        lines.append("QQ 匹配：是")
-    elif qq_match is False:
-        lines.append("QQ 匹配：否")
-    else:
-        lines.append("QQ 匹配：未记录")
+    lines.append(qq_match_label((public.get("match") or {}).get("qq_match")))
     lines.append("可操作：")
     if status == "external":
         lines.append("（已在 QQ 侧处理，无需 ok/no）")
@@ -277,39 +306,65 @@ def format_view(item, index: int | None = None) -> str:
         lines.append(f"/audit reject {public.get('id')} confirm")
         lines.append(f"/audit mark-external {public.get('id')} confirm")
         lines.append(f"/audit dismiss {public.get('id')} confirm <原因>")
+    lines.extend(
+        [
+            "",
+            f"记录编号：{public.get('id', '')}",
+        ]
+    )
     return "\n".join(lines)
 
 
-def format_ok_result(item, index: int | None = None) -> str:
+def format_ok_result(
+    item,
+    index: int | None = None,
+    *,
+    group_label: str | None = None,
+    user_label: str | None = None,
+) -> str:
     public = item.to_public_dict()
     label = f"[{index}]" if index is not None else public.get("id", "")
     summary = applicant_summary(item)
+    gid = str(public.get("group_id") or "")
+    uid = str(public.get("user_id") or "")
+    group_text = (group_label or "").strip() or f"群 {gid}"
+    qq_text = (user_label or "").strip() or uid
     return "\n".join(
         [
             f"已同意申请 {label}",
             "",
             f"申请人：{summary}",
-            f"QQ：{public.get('user_id', '')}",
-            f"群：{public.get('group_id', '')}",
+            f"QQ：{qq_text}",
+            f"群：{group_text}",
             "处理：管理员手动通过",
-            "状态：processed",
         ]
     )
 
 
-def format_no_result(item, index: int | None, reason: str) -> str:
+def format_no_result(
+    item,
+    index: int | None,
+    reason: str,
+    *,
+    group_label: str | None = None,
+    user_label: str | None = None,
+) -> str:
     public = item.to_public_dict()
     label = f"[{index}]" if index is not None else public.get("id", "")
     summary = applicant_summary(item)
+    gid = str(public.get("group_id") or "")
+    uid = str(public.get("user_id") or "")
+    group_text = (group_label or "").strip() or f"群 {gid}"
+    qq_text = (user_label or "").strip() or uid
     return "\n".join(
         [
             f"已拒绝申请 {label}",
             "",
             f"申请人：{summary}",
-            f"QQ：{public.get('user_id', '')}",
-            f"群：{public.get('group_id', '')}",
+            f"QQ：{qq_text}",
+            f"群：{group_text}",
             f"理由：{reason or DEFAULT_REJECT_REASON}",
-            "状态：processed",
+            "处理：已向 QQ 发送拒绝",
         ]
     )
 

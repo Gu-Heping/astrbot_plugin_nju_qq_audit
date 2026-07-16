@@ -21,6 +21,16 @@ STRENGTH_SUMMARY = {
     "none": "未匹配",
 }
 
+STATUS_LABELS = {
+    "pending": "等待处理",
+    "processed": "已处理",
+    "external": "QQ 侧已处理",
+    "stale": "QQ 侧已找不到申请",
+    "dismissed": "本地已关闭",
+    "ignored": "已忽略/已被新申请取代",
+    "failed": "处理失败",
+}
+
 DEFAULT_REJECT_REASON = "请填写真实姓名和学号后重新申请。"
 
 
@@ -32,6 +42,16 @@ def decision_label(decision: str) -> str:
     return DECISION_LABELS.get(decision, decision)
 
 
+def status_label(status: str) -> str:
+    return STATUS_LABELS.get(status or "", status or "未知")
+
+
+def strength_label(strength: str | None) -> str:
+    if not strength:
+        return "未匹配"
+    return STRENGTH_SUMMARY.get(strength, strength)
+
+
 def human_judgement(item) -> str:
     strength = getattr(item, "match_strength", None) or item.match.get("strength", "none")
     decision = getattr(item, "decision", "")
@@ -39,9 +59,11 @@ def human_judgement(item) -> str:
     strength_text = STRENGTH_SUMMARY.get(strength, strength)
 
     if decision == "approve" and strength == "strong":
-        return f"强匹配，建议通过"
+        if reason:
+            return reason if "建议" in reason else f"{reason}，建议通过"
+        return "强匹配，建议通过"
     if decision == "manual_review" and strength == "weak":
-        return f"弱匹配，需要人工确认"
+        return reason or "弱匹配，需要人工确认"
     if decision == "manual_review" and not reason:
         return "信息不足，需要人工确认"
     if reason:
@@ -53,10 +75,10 @@ def list_action_hint(item) -> str:
     decision = getattr(item, "decision", "")
     strength = getattr(item, "match_strength", None) or item.match.get("strength", "none")
     if decision == "approve" and strength == "strong":
-        return "操作：/audit ok 编号"
+        return "ok"
     if decision == "manual_review":
-        return "操作：/audit view 编号"
-    return "操作：/audit view 编号"
+        return "view"
+    return "view"
 
 
 def applicant_summary(item) -> str:
@@ -82,3 +104,11 @@ def applicant_summary(item) -> str:
     if name and major:
         return f"{name} / {major}"
     return str(name)
+
+
+def qq_match_label(qq_match) -> str:
+    if qq_match is True:
+        return "QQ 辅助匹配：QQ号与名单一致"
+    if qq_match is False:
+        return "QQ 辅助匹配：QQ号与名单不一致"
+    return "QQ 辅助匹配：未使用"

@@ -14,11 +14,11 @@ def test_record_mode_changed_mentions_release():
 
 
 def test_help_includes_release_and_report():
-    text = format_help()
+    text = format_help(topic="advanced")
     assert "/audit release preview" in text
     assert "/audit catchup preview" in text
     assert "/audit catchup confirm" in text
-    assert "catchup：先同步校对表" in text or "先同步校对表" in text
+    assert "catchup：先同步校对表" in text or "先同步校对表" in text or "校对表刚更新" in text
     assert "/audit unknown" in text
     assert "/audit report" in text
     assert "推荐流程" in text
@@ -32,7 +32,9 @@ def test_help_includes_release_and_report():
 
 
 def test_help_shows_context_when_provided():
-    text = format_help(effective_mode="record-only", pending_count=3, releasable_count=2)
+    text = format_help(
+        effective_mode="record-only", pending_count=3, releasable_count=2
+    )
     assert "当前：" in text
     assert "record-only" in text
     assert "待处理 3" in text

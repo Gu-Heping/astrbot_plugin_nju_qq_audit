@@ -182,7 +182,7 @@ def format_report(
         f"- 已忽略：{data.ignored}",
         f"- 失败：{data.failed}",
         f"- 外部处理：{data.external}",
-        f"- 可分批通过（strong）：{data.releasable}",
+        f"- 可分批通过（强匹配）：{data.releasable}",
         f"- 分批任务进行中：{'是' if release_running else '否'}",
         "",
         "需人工原因 Top：",
@@ -209,7 +209,7 @@ def format_report(
             [
                 "",
                 "建议：",
-                f"有 {data.releasable} 条 strong pending，可先 /audit release preview",
+                f"有 {data.releasable} 条强匹配待处理，可先 /audit release preview",
             ]
         )
     return "\n".join(lines)

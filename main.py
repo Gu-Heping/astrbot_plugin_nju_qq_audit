@@ -37,6 +37,14 @@ from admin.ux_formatter import (
     format_ok_result,
     format_view,
 )
+from admin.receipts import (
+    format_already_terminal_result,
+    format_dismiss_result,
+    format_mark_external_result,
+    format_restore_result,
+    resolve_display_labels,
+    resolve_one_item_labels,
+)
 from admin.handlers import PluginContext
 from admin.ctx_compat import ensure_ctx_compat
 from admin.labels import applicant_summary
@@ -350,15 +358,15 @@ class NjuQqAuditPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("help")
-    async def audit_help(self, event: AstrMessageEvent):
+    async def audit_help(self, event: AstrMessageEvent, topic: str = ""):
         allowed, message = can_run_command(self._settings(), "help", event)
         if not allowed:
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
-        yield event.plain_result(await self._render_help())
+        yield event.plain_result(await self._render_help(topic=topic))
 
-    async def _render_help(self) -> str:
+    async def _render_help(self, topic: str = "") -> str:
         ensure_ctx_compat(self.ctx)
         mode, _ = self.ctx.effective_mode()
         pending = await self.ctx.requests.list_pending(limit=1000)
@@ -373,6 +381,7 @@ class NjuQqAuditPlugin(Star):
                 effective_mode=mode,
                 pending_count=len(pending),
                 releasable_count=releasable_count,
+                topic=topic,
             )
         except TypeError:
             # 热重载后 main.py / formatter.py 版本不一致时的兼容
@@ -474,8 +483,17 @@ class NjuQqAuditPlugin(Star):
         items, index_map = await fetch_pending_for_admin(
             self.ctx, event.get_sender_id(), limit, profile=profile
         )
+        group_labels, user_labels = await resolve_display_labels(
+            getattr(self.ctx, "display", None), items
+        )
         yield event.plain_result(
-            format_list(items, index_map, reconcile_summary=reconcile_summary)
+            format_list(
+                items,
+                index_map,
+                reconcile_summary=reconcile_summary,
+                group_labels=group_labels,
+                user_labels=user_labels,
+            )
         )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
@@ -496,7 +514,17 @@ class NjuQqAuditPlugin(Star):
         if not resolved.ok:
             yield event.plain_result(resolved.message)
             return
-        yield event.plain_result(format_view(resolved.request, resolved.index))
+        group_label, user_label = await resolve_one_item_labels(
+            getattr(self.ctx, "display", None), resolved.request
+        )
+        yield event.plain_result(
+            format_view(
+                resolved.request,
+                resolved.index,
+                group_label=group_label,
+                user_label=user_label,
+            )
+        )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("lookup")
@@ -554,7 +582,17 @@ class NjuQqAuditPlugin(Star):
             list_cache=self.ctx.list_cache,
         )
         if result.ok:
-            yield event.plain_result(format_ok_result(resolved.request, resolved.index))
+            group_label, user_label = await resolve_one_item_labels(
+                getattr(self.ctx, "display", None), resolved.request
+            )
+            yield event.plain_result(
+                format_ok_result(
+                    resolved.request,
+                    resolved.index,
+                    group_label=group_label,
+                    user_label=user_label,
+                )
+            )
         else:
             yield event.plain_result(
                 await self._format_action_failure(resolved.request.id, result)
@@ -585,7 +623,18 @@ class NjuQqAuditPlugin(Star):
             list_cache=self.ctx.list_cache,
         )
         if result.ok:
-            yield event.plain_result(format_no_result(resolved.request, resolved.index, reject_reason))
+            group_label, user_label = await resolve_one_item_labels(
+                getattr(self.ctx, "display", None), resolved.request
+            )
+            yield event.plain_result(
+                format_no_result(
+                    resolved.request,
+                    resolved.index,
+                    reject_reason,
+                    group_label=group_label,
+                    user_label=user_label,
+                )
+            )
         else:
             yield event.plain_result(
                 await self._format_action_failure(resolved.request.id, result)
@@ -617,8 +666,9 @@ class NjuQqAuditPlugin(Star):
             event.get_sender_id(),
             list_cache=self.ctx.list_cache,
         )
-        label = f"[{resolved.index}]" if resolved.index is not None else resolved.request.id
-        yield event.plain_result(f"已将申请 {label} 标记为 external（QQ 侧已处理）。")
+        yield event.plain_result(
+            format_mark_external_result(resolved.request, resolved.index)
+        )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("dismiss")
@@ -657,15 +707,16 @@ class NjuQqAuditPlugin(Star):
             list_cache=self.ctx.list_cache,
         )
         latest = result.get("request") or resolved.request
-        label = f"[{resolved.index}]" if resolved.index is not None else latest.id
         if result.get("already_terminal"):
             yield event.plain_result(
-                f"申请 {label} 当前状态为 {latest.status}，未修改。"
+                format_already_terminal_result(latest, resolved.index)
             )
             return
         if result.get("idempotent"):
             yield event.plain_result(
-                f"申请 {label} 已是 dismissed（幂等，未重复修改）。"
+                format_dismiss_result(
+                    latest, resolved.index, dismiss_reason, idempotent=True
+                )
             )
             return
         if not result.get("ok"):
@@ -674,8 +725,7 @@ class NjuQqAuditPlugin(Star):
             )
             return
         yield event.plain_result(
-            f"已本地关闭申请 {label}（dismissed，未调用 QQ 拒绝接口）。\n"
-            f"原因：{dismiss_reason}"
+            format_dismiss_result(latest, resolved.index, dismiss_reason)
         )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
@@ -748,8 +798,9 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(resolved.message)
             return
         await self.ctx.pipeline.restore_stale(resolved.request, event.get_sender_id())
-        label = f"[{resolved.index}]" if resolved.index is not None else resolved.request.id
-        yield event.plain_result(f"已将申请 {label} 恢复为 pending，可重新 /audit ok/no。")
+        yield event.plain_result(
+            format_restore_result(resolved.request, resolved.index)
+        )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("cleanup")
@@ -1078,7 +1129,17 @@ class NjuQqAuditPlugin(Star):
         await self._record_admin_session(event)
         limit = max(1, min(int(limit), 50))
         items, index_map = await fetch_pending_for_admin(self.ctx, event.get_sender_id(), limit)
-        yield event.plain_result(format_list(items, index_map))
+        group_labels, user_labels = await resolve_display_labels(
+            getattr(self.ctx, "display", None), items
+        )
+        yield event.plain_result(
+            format_list(
+                items,
+                index_map,
+                group_labels=group_labels,
+                user_labels=user_labels,
+            )
+        )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("request")
@@ -1097,7 +1158,17 @@ class NjuQqAuditPlugin(Star):
         if not resolved.ok:
             yield event.plain_result(resolved.message)
             return
-        yield event.plain_result(format_view(resolved.request, resolved.index))
+        group_label, user_label = await resolve_one_item_labels(
+            getattr(self.ctx, "display", None), resolved.request
+        )
+        yield event.plain_result(
+            format_view(
+                resolved.request,
+                resolved.index,
+                group_label=group_label,
+                user_label=user_label,
+            )
+        )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("approve")
@@ -1125,7 +1196,17 @@ class NjuQqAuditPlugin(Star):
             list_cache=self.ctx.list_cache,
         )
         if result.ok:
-            yield event.plain_result(format_ok_result(resolved.request, resolved.index))
+            group_label, user_label = await resolve_one_item_labels(
+                getattr(self.ctx, "display", None), resolved.request
+            )
+            yield event.plain_result(
+                format_ok_result(
+                    resolved.request,
+                    resolved.index,
+                    group_label=group_label,
+                    user_label=user_label,
+                )
+            )
         else:
             yield event.plain_result(
                 await self._format_action_failure(resolved.request.id, result)
@@ -1158,7 +1239,18 @@ class NjuQqAuditPlugin(Star):
             list_cache=self.ctx.list_cache,
         )
         if result.ok:
-            yield event.plain_result(format_no_result(resolved.request, resolved.index, "管理员人工拒绝"))
+            group_label, user_label = await resolve_one_item_labels(
+                getattr(self.ctx, "display", None), resolved.request
+            )
+            yield event.plain_result(
+                format_no_result(
+                    resolved.request,
+                    resolved.index,
+                    "管理员人工拒绝",
+                    group_label=group_label,
+                    user_label=user_label,
+                )
+            )
         else:
             yield event.plain_result(
                 await self._format_action_failure(resolved.request.id, result)

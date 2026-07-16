@@ -10,28 +10,168 @@ def format_help(
     effective_mode: str | None = None,
     pending_count: int | None = None,
     releasable_count: int | None = None,
+    topic: str | None = None,
+) -> str:
+    topic_key = (topic or "").strip().lower()
+    if topic_key in {"batch", "分批", "release", "catchup"}:
+        return _format_help_batch(
+            effective_mode=effective_mode,
+            pending_count=pending_count,
+            releasable_count=releasable_count,
+        )
+    if topic_key in {"debug", "排查", "probe"}:
+        return _format_help_debug()
+    if topic_key in {"advanced", "adv", "高级", "all", "full"}:
+        return _format_help_advanced(
+            effective_mode=effective_mode,
+            pending_count=pending_count,
+            releasable_count=releasable_count,
+        )
+    return _format_help_default(
+        effective_mode=effective_mode,
+        pending_count=pending_count,
+        releasable_count=releasable_count,
+    )
+
+
+def _help_context(
+    *,
+    effective_mode: str | None,
+    pending_count: int | None,
+    releasable_count: int | None,
+) -> list[str]:
+    if effective_mode is None:
+        return []
+    context_bits = [f"模式 {effective_mode}"]
+    if pending_count is not None:
+        context_bits.append(f"待处理 {pending_count}")
+    if releasable_count is not None:
+        context_bits.append(f"可分批 {releasable_count}")
+    return ["", "当前：" + " | ".join(context_bits)]
+
+
+def _format_help_default(
+    *,
+    effective_mode: str | None,
+    pending_count: int | None,
+    releasable_count: int | None,
 ) -> str:
     lines = [
-        f"NJU QQ Audit {PLUGIN_VERSION} 管理命令（私聊）",
+        f"NJU QQ Audit {PLUGIN_VERSION}",
+        "",
+        "常用：",
+        "/audit list",
+        "/audit view 1",
+        "/audit ok 1",
+        "/audit no 1 信息不完整",
+        "/audit sync",
+        "/audit report",
+    ]
+    lines.extend(
+        _help_context(
+            effective_mode=effective_mode,
+            pending_count=pending_count,
+            releasable_count=releasable_count,
+        )
+    )
+    lines.extend(
+        [
+            "",
+            "更多：",
+            "/audit help batch     分批通过/补放",
+            "/audit help debug     排查问题",
+            "/audit help advanced  高级维护命令",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _format_help_batch(
+    *,
+    effective_mode: str | None,
+    pending_count: int | None,
+    releasable_count: int | None,
+) -> str:
+    lines = [
+        f"NJU QQ Audit {PLUGIN_VERSION} · 分批通过 / 补放",
+        "",
+        "日常只记录：/audit record",
+        "",
+        "分批通过（用当前本地名单）：",
+        "/audit release preview",
+        "/audit release 10 confirm",
+        "/audit release all confirm",
+        "",
+        "同步名单并补放：",
+        "/audit catchup preview",
+        "/audit catchup confirm",
+        "/audit catchup 10 confirm",
+        "",
+        "筛选条件（须同时满足）：",
+        "- 本科申请",
+        "- 系统强匹配",
+        "- 学号判断为 26 级",
+        "- 仍在待处理队列中",
+        "",
+        "说明：",
+        "- 不改变当前运行模式",
+        "- 校对表刚更新时优先 catchup",
+        "- 别名：/audit batch strong N confirm、/audit temp N confirm",
+    ]
+    lines.extend(
+        _help_context(
+            effective_mode=effective_mode,
+            pending_count=pending_count,
+            releasable_count=releasable_count,
+        )
+    )
+    return "\n".join(lines)
+
+
+def _format_help_debug() -> str:
+    return "\n".join(
+        [
+            f"NJU QQ Audit {PLUGIN_VERSION} · 排查",
+            "",
+            "/audit probe api            测试审批接口",
+            "/audit probe last           最近原始入群事件",
+            "/audit debug                技术状态",
+            "/audit lookup <姓名> <学号>  校对表查询",
+            "/audit sync status          定时同步状态",
+            "/audit unknown [n]          近 7 天未识别汇总",
+            "",
+            "说明：",
+            "- 短编号来自最近一次 /audit list 或入群通知",
+            "- 弱匹配、非 26 级、QQ 辅助不会自动通过",
+        ]
+    )
+
+
+def _format_help_advanced(
+    *,
+    effective_mode: str | None,
+    pending_count: int | None,
+    releasable_count: int | None,
+) -> str:
+    lines = [
+        f"NJU QQ Audit {PLUGIN_VERSION} 管理命令（完整）",
         "",
         "推荐流程：",
         "1. /audit record          日常只记录（默认，勿用 off）",
         "2. /audit sync              同步学生数据",
         "3. /audit list              看待处理（短编号 1/2/3，30 分钟有效）",
-        "4. /audit catchup preview   同步名单并预览可补放 strong",
+        "4. /audit catchup preview   同步名单并预览可补放",
         "   /audit catchup confirm   同步 + 重算 + 分批通过",
         "5. /audit ok/no <n>         弱匹配逐条处理",
         "6. /audit report            定期复盘",
     ]
-
-    if effective_mode is not None:
-        context_bits = [f"模式 {effective_mode}"]
-        if pending_count is not None:
-            context_bits.append(f"待处理 {pending_count}")
-        if releasable_count is not None:
-            context_bits.append(f"可分批 {releasable_count}")
-        lines.extend(["", "当前：" + " | ".join(context_bits)])
-
+    lines.extend(
+        _help_context(
+            effective_mode=effective_mode,
+            pending_count=pending_count,
+            releasable_count=releasable_count,
+        )
+    )
     lines.extend(
         [
             "",
@@ -42,14 +182,14 @@ def format_help(
             "/audit lookup <姓名> <学号> [专业]  校对表查询（诊断匹配）",
             "/audit ok <n>               同意（无需 confirm）",
             "/audit no <n> [理由]        拒绝，可附理由",
-            "/audit stale [n]            查看 stale 队列（QQ 侧已失效）",
-            "/audit restore <n> confirm  将 stale 恢复 pending",
+            "/audit stale [n]            查看 QQ 侧已失效的申请",
+            "/audit restore <n> confirm  恢复为待处理",
             "/audit mark-external <n> confirm  确认 QQ 侧已处理",
             "/audit dismiss <n> confirm <原因>  本地关闭无效申请（不调 QQ）",
-            "/audit sweep preview          预览将本地关闭的非 strong pending",
-            "/audit sweep confirm <原因>   一键 dismiss 非 strong（保留 strong）",
+            "/audit sweep preview          预览将本地关闭的非强匹配待处理",
+            "/audit sweep confirm <原因>   一键本地关闭非强匹配（保留强匹配）",
             "",
-            "分批放人（仅 strong 26 级 pending，不改变 mode）：",
+            "分批放人（仅本科强匹配 26 级待处理，不改变 mode）：",
             "/audit release              帮助 + 当前可释放数",
             "/audit release preview      按当前缓存重算后预览",
             "/audit release 10 confirm   通过最多 10 条",
@@ -69,13 +209,13 @@ def format_help(
             "/audit sync grad            同步研究生名单",
             "/audit sync-grad            同上（别名）",
             "/audit sync status          定时同步状态",
-            "/audit list grad            仅研究生 pending",
-            "/audit list undergraduate   仅本科 pending",
+            "/audit list grad            仅研究生待处理",
+            "/audit list undergraduate   仅本科待处理",
             "",
             "模式：",
             "/audit record               只记录，不自动放人（推荐日常）",
             "/audit manual               每条需人工处理",
-            "/audit auto confirm         自动通过 strong 26 级",
+            "/audit auto confirm         自动通过强匹配 26 级",
             "/audit off confirm          完全停用且不记录（慎用）",
             "",
             "排查：",
@@ -85,12 +225,12 @@ def format_help(
             "",
             "说明：",
             "- 短编号来自最近一次 /audit list 或入群通知",
-            "- 弱匹配、非 26 级、QQ 辅助不会 auto approve",
-            "- release：用当前本地名单重算 pending 后分批通过",
-            "- catchup：先同步校对表，再重算 pending 并补放新 strong",
+            "- 弱匹配、非 26 级、QQ 辅助不会自动通过",
+            "- release：用当前本地名单重算待处理后分批通过",
+            "- catchup：先同步校对表，再重算待处理并补放新强匹配",
             "- lookup：用姓名/学号直接查当前缓存是否能匹配",
-            "- sweep：本地批量 dismiss 非 strong（不调 QQ；适合 QQ 侧已拒但未上报）",
-            "- 校对表刚更新、历史 pending 未匹配时优先 catchup",
+            "- sweep：本地批量关闭非强匹配（不调 QQ；适合 QQ 侧已拒但未上报）",
+            "- 校对表刚更新、历史待处理未匹配时优先 catchup",
             "- 修改目标群请编辑 target_group_ids 后重启",
             "",
             "旧命令（仍可用）：",

@@ -120,12 +120,12 @@ def test_format_ok_no_include_applicant_summary():
     ok_text = format_ok_result(req, 1)
     assert "申请人：张三 / 26115002" in ok_text
     assert f"QQ：{USER_ID}" in ok_text
-    assert f"群：{GROUP_ID}" in ok_text
+    assert f"群：群 {GROUP_ID}" in ok_text or f"群：{GROUP_ID}" in ok_text
     assert "处理：管理员手动通过" in ok_text
     assert "flag" not in ok_text
     no_text = format_no_result(req, 1, "信息不完整")
     assert "申请人：张三 / 26115002" in no_text
-    assert f"群：{GROUP_ID}" in no_text
+    assert f"群：群 {GROUP_ID}" in no_text or f"群：{GROUP_ID}" in no_text
 
 
 @pytest.mark.asyncio

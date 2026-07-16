@@ -149,7 +149,7 @@ async def test_release_preview_shows_newly_strong_after_rematch(tmp_path):
     assert preview.rematch is not None
     assert preview.rematch.upgraded_to_strong == 1
     assert preview.total_releasable == 1
-    assert "新升为 strong：1" in text
+    assert "新升为强匹配：1" in text
     assert "王补录" in text
     actions.set_group_add_request.assert_not_awaited()
 
@@ -190,7 +190,7 @@ async def test_catchup_preview_sync_then_rematch(tmp_path):
     assert preview.release_preview.total_releasable == 1
     text = format_catchup_preview(preview, settings)
     assert "名单同步：成功" in text
-    assert "新升为 strong：1" in text
+    assert "新升为强匹配：1" in text
     assert "/audit catchup confirm" in text
     actions.set_group_add_request.assert_not_awaited()
 
@@ -257,7 +257,7 @@ async def test_catchup_sync_failure_blocks_rematch_and_approve(tmp_path):
     assert preview.sync_ok is False
     assert (await requests.get_by_id("REQ-catchup-1")).match_strength == "none"
     text = format_catchup_preview(preview, settings)
-    assert "未对 pending 重算或放行" in text
+    assert "未对待处理重算或放行" in text
 
     result = await service.catchup_batch(
         run_sync=fail_sync,

@@ -201,7 +201,7 @@ async def test_view_shows_dismiss_info(tmp_path):
     await pipe.dismiss_pending(req, ADMIN_ID, "测试数据清理", list_cache=list_cache)
     updated = await requests.get_by_id(req.id)
     text = format_view(updated, None)
-    assert "dismissed" in text
+    assert "本地已关闭" in text or "已本地关闭" in text
     assert ADMIN_ID in text
     assert "测试数据清理" in text
     assert "未向 QQ 发起拒绝" in text

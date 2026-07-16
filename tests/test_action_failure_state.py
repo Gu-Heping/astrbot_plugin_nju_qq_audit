@@ -143,7 +143,7 @@ async def test_external_view_allowed(tmp_path):
     )
     assert result.ok
     text = format_view(result.request, result.index)
-    assert "external" in text
+    assert "QQ 侧已处理" in text
     assert "flag" not in text
 
 

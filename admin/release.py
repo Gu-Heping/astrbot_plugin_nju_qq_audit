@@ -162,8 +162,8 @@ def _format_rematch_lines(rematch: RematchSummary | None) -> list[str]:
     if rematch is None:
         return []
     return [
-        f"已按当前名单重算 pending：{rematch.scanned} 条",
-        f"更新：{rematch.changed}，新升为 strong：{rematch.upgraded_to_strong}，"
+        f"已按当前名单重算待处理：{rematch.scanned} 条",
+        f"更新：{rematch.changed}，新升为强匹配：{rematch.upgraded_to_strong}，"
         f"新可放行：{rematch.newly_releasable}",
     ]
 
@@ -172,14 +172,14 @@ def format_release_help(count: int, settings: PluginSettings) -> str:
     interval_sec = settings.batch_approve_interval_ms / 1000
     return "\n".join(
         [
-            "分批通过（临时放行历史 strong match 申请）",
+            "分批通过（临时放行历史强匹配申请）",
             "",
             f"当前可通过：{count} 条",
             f"单次上限：{settings.batch_approve_max_count} 条",
             f"间隔：{interval_sec:g} 秒",
             "",
             "命令：",
-            "/audit release preview        预览（会先按当前缓存重算 pending）",
+            "/audit release preview        预览（会先按当前缓存重算待处理）",
             "/audit release 10 confirm     通过最多 10 条",
             "/audit release all confirm    通过最多上限条数",
             "",
@@ -187,9 +187,14 @@ def format_release_help(count: int, settings: PluginSettings) -> str:
             "/audit catchup preview        拉最新名单 + 重算 + 预览",
             "/audit catchup confirm        拉最新名单 + 重算 + 放行（上限内）",
             "",
+            "筛选条件（须同时满足）：",
+            "- 本科申请",
+            "- 系统强匹配",
+            "- 学号判断为 26 级",
+            "- 仍在待处理队列中",
+            "",
             "说明：",
-            "- 仅 strong match + 26级 + 目标群 + pending",
-            "- 不改变当前运行模式（不是长期 auto）",
+            "- 不改变当前运行模式（不是长期自动审核）",
             "- 建议先发欢迎消息，再分批执行",
             "- 校对表更新后优先使用 /audit catchup preview",
         ]
@@ -200,7 +205,7 @@ def format_catchup_help(settings: PluginSettings) -> str:
     interval_sec = settings.batch_approve_interval_ms / 1000
     return "\n".join(
         [
-            "catchup：同步 NJUTable 名单 → 重算 pending → 补放 strong",
+            "补放：同步名单 → 重算待处理 → 补放强匹配",
             "",
             f"单次上限：{settings.batch_approve_max_count} 条",
             f"间隔：{interval_sec:g} 秒",
@@ -210,9 +215,14 @@ def format_catchup_help(settings: PluginSettings) -> str:
             "/audit catchup confirm        同步 + 重算 + 放行最多上限条",
             "/audit catchup 10 confirm     同步 + 重算 + 放行最多 10 条",
             "",
+            "筛选条件（须同时满足）：",
+            "- 本科申请",
+            "- 系统强匹配",
+            "- 学号判断为 26 级",
+            "- 仍在待处理队列中",
+            "",
             "说明：",
             "- 同步失败时不会重算或放行",
-            "- 仅放行 strong + 26 级 + 目标群 pending",
             "- 不改变当前运行模式",
         ]
     )
@@ -224,12 +234,12 @@ def format_release_preview(preview: ReleasePreview, settings: PluginSettings) ->
     if lines:
         lines.append("")
     if not preview.items:
-        lines.append("当前没有可分批通过的 strong match 申请。")
+        lines.append("当前没有可分批通过的强匹配申请。")
         return "\n".join(lines)
     lines.extend(
         [
             f"可分批通过：{preview.total_releasable} 条（预览）",
-            f"条件：strong match + 26级 + 目标群 + pending",
+            "筛选条件：本科申请 · 系统强匹配 · 学号判断为 26 级 · 仍在待处理队列中",
             f"间隔：{settings.batch_approve_interval_ms / 1000:g} 秒",
             "",
         ]
@@ -268,7 +278,7 @@ def format_release_result(result: ReleaseResult, settings: PluginSettings) -> st
         [
             prefix,
             f"间隔：{settings.batch_approve_interval_ms / 1000:g} 秒",
-            "条件：仅 strong match + 26级 + 目标群 + pending",
+            "筛选条件：本科申请 · 系统强匹配 · 学号判断为 26 级 · 仍在待处理队列中",
             "",
         ]
     )
@@ -296,7 +306,7 @@ def _format_sync_header(sync_ok: bool, sync_message: str, sync_state: SyncState 
     if not sync_ok:
         return [
             f"名单同步失败：{sync_message}",
-            "未对 pending 重算或放行。请先 /audit sync status 排查。",
+            "未对待处理重算或放行。请先 /audit sync status 排查。",
         ]
     if sync_state is not None:
         cached = sync_state.filtered_count or sync_state.row_count
@@ -315,13 +325,13 @@ def format_catchup_preview(preview: CatchupPreview, settings: PluginSettings) ->
     rematch = preview.rematch
     if rematch is not None:
         lines.append(
-            f"重算 pending：共 {rematch.scanned} 条，新升为 strong：{rematch.upgraded_to_strong}，"
+            f"重算待处理：共 {rematch.scanned} 条，新升为强匹配：{rematch.upgraded_to_strong}，"
             f"本次可放行：{(preview.release_preview.total_releasable if preview.release_preview else 0)}"
         )
         lines.append("")
     rp = preview.release_preview
     if rp is None or not rp.items:
-        lines.append("当前没有可补放的 strong match 申请。")
+        lines.append("当前没有可补放的强匹配申请。")
         return "\n".join(lines)
     for item in rp.items:
         lines.extend(
