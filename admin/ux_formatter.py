@@ -523,9 +523,34 @@ def extract_external_applicant_and_verification(
         applicant = (summary or "").strip() or str(user_id or "")
         return applicant, applicant
 
+    # Prefer parsing the real filled content after "answer" markers.
+    # Examples:
+    #   问题：... 答案：张轩玮，261108002，德语
+    #   问题：... 回答：...（多个答案标记取最后一个）
+    # If markers are not found, fall back to parsing the whole comment.
+    answer_marker_re = re.compile(
+        r"(?i)(?:答案|答|回答)\s*[：:]\s*|(?:answer)\s*[：:]\s*|\bA\s*[：:]\s*"
+    )
+    matches = list(answer_marker_re.finditer(comment_line))
+    if matches:
+        # Take the last answer marker.
+        answer_text = comment_line[matches[-1].end() :].strip()
+    else:
+        answer_text = comment_line
+
+    if not answer_text:
+        applicant = (summary or "").strip() or str(user_id or "")
+        return applicant, applicant
+
     # Split into tokens like: ["张轩玮", "261108002", "德语"]
-    tokens = re.findall(r"[^\d\s,，;；|/]+|\d+", comment_line)
+    tokens = re.findall(r"[^\d\s,，;；|/]+|\d+", answer_text)
     tokens = [t.strip() for t in tokens if t and t.strip()]
+
+    # If we accidentally parsed question/label words, fall back to summary/user_id.
+    first = tokens[0]
+    if first and any(first.startswith(w) for w in {"问题", "答案", "答", "回答", "answer"}):
+        applicant = (summary or "").strip() or str(user_id or "")
+        return applicant, applicant
 
     if len(tokens) >= 3:
         applicant = f"{tokens[0]} / {tokens[1]} / {tokens[2]}"
