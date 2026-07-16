@@ -357,7 +357,7 @@ def format_manual_review_notice(
     parsed: dict | None = None,
 ) -> str:
     parsed = parsed or {}
-    ref = str(index) if index is not None else "?"
+    ref = str(index) if index is not None else None
     lines = [
         "新的入群申请需要确认",
         "",
@@ -371,7 +371,6 @@ def format_manual_review_notice(
         major = parsed.get("major_text") or parsed.get("major")
         if major:
             lines.append(f"专业：{major}")
-        match_college = None  # filled from match in caller via parsed alias
         college = parsed.get("college")
         if college:
             lines.append(f"学院：{college}")
@@ -383,9 +382,20 @@ def format_manual_review_notice(
             f"验证：{(comment or '')[:120] or '（空）'}",
             f"判断：{judgement}",
             "",
-            f"/audit view {ref}",
-            f"/audit ok {ref}",
-            f"/audit no {ref}",
+        ]
+    )
+    if ref is not None:
+        lines.extend(
+            [
+                f"/audit view {ref}",
+                f"/audit ok {ref}",
+                f"/audit no {ref}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "若编号无效，请先发送：",
             "/audit list",
         ]
     )

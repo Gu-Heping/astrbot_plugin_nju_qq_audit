@@ -219,6 +219,28 @@ def test_grad_parser_major_stops_before_type_label():
     assert parsed.admission_type == "硕士"
 
 
+def test_grad_parser_name_stops_before_luqu_label():
+    parsed = parse_graduate_comment("姓名：张三录取专业名称：马克思主义哲学 类型：硕")
+    assert parsed.name == "张三"
+    assert parsed.major_text == "马克思主义哲学"
+    assert parsed.admission_type == "硕士"
+
+
+def test_grad_parser_type_stops_before_major_label():
+    parsed = parse_graduate_comment("姓名：张三 类型：硕专业：马克思主义哲学")
+    assert parsed.name == "张三"
+    assert parsed.admission_type == "硕士"
+    assert parsed.major_text == "马克思主义哲学"
+
+
+def test_grad_parser_labeled_major_with_embedded_code():
+    parsed = parse_graduate_comment("姓名：刘尚明 专业：085400电子信息 类型：硕")
+    assert parsed.name == "刘尚明"
+    assert "085400" in parsed.major_code_candidates
+    assert parsed.major_text == "电子信息"
+    assert parsed.admission_type == "硕士"
+
+
 def test_grad_parser_shuo_bo_placeholder_not_concrete_type():
     parsed = parse_graduate_comment("刘尚明 马克思主义哲学 硕/博")
     assert parsed.name == "刘尚明"
@@ -555,3 +577,21 @@ async def test_rematch_can_skip_graduate_profile(tmp_path):
     assert summary2.changed >= 1
     latest2 = await requests.get_by_id(grad.id)
     assert latest2.match_strength == "strong"
+
+
+def test_manual_review_notice_without_index_falls_back_to_list():
+    from admin.ux_formatter import format_manual_review_notice
+
+    text = format_manual_review_notice(
+        index=None,
+        group_id="200",
+        user_id="u",
+        comment="刘尚明 马克思主义哲学 硕",
+        judgement="需人工",
+        profile="graduate",
+        parsed={"name": "刘尚明", "admission_type": "硕士", "major_text": "马克思主义哲学"},
+    )
+    assert "/audit view ?" not in text
+    assert "/audit ok ?" not in text
+    assert "/audit list" in text
+    assert "类型：研究生" in text

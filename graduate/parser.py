@@ -9,9 +9,8 @@ from graduate.models import GraduateParsedApplication
 CHINESE_NAME_PATTERN = re.compile(r"^[\u4e00-\u9fa5·]{2,4}$")
 MAJOR_CODE_PATTERN = re.compile(r"^\d{4,8}$")
 NAME_LABEL_PATTERN = re.compile(
-    # Stop before the next field label; do not use [:：] alone as a stop —
-    # glued 「姓名：张三专业：…」 would otherwise greedily swallow 「张三专业」.
-    r"(?:姓名|名字)[:：\s]+([\u4e00-\u9fa5·]{2,4})"
+    # Non-greedy so 「姓名：张三录取专业…」 stops at 张三, not 张三录取.
+    r"(?:姓名|名字)[:：\s]+([\u4e00-\u9fa5·]{2,4}?)"
     r"(?=\s|专业|类型|录取|$|[，,；;|/／])",
     re.IGNORECASE,
 )
@@ -22,13 +21,22 @@ MAJOR_CODE_LABEL_PATTERN = re.compile(
 )
 MAJOR_LABEL_PATTERN = re.compile(
     r"(?:专业名称|录取专业|报读专业|专业(?!代码))[:：\s]*"
-    r"([\u4e00-\u9fa5a-zA-Z（）()·\-]{2,40}?)"
+    r"([\u4e00-\u9fa5a-zA-Z0-9（）()·\-]{2,40}?)"
     r"(?=\s|类型|录取类型|学位类型|学段|专业代码|$|[，,；;|/／]|姓名|名字)",
     re.IGNORECASE,
 )
 TYPE_LABEL_PATTERN = re.compile(
-    r"(?:类型|录取类型|学位类型|学段)[:：\s]*([^\s,，；;]{1,12})",
+    r"(?:类型|录取类型|学位类型|学段)[:：\s]*"
+    r"([^\s,，；;]{1,12}?)"
+    r"(?=\s|专业|姓名|名字|$|[，,；;|/／])",
     re.IGNORECASE,
+)
+
+_LEADING_MAJOR_CODE = re.compile(
+    r"^(\d{4,8})([\u4e00-\u9fa5a-zA-Z（）()·\-].*)$"
+)
+_TRAILING_MAJOR_CODE = re.compile(
+    r"^([\u4e00-\u9fa5a-zA-Z（）()·\-].*?)(\d{4,8})$"
 )
 
 # Template placeholders that mean "pick one", not a concrete admission type.
@@ -133,6 +141,35 @@ def _looks_like_major(token: str) -> bool:
     return True
 
 
+def _absorb_major_value(result: GraduateParsedApplication, raw: str) -> None:
+    """Store labeled/free major text; peel embedded 4–8 digit codes when present."""
+    value = normalize_whitespace(raw)
+    if not value:
+        return
+    if MAJOR_CODE_PATTERN.fullmatch(value):
+        if value not in result.major_code_candidates:
+            result.major_code_candidates.append(value)
+        return
+    leading = _LEADING_MAJOR_CODE.match(value)
+    if leading:
+        code, rest = leading.group(1), normalize_whitespace(leading.group(2))
+        if code not in result.major_code_candidates:
+            result.major_code_candidates.append(code)
+        if rest and not result.major_text:
+            result.major_text = rest
+        return
+    trailing = _TRAILING_MAJOR_CODE.match(value)
+    if trailing:
+        rest, code = normalize_whitespace(trailing.group(1)), trailing.group(2)
+        if code not in result.major_code_candidates:
+            result.major_code_candidates.append(code)
+        if rest and not result.major_text:
+            result.major_text = rest
+        return
+    if not result.major_text:
+        result.major_text = value
+
+
 def parse_graduate_comment(raw: str) -> GraduateParsedApplication:
     full = normalize_whitespace(raw)
     text = normalize_whitespace(extract_answer_segment(raw))
@@ -153,7 +190,7 @@ def parse_graduate_comment(raw: str) -> GraduateParsedApplication:
 
     major_label = MAJOR_LABEL_PATTERN.search(text)
     if major_label:
-        result.major_text = normalize_whitespace(major_label.group(1))
+        _absorb_major_value(result, major_label.group(1))
 
     type_label = TYPE_LABEL_PATTERN.search(text)
     if type_label:
@@ -211,12 +248,12 @@ def parse_graduate_comment(raw: str) -> GraduateParsedApplication:
             result.name = normalize_name(t)
             continue
         if not result.major_text and _looks_like_major(t):
-            result.major_text = normalize_whitespace(t)
+            _absorb_major_value(result, t)
             continue
         # Second Chinese name-like after name already set → likely major fragment
         if result.name and not result.major_text and len(t) >= 2 and re.search(r"[\u4e00-\u9fa5]", t):
             if normalize_admission_type(t) is None and t not in _UNKNOWN_TYPE_TOKENS:
-                result.major_text = normalize_whitespace(t)
+                _absorb_major_value(result, t)
 
     if not result.name and not result.major_text and not result.admission_type and not result.major_code_candidates:
         result.parse_errors.append("unable to parse graduate fields")
