@@ -101,10 +101,10 @@ def match_graduate(
     if major and not major_hits:
         major_hits = [s for s in pool if majors_fuzzy_match(major, s.major_name)]
     elif major and major_hits:
-        # Prefer intersection of code+name fuzzy if both given
+        # Both code and name supplied: require intersection. Code-only fallback
+        # would auto-approve conflicting credentials (e.g. 010101 + 中国哲学).
         both = [s for s in major_hits if majors_fuzzy_match(major, s.major_name)]
-        if both:
-            major_hits = both
+        major_hits = both
 
     if codes or major:
         if not major_hits:

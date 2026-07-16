@@ -433,3 +433,73 @@ async def test_saturated_snapshot_still_allows_member_approved(tmp_path):
     assert summary.external_rejected_inferred == 0
     assert (await requests.get_by_id(req.id)).status == "external"
     assert any(r.get("type") == "reconcile_snapshot_saturated" for r in audit.read_all())
+
+
+@pytest.mark.asyncio
+async def test_one_group_failure_does_not_block_other_group(tmp_path):
+    grad_group = "200"
+    under_req = _pending(flag="flag-under")
+    grad_req = _pending(
+        id=new_request_id(),
+        group_id=grad_group,
+        user_id="30001",
+        flag="flag-grad",
+        comment="刘尚明",
+        profile="graduate",
+    )
+
+    async def system_msg(group_id):
+        if str(group_id) == grad_group:
+            return ActionResult(ok=False, message="grad backend down")
+        return ActionResult(
+            ok=True,
+            data=_qq_payload(
+                {
+                    "group_id": int(GROUP_ID),
+                    "requester_uin": int(USER_ID),
+                    "flag": under_req.flag,
+                    "message": under_req.comment,
+                }
+            ),
+        )
+
+    actions = MagicMock()
+    actions.get_group_system_msg = AsyncMock(side_effect=system_msg)
+    actions.get_group_member_info = AsyncMock()
+    settings = load_settings(
+        DummyConfig(
+            {
+                "target_group_ids": GROUP_ID,
+                "grad_enabled": True,
+                "grad_target_group_ids": grad_group,
+                "admin_notify": False,
+                "audit_list_reconcile_timeout_ms": 4000,
+                "audit_list_reject_wait_seconds": 0,
+                "audit_list_reject_confirm_snapshots": 2,
+            }
+        )
+    )
+    requests = RequestsStore(tmp_path / "requests.json")
+    audit = AuditLog(tmp_path / "audit.jsonl", settings)
+    runtime = RuntimeStore(tmp_path / "runtime.json")
+    pipe = AuditPipeline(
+        settings, requests, audit, runtime, MagicMock(), actions, MagicMock()
+    )
+    list_cache = AdminListCacheStore(tmp_path / "list_cache.json")
+    await requests.upsert(under_req)
+    await requests.upsert(grad_req)
+
+    summary = await pipe.reconcile_active_pending(source="audit_list", list_cache=list_cache)
+
+    assert summary.failed is True
+    assert summary.unchanged >= 1
+    assert (await requests.get_by_id(under_req.id)).status == "pending"
+    assert (await requests.get_by_id(grad_req.id)).status == "pending"
+    # Undergraduate-only list must not even touch the broken graduate group.
+    summary2 = await pipe.reconcile_active_pending(
+        source="audit_list",
+        list_cache=list_cache,
+        profiles=frozenset({"undergraduate"}),
+    )
+    assert summary2.failed is False
+    assert summary2.unchanged >= 1

@@ -474,6 +474,7 @@ class NjuQqAuditPlugin(Star):
         reconcile_summary = await self.ctx.pipeline.reconcile_active_pending(
             source="audit_list",
             list_cache=self.ctx.list_cache,
+            profiles=frozenset({profile}) if profile else None,
         )
         items, index_map = await fetch_pending_for_admin(
             self.ctx, event.get_sender_id(), limit, profile=profile

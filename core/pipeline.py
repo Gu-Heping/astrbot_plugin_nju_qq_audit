@@ -1452,6 +1452,7 @@ class AuditPipeline:
         *,
         source: str,
         list_cache: AdminListCacheStore | None = None,
+        profiles: frozenset[str] | None = None,
     ) -> PendingReconcileSummary:
         summary = PendingReconcileSummary()
         try:
@@ -1460,6 +1461,7 @@ class AuditPipeline:
                     source=source,
                     list_cache=list_cache,
                     summary=summary,
+                    profiles=profiles,
                 ),
                 timeout=self.settings.audit_list_reconcile_timeout_ms / 1000,
             )
@@ -1493,13 +1495,17 @@ class AuditPipeline:
         source: str,
         list_cache: AdminListCacheStore | None,
         summary: PendingReconcileSummary,
+        profiles: frozenset[str] | None = None,
     ) -> PendingReconcileSummary:
         active_groups = configured_audit_group_ids(self.settings)
-        pendings = [
-            req
-            for req in await self.requests.list_pending(limit=1000)
-            if req.group_id in active_groups
-        ]
+        pendings = []
+        for req in await self.requests.list_pending(limit=1000):
+            if req.group_id not in active_groups:
+                continue
+            req_profile = getattr(req, "profile", None) or "undergraduate"
+            if profiles is not None and req_profile not in profiles:
+                continue
+            pendings.append(req)
         if not pendings:
             return summary
 
@@ -1512,24 +1518,32 @@ class AuditPipeline:
             result = await self.actions.get_group_system_msg(group_id)
             fetch = build_group_snapshot_fetch(result)
             if not fetch.ok or not fetch.reliable:
+                # Isolate per-group failure so one profile/group cannot block others.
                 summary.failed = True
-                summary.failure_message = fetch.message or "group system msg failed"
+                if not summary.failure_message:
+                    summary.failure_message = fetch.message or "group system msg failed"
                 await self.audit.append(
                     {
                         "type": "reconcile_failed",
                         "source": source,
                         "reason": "group_system_msg_unavailable",
                         "group_id": group_id,
-                        "message": summary.failure_message,
+                        "message": fetch.message or "group system msg failed",
                     }
                 )
-                return summary
+                continue
             fetches[group_id] = fetch
+
+        if not fetches:
+            return summary
 
         planned: list[tuple[str, PendingRequest]] = []
         now_iso = utc_now_iso()
         for group_id, items in by_group.items():
-            fetch = fetches[group_id]
+            fetch = fetches.get(group_id)
+            if fetch is None:
+                summary.unchanged += len(items)
+                continue
             if fetch.empty_untrusted:
                 summary.snowluma_empty_ambiguity = True
             if fetch.snapshot_saturated:

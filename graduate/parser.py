@@ -22,11 +22,19 @@ MAJOR_CODE_LABEL_PATTERN = re.compile(
 )
 MAJOR_LABEL_PATTERN = re.compile(
     r"(?:专业名称|录取专业|报读专业|专业(?!代码))[:：\s]*"
-    r"([\u4e00-\u9fa5a-zA-Z（）()·\-]{2,40})",
+    r"([\u4e00-\u9fa5a-zA-Z（）()·\-]{2,40}?)"
+    r"(?=\s|类型|录取类型|学位类型|学段|专业代码|$|[，,；;|/／]|姓名|名字)",
     re.IGNORECASE,
 )
 TYPE_LABEL_PATTERN = re.compile(
     r"(?:类型|录取类型|学位类型|学段)[:：\s]*([^\s,，；;]{1,12})",
+    re.IGNORECASE,
+)
+
+# Template placeholders that mean "pick one", not a concrete admission type.
+_AMBIGUOUS_TYPE_PATTERN = re.compile(
+    r"(硕\s*[/／或]\s*博|博\s*[/／或]\s*硕|"
+    r"硕士\s*[/／或]\s*博士|博士\s*[/／或]\s*硕士|硕博)",
     re.IGNORECASE,
 )
 
@@ -80,6 +88,13 @@ def normalize_admission_type(token: str | None) -> str | None:
     if not raw:
         return None
     if raw in _UNKNOWN_TYPE_TOKENS or raw == "研究生":
+        return None
+    # Ambiguous template placeholders (硕/博) must not resolve to a concrete type.
+    if raw == "硕博" or (
+        any(sep in raw for sep in ("/", "／", "或"))
+        and ("硕" in raw or "master" in raw)
+        and ("博" in raw or "doctor" in raw or "phd" in raw)
+    ):
         return None
     # Strip common wrappers
     compact = raw.replace("（", "").replace("）", "").replace("(", "").replace(")", "")
@@ -145,8 +160,9 @@ def parse_graduate_comment(raw: str) -> GraduateParsedApplication:
         result.admission_type_raw = type_label.group(1).strip()
         result.admission_type = normalize_admission_type(result.admission_type_raw)
 
-    # Tokenize remaining free text (drop punctuation)
-    cleaned = re.sub(r"[,，；;|/／]+", " ", text)
+    # Protect 「硕/博」 placeholders before splitting on 「/」.
+    text_for_tokens = _AMBIGUOUS_TYPE_PATTERN.sub(" ", text)
+    cleaned = re.sub(r"[,，；;|/／]+", " ", text_for_tokens)
     tokens = [t for t in cleaned.split() if t and t.lower() not in _TEMPLATE_SKIP]
 
     # Strip labeled values already consumed from free tokens where exact match
@@ -163,15 +179,28 @@ def parse_graduate_comment(raw: str) -> GraduateParsedApplication:
             continue
         free.append(t)
 
+    # If free text contains both 硕 and 博 signals, treat type as unresolved.
+    free_types = {
+        normalize_admission_type(t)
+        for t in free
+        if normalize_admission_type(t) is not None
+    }
+    free_type_ambiguous = len(free_types) > 1
+
     for t in free:
         if MAJOR_CODE_PATTERN.fullmatch(t):
             if t not in result.major_code_candidates:
                 result.major_code_candidates.append(t)
             continue
         adm = normalize_admission_type(t)
-        if adm and not result.admission_type:
+        if adm and not result.admission_type and not free_type_ambiguous:
             result.admission_type = adm
             result.admission_type_raw = t
+            continue
+        if free_type_ambiguous and adm:
+            # Keep raw clue but do not pick a side.
+            if not result.admission_type_raw:
+                result.admission_type_raw = "硕/博"
             continue
         if t in _UNKNOWN_TYPE_TOKENS or t == "研究生":
             # Explicitly do not force master
