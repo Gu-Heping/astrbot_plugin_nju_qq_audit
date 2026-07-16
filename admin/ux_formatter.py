@@ -72,13 +72,75 @@ def _adapter_status_text(adapter_probe: dict | None) -> str:
     return "未知"
 
 
-def _home_health(settings: PluginSettings, adapter_probe: dict | None) -> str:
-    if not settings.target_group_ids or not admin_configured(settings):
+def _channel_status(
+    settings: PluginSettings,
+    *,
+    grad_enabled: bool | None = None,
+    grad_target_group_ids: list[str] | frozenset[str] | None = None,
+) -> tuple[bool, bool, bool, bool, bool]:
+    """Return undergrad/grad flags and whether any audit channel is configured."""
+    has_undergrad = bool(settings.target_group_ids)
+    grad_on = settings.grad_enabled if grad_enabled is None else grad_enabled
+    if grad_target_group_ids is not None:
+        has_grad = bool(grad_target_group_ids)
+    else:
+        has_grad = bool(settings.grad_target_group_ids)
+    grad_ready = grad_on and has_grad
+    any_channel = has_undergrad or grad_ready
+    return has_undergrad, grad_on, has_grad, grad_ready, any_channel
+
+
+def _home_health(
+    settings: PluginSettings,
+    adapter_probe: dict | None,
+    *,
+    grad_enabled: bool | None = None,
+    grad_target_group_ids: list[str] | frozenset[str] | None = None,
+) -> str:
+    _, _, _, _, any_channel = _channel_status(
+        settings,
+        grad_enabled=grad_enabled,
+        grad_target_group_ids=grad_target_group_ids,
+    )
+    if not any_channel or not admin_configured(settings):
         return "需要配置"
     available = (adapter_probe or {}).get("adapter_action_available", "unknown")
     if available == "no":
         return "有告警"
     return "正常"
+
+
+def _home_warning_lines(
+    settings: PluginSettings,
+    *,
+    grad_enabled: bool | None = None,
+    grad_target_group_ids: list[str] | frozenset[str] | None = None,
+) -> list[str]:
+    has_undergrad, grad_on, has_grad, _, any_channel = _channel_status(
+        settings,
+        grad_enabled=grad_enabled,
+        grad_target_group_ids=grad_target_group_ids,
+    )
+    if not any_channel:
+        lines = [
+            "⚠️ 未配置任何目标群",
+        ]
+        if grad_on and not has_grad:
+            lines.append("研究生已启用但未配置研究生目标群。")
+        else:
+            lines.append(
+                "请到 AstrBot 插件配置里填写 target_group_ids，"
+                "或启用并配置 grad_target_group_ids。"
+            )
+        lines.append("")
+        return lines
+    if grad_on and not has_grad:
+        return [
+            "⚠️ 研究生已启用但未配置研究生目标群",
+            "请到 AstrBot 插件配置里填写 grad_target_group_ids。",
+            "",
+        ]
+    return []
 
 
 def format_home(
@@ -98,17 +160,27 @@ def format_home(
     release_running: bool = False,
 ) -> str:
     lines: list[str] = []
-    health = _home_health(settings, adapter_probe)
+    grad_on = settings.grad_enabled if grad_enabled is None else grad_enabled
+    grad_ids = (
+        grad_target_group_ids
+        if grad_target_group_ids is not None
+        else sorted(settings.grad_target_group_ids)
+    )
+    grad_group_text = ", ".join(sorted(grad_ids)) if grad_ids else "(未配置)"
+    health = _home_health(
+        settings,
+        adapter_probe,
+        grad_enabled=grad_on,
+        grad_target_group_ids=grad_ids,
+    )
 
-    if not settings.target_group_ids:
-        lines.extend(
-            [
-                "⚠️ 未配置目标群",
-                "当前不会处理任何入群申请。",
-                "请到 AstrBot 插件配置里填写 target_group_ids。",
-                "",
-            ]
+    lines.extend(
+        _home_warning_lines(
+            settings,
+            grad_enabled=grad_on,
+            grad_target_group_ids=grad_ids,
         )
+    )
     if not admin_configured(settings):
         lines.extend(
             [
@@ -144,8 +216,8 @@ def format_home(
             f"- 待处理数：{pending_count} 条",
             "",
             "研究生：",
-            f"- 启用：{'是' if (settings.grad_enabled if grad_enabled is None else grad_enabled) else '否'}",
-            f"- 目标群：{', '.join(grad_target_group_ids if grad_target_group_ids is not None else sorted(settings.grad_target_group_ids)) or '(未配置)'}",
+            f"- 启用：{'是' if grad_on else '否'}",
+            f"- 目标群：{grad_group_text}",
             f"- 名单人数：{grad_student_count} 人",
             f"- 最近同步：{_format_local_time((grad_sync_state or SyncState()).last_sync_at)}，"
             f"{(grad_sync_state or SyncState()).last_sync_result or '(无)'}",

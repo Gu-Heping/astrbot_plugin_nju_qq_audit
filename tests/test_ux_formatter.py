@@ -60,7 +60,7 @@ def test_format_home_shows_warnings_when_unconfigured():
         sync_state=SyncState(),
         adapter_probe={"adapter_action_available": "no"},
     )
-    assert "未配置目标群" in text
+    assert "未配置任何目标群" in text
     assert "未配置管理员" in text
     assert "审批接口不可用" in text
 
