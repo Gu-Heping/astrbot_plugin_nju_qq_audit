@@ -8,6 +8,7 @@ from astrbot.api import logger
 
 from config import PluginSettings, get_effective_mode
 from admin.action_error import classify_action_failure
+from admin.labels import applicant_summary
 from core.decision import apply_auto_approve_flag, make_decision, should_auto_approve
 from core.matcher import MatchResult, match_student
 from core.parser import parse_application_comment
@@ -928,6 +929,14 @@ class AuditPipeline:
                     user_id=event.user_id,
                     ok=action_result.ok,
                     reason=decision.reason,
+                    summary=applicant_summary(pending),
+                    comment=pending.comment or event.comment or "",
+                    match_strength=(
+                        getattr(match, "strength", None)
+                        or pending.match_strength
+                        or (pending.match or {}).get("strength")
+                    ),
+                    action_message=action_result.message,
                 )
 
     async def _record_action_outcome(

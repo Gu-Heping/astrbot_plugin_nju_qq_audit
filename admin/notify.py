@@ -9,7 +9,11 @@ except ImportError:  # pragma: no cover - unit tests without astrbot
 
     logger = logging.getLogger(__name__)
 
-from admin.ux_formatter import format_manual_review_notice, format_pending_comment_updated_notice
+from admin.ux_formatter import (
+    format_auto_result_notice,
+    format_manual_review_notice,
+    format_pending_comment_updated_notice,
+)
 from config import PluginSettings
 from onebot.actions import ActionClient
 
@@ -168,17 +172,23 @@ class AdminNotifier:
         user_id: str,
         ok: bool,
         reason: str,
+        summary: str | None = None,
+        comment: str | None = None,
+        match_strength: str | None = None,
+        action_message: str | None = None,
     ) -> None:
         if not self.settings.admin_notify:
             return
-        message = "\n".join(
-            [
-                f"[入群审核] 自动通过{'成功' if ok else '失败'}",
-                f"request_id: {request_id}",
-                f"group_id: {group_id}",
-                f"user_id: {user_id}",
-                f"reason: {reason}",
-            ]
+        message = format_auto_result_notice(
+            request_id=request_id,
+            group_id=group_id,
+            user_id=user_id,
+            ok=ok,
+            reason=reason,
+            summary=summary,
+            comment=comment,
+            match_strength=match_strength,
+            action_message=action_message,
         )
         await self._notify_admins(message, exclude_user_id=user_id)
 

@@ -5,6 +5,7 @@ from datetime import datetime
 from admin.formatter import admin_configured, format_status
 from admin.labels import (
     DEFAULT_REJECT_REASON,
+    STRENGTH_SUMMARY,
     applicant_summary,
     human_judgement,
     list_action_hint,
@@ -283,11 +284,13 @@ def format_view(item, index: int | None = None) -> str:
 def format_ok_result(item, index: int | None = None) -> str:
     public = item.to_public_dict()
     label = f"[{index}]" if index is not None else public.get("id", "")
+    summary = applicant_summary(item)
     return "\n".join(
         [
             f"已同意申请 {label}",
             "",
-            f"用户：{public.get('user_id', '')}",
+            f"申请人：{summary}",
+            f"QQ：{public.get('user_id', '')}",
             f"群：{public.get('group_id', '')}",
             "原因：管理员手动通过",
             "状态：processed",
@@ -298,15 +301,90 @@ def format_ok_result(item, index: int | None = None) -> str:
 def format_no_result(item, index: int | None, reason: str) -> str:
     public = item.to_public_dict()
     label = f"[{index}]" if index is not None else public.get("id", "")
+    summary = applicant_summary(item)
     return "\n".join(
         [
             f"已拒绝申请 {label}",
             "",
-            f"用户：{public.get('user_id', '')}",
+            f"申请人：{summary}",
+            f"QQ：{public.get('user_id', '')}",
+            f"群：{public.get('group_id', '')}",
             f"理由：{reason or DEFAULT_REJECT_REASON}",
             "状态：processed",
         ]
     )
+
+
+def format_auto_result_notice(
+    *,
+    request_id: str,
+    group_id: str,
+    user_id: str,
+    ok: bool,
+    reason: str,
+    summary: str | None = None,
+    comment: str | None = None,
+    match_strength: str | None = None,
+    action_message: str | None = None,
+) -> str:
+    """Human-readable auto-approve success/failure notice for admins."""
+    label = (summary or "").strip() or str(user_id or "")
+    comment_line = (comment or "").strip()[:120]
+    strength = (match_strength or "").strip()
+    strength_text = STRENGTH_SUMMARY.get(strength, strength)
+
+    if ok:
+        title = "[入群审核] 自动通过成功 ✅"
+        if strength == "strong":
+            judgement = "强匹配，已自动同意"
+        elif strength_text:
+            judgement = f"{strength_text}，已自动同意"
+        else:
+            judgement = "已自动同意"
+    else:
+        title = "[入群审核] 自动通过失败 ⚠️"
+        if strength == "strong":
+            judgement = "强匹配，但 QQ 审批接口失败"
+        elif strength_text:
+            judgement = f"{strength_text}，但 QQ 审批接口失败"
+        else:
+            judgement = "QQ 审批接口失败"
+
+    lines = [
+        title,
+        "",
+        f"申请人：{label}",
+        f"群：{group_id}",
+        f"QQ：{user_id}",
+    ]
+    if comment_line:
+        lines.append(f"验证：{comment_line}")
+    lines.extend(
+        [
+            "",
+            f"判断：{judgement}",
+            f"原因：{reason or '（无）'}",
+        ]
+    )
+    if ok:
+        lines.extend(
+            [
+                "",
+                "查看记录：",
+                f"/audit view {request_id}",
+            ]
+        )
+    else:
+        if action_message:
+            lines.append(f"错误：{action_message}")
+        lines.extend(
+            [
+                "",
+                "建议：",
+                "/audit list",
+            ]
+        )
+    return "\n".join(lines)
 
 
 def format_auto_warning() -> str:

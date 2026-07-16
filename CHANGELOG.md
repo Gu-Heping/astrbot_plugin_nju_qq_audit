@@ -2,6 +2,13 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.1] - 2026-07-16
+
+### 优化
+
+- **自动通过成功/失败通知**改为可读摘要：申请人、群、QQ、验证文本、判断、原因；失败附错误与 `/audit list` 建议
+- `/audit ok` / `/audit no` 回执补充申请人摘要与群号
+
 ## [v0.4.0] - 2026-07-16
 
 ### 新增
