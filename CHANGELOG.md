@@ -18,14 +18,15 @@
 
 - 研究生 parser：显式解析「专业代码」标签；姓名/专业/类型标签在下一字段前停住，避免粘连误吃
 - 专业字段支持「代码+名称」粘连（如 `085400电子信息`）
-- 「硕/博」模板占位不解析为具体录取类型，避免误 strong
+- 「硕/博」模板占位（含 `类型：硕/博`）不解析为具体录取类型；多专业代码冲突不 strong
 - 专业代码与专业名称冲突时不 strong（需同时满足）
-- `grad_enabled=false` 时忽略研究生群列表，重叠不再拦截本科
+- `grad_enabled=false` 时忽略研究生群列表，重叠不再拦截本科；`/audit debug` 重叠警告同步受控
 - 入退群 / 外部同意对账覆盖已启用的研究生目标群；单群对账失败不阻断其他群
 - `/audit list grad|undergraduate` 对账按 profile 过滤
 - 恢复误删的 `run_sync`；研究生同步加独立锁；hot-reload 补齐 `grad_cache` / sync-grad
 - sweep / release rematch 默认仅处理本科，避免误关或改写研究生 pending
 - 人工审核通知在无短编号时回退 `/audit list`，不再输出 `/audit view ?`
+- `/audit auto confirm` 文案明确本科与研究生的自动通过条件
 
 ### 说明
 

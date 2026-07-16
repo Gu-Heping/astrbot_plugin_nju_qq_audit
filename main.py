@@ -87,6 +87,7 @@ from core.version import (
     RECONCILE_LOGIC_VERSION,
     get_git_commit,
 )
+from profiles.router import overlapping_group_ids
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
 
@@ -436,13 +437,7 @@ class NjuQqAuditPlugin(Star):
                 grad_cache_count=len(self.ctx.grad_cache.load_students()),
                 grad_sync_state=self.ctx.grad_cache.load_sync_state(),
                 group_overlap_warning=(
-                    ",".join(
-                        sorted(
-                            self._settings().target_group_ids
-                            & self._settings().grad_target_group_ids
-                        )
-                    )
-                    or None
+                    ",".join(sorted(overlapping_group_ids(self._settings()))) or None
                 ),
                 config_warnings=self.ctx.config_warnings(),
             )

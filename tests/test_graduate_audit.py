@@ -248,6 +248,14 @@ def test_grad_parser_shuo_bo_placeholder_not_concrete_type():
     assert parsed.admission_type is None
 
 
+def test_grad_parser_labeled_shuo_bo_not_concrete_type():
+    parsed = parse_graduate_comment("姓名：刘尚明 专业：马克思主义哲学 类型：硕/博")
+    assert parsed.name == "刘尚明"
+    assert parsed.major_text == "马克思主义哲学"
+    assert parsed.admission_type is None
+    assert "硕" in (parsed.admission_type_raw or "")
+
+
 def test_grad_parser_does_not_force_graduate_as_master():
     assert normalize_admission_type("研究生") is None
     parsed = parse_graduate_comment("刘尚明 马克思主义哲学 研究生")
@@ -325,6 +333,14 @@ def test_match_shuo_bo_placeholder_not_strong():
     match = match_graduate(parsed, students)
     assert parsed.admission_type is None
     assert match.strength != "strong"
+
+
+def test_match_conflicting_major_codes_not_strong():
+    students = [_grad_student()]
+    parsed = parse_graduate_comment("刘尚明 010101 010102 硕")
+    match = match_graduate(parsed, students)
+    assert match.strength != "strong"
+    assert "冲突" in match.reason
 
 
 def test_match_phd_normalization():

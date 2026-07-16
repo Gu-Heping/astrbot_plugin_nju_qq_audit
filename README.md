@@ -15,7 +15,7 @@
 7. 收到通知后发送 `/audit list`，用 `/audit ok 1` 或 `/audit no 1 理由` 处理
 8. 名单刚更新、历史 pending 未匹配时用 **`/audit catchup preview`**，再 **`/audit catchup confirm`** 补放
 9. 仅用当前本地缓存分批时用 **`/audit release preview`** / **`/audit release 10 confirm`**
-10. 确认流程无误后，可选 `/audit auto confirm` 开启自动强匹配（仅 26 级 strong）
+10. 确认流程无误后，可选 `/audit auto confirm` 开启自动强匹配（本科 26 级 strong；若启用研究生则含研究生 strong）
 
 > 短编号来自最近一次 `/audit list` 或入群通知；**30 分钟内有效**。无需复制 `REQ-xxx` 长 ID。
 

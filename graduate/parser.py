@@ -26,9 +26,10 @@ MAJOR_LABEL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 TYPE_LABEL_PATTERN = re.compile(
+    # Do not stop at 「/」— otherwise 「类型：硕/博」 captures only 「硕」.
     r"(?:类型|录取类型|学位类型|学段)[:：\s]*"
     r"([^\s,，；;]{1,12}?)"
-    r"(?=\s|专业|姓名|名字|$|[，,；;|/／])",
+    r"(?=\s|专业|姓名|名字|$|[，,；;])",
     re.IGNORECASE,
 )
 

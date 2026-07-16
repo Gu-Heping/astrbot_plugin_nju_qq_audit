@@ -93,10 +93,19 @@ def match_graduate(
             )
 
     # Major / code filter
+    unique_codes = list(dict.fromkeys(str(c).strip() for c in codes if str(c).strip()))
+    if len(unique_codes) > 1:
+        return GraduateMatchResult(
+            strength="none",
+            confidence=0.3,
+            reason="多个专业代码互相冲突，需人工复核",
+            candidate_count=len(pool),
+        )
+
     major_hits: list[GraduateStudent] = []
-    if codes:
+    if unique_codes:
         for s in pool:
-            if any(major_code_match(c, s) for c in codes):
+            if any(major_code_match(c, s) for c in unique_codes):
                 major_hits.append(s)
     if major and not major_hits:
         major_hits = [s for s in pool if majors_fuzzy_match(major, s.major_name)]
@@ -106,7 +115,7 @@ def match_graduate(
         both = [s for s in major_hits if majors_fuzzy_match(major, s.major_name)]
         major_hits = both
 
-    if codes or major:
+    if unique_codes or major:
         if not major_hits:
             if name and adm:
                 return GraduateMatchResult(
@@ -130,7 +139,7 @@ def match_graduate(
         pool = major_hits
 
     # Decision ladder
-    if not name and not adm and not major and not codes:
+    if not name and not adm and not major and not unique_codes:
         return GraduateMatchResult(
             strength="none",
             confidence=0,
@@ -146,10 +155,10 @@ def match_graduate(
         )
 
     # Strong: name + admission_type + major/code, unique
-    if adm and (major or codes) and len(pool) == 1:
+    if adm and (major or unique_codes) and len(pool) == 1:
         s = pool[0]
         matched_by = ["name", "admission_type"]
-        if codes and any(major_code_match(c, s) for c in codes):
+        if unique_codes and any(major_code_match(c, s) for c in unique_codes):
             matched_by.append("major_code")
         if major and majors_fuzzy_match(major, s.major_name):
             matched_by.append("major_name")
@@ -173,7 +182,7 @@ def match_graduate(
 
     if len(pool) == 1:
         s = pool[0]
-        if adm and not (major or codes):
+        if adm and not (major or unique_codes):
             return GraduateMatchResult(
                 strength="weak",
                 confidence=0.55,
@@ -183,7 +192,7 @@ def match_graduate(
                 matched_by=["name", "admission_type"],
                 candidate_count=1,
             )
-        if (major or codes) and not adm:
+        if (major or unique_codes) and not adm:
             return GraduateMatchResult(
                 strength="weak",
                 confidence=0.55,

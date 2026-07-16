@@ -314,10 +314,11 @@ def format_auto_warning() -> str:
         [
             "切换到自动审核前请确认：",
             "",
-            "- auto 只会自动通过姓名+学号或姓名+通知书编号的 26 级 strong match",
+            "- 本科：仅自动通过姓名+学号或姓名+通知书编号的 26 级 strong match",
+            "- 研究生（若已启用）：仅自动通过姓名+硕/博+专业（或专业代码）唯一 strong match",
             "- 弱匹配、信息不足不会自动拒绝",
             "- 日常暂停自动放人请用 /audit record，不是 off",
-            "- 建议先完成 /audit sync 并人工抽查几条",
+            "- 建议先 /audit sync（及 /audit sync-grad）并人工抽查几条",
             "",
             "确认切换请发送：",
             "/audit auto confirm",
