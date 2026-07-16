@@ -22,14 +22,20 @@ def test_default_help_includes_graduate_entries():
 
 def test_help_grad_shows_graduate_rules():
     text = format_help(topic="grad")
-    assert "研究生" in text
-    assert "独立名单" in text
+    assert "研究生审核" in text
     assert "/audit sync grad" in text
     assert "/audit list grad" in text
-    assert "硕/博" in text
-    assert "不自动拒绝" in text
-    assert "release/catchup" in text
-    assert "本科" in text
+    assert "填写格式：" in text
+    assert "姓名 专业 硕/博" in text
+    assert "张三 马克思主义哲学 硕" in text
+    assert "李四 010101 博" in text
+    assert "硕或博 唯一匹配" in text
+    assert "不会自动拒绝" in text
+    assert "release/catchup 只处理本科" in text
+    assert "不要照抄" not in text
+    assert "填写顺序不限" not in text
+    assert "硕士/博士" not in text
+    assert "独立名单" not in text
 
 
 def test_format_home_shows_undergrad_and_grad_sections():

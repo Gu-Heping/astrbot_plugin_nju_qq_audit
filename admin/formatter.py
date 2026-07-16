@@ -96,23 +96,28 @@ def _format_help_default(
 def _format_help_grad() -> str:
     return "\n".join(
         [
-            f"NJU QQ Audit {PLUGIN_VERSION} · 研究生审核说明",
+            f"NJU QQ Audit {PLUGIN_VERSION} · 研究生审核",
             "",
-            "研究生群审核使用独立名单、独立目标群（与本科互不影响）。",
-            "",
-            "常用命令：",
+            "常用：",
             "/audit sync grad",
             "/audit list grad",
             "/audit view 1",
             "/audit ok 1",
             "/audit no 1 信息不完整",
             "",
-            "自动通过条件：",
-            "- 姓名 + 硕/博 + 专业/专业代码唯一强匹配",
+            "填写格式：",
+            "姓名 专业 硕/博",
+            "",
+            "示例：",
+            "张三 马克思主义哲学 硕",
+            "李四 010101 博",
+            "",
+            "规则：",
+            "姓名 + 专业/代码 + 硕或博 唯一匹配才会自动通过。",
+            "其他情况进入人工确认，不会自动拒绝。",
             "",
             "说明：",
-            "- 不自动拒绝（弱匹配/信息不足会提示人工确认）",
-            "- release/catchup 当前只处理本科补放，不处理研究生",
+            "release/catchup 只处理本科。",
         ]
     )
 

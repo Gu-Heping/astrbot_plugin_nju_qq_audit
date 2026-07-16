@@ -2,6 +2,18 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.10] - 2026-07-16
+
+### 优化
+
+- `/audit help grad` 改为短 help：填写格式、示例、规则与 release/catchup 说明
+
+## [v0.4.9] - 2026-07-16
+
+### 优化
+
+- `/audit help grad` 自动通过说明与 parser/matcher 一致：强调姓名+专业+硕士/博士三项唯一匹配、填写顺序不限；说明「硕/博」仅为模板占位
+
 ## [v0.4.7] - 2026-07-16
 
 ### 优化
