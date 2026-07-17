@@ -1338,6 +1338,7 @@ class AuditPipeline:
         *,
         notice_sub_type: str | None = None,
         operator_id: str | None = None,
+        self_id: str | None = None,
         list_cache: AdminListCacheStore | None = None,
         notifier: AdminNotifier | None = None,
     ) -> ReconcileResult:
@@ -1368,28 +1369,95 @@ class AuditPipeline:
                 f"pending sub_type={pending.sub_type}",
             )
 
+        if self_id and operator_id and str(operator_id) == str(self_id):
+            latest = await self.requests.get_by_id(pending.id) or pending
+            # Bot 自己审批后的 group_increase 回传：不标 external、不发通知。
+            if list_cache is not None:
+                try:
+                    await list_cache.remove_request_id(pending.id)
+                except Exception:
+                    logger.warning(
+                        "[audit] list_cache cleanup failed for request=%s",
+                        pending.id,
+                        exc_info=True,
+                    )
+            await self.audit.append(
+                {
+                    "type": "own_approve_join_notice_suppressed",
+                    "request_id": pending.id,
+                    "group_id": group_id,
+                    "user_id": user_id,
+                    "operator_id": operator_id,
+                    "notice_sub_type": notice_sub_type,
+                    "status": latest.status,
+                }
+            )
+            return ReconcileResult.success(
+                pending.id,
+                "bot 自己审批产生的入群通知，已抑制 external 重复通知",
+            )
+
+        latest = await self.requests.get_by_id(pending.id) or pending
+        if (
+            latest.status == "processed"
+            and latest.action_result
+            and latest.action_result.ok
+        ):
+            if list_cache is not None:
+                try:
+                    await list_cache.remove_request_id(latest.id)
+                except Exception:
+                    logger.warning(
+                        "[audit] list_cache cleanup failed for request=%s",
+                        latest.id,
+                        exc_info=True,
+                    )
+            await self.audit.append(
+                {
+                    "type": "join_notice_after_processed_approve_suppressed",
+                    "request_id": latest.id,
+                    "group_id": group_id,
+                    "user_id": user_id,
+                    "operator_id": operator_id,
+                    "notice_sub_type": notice_sub_type,
+                    "status": latest.status,
+                    "decision": latest.decision,
+                }
+            )
+            return ReconcileResult.success(
+                latest.id,
+                "申请已由 bot/管理员命令处理成功，抑制 external 重复通知",
+            )
+
+        if latest.status != "pending":
+            return ReconcileResult.not_handled(
+                "pending_no_longer_active",
+                f"request status={latest.status}",
+            )
+
         message = _external_join_message(notice_sub_type, operator_id)
 
         await self._apply_external_status(
-            pending,
+            latest,
             message,
             source="group_increase",
             list_cache=list_cache,
             operator_id=operator_id,
             notice_sub_type=notice_sub_type,
             notifier=notifier,
+            notify=True,
         )
 
         logger.info(
             "[audit] external join reconciled request=%s group=%s user=%s "
             "notice_sub_type=%s logic=%s",
-            pending.id,
+            latest.id,
             group_id,
             user_id,
             notice_sub_type,
             RECONCILE_LOGIC_VERSION,
         )
-        return ReconcileResult.success(pending.id, message)
+        return ReconcileResult.success(latest.id, message)
 
     async def handle_group_increase(self, increase: GroupMemberIncrease) -> None:
         if increase.group_id not in configured_audit_group_ids(self.settings):

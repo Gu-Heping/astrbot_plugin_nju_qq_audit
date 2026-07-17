@@ -33,10 +33,14 @@ def test_extract_group_increase():
         "group_id": 796836121,
         "user_id": 2492835361,
         "sub_type": "approve",
+        "self_id": 1179350197,
+        "operator_id": 1179350197,
     }
     increase = extract_group_increase(raw)
     assert increase is not None
     assert increase.user_id == "2492835361"
+    assert increase.self_id == "1179350197"
+    assert increase.operator_id == "1179350197"
 
 
 def test_extract_group_decrease_leave():

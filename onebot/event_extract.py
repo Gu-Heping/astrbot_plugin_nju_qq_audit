@@ -59,6 +59,7 @@ class GroupMemberIncrease:
     user_id: str
     sub_type: str | None = None
     operator_id: str | None = None
+    self_id: str | None = None
     raw_event: dict[str, Any] | None = None
 
 
@@ -113,6 +114,7 @@ def extract_group_increase(raw: dict[str, Any] | None) -> GroupMemberIncrease | 
         user_id=str(user_id),
         sub_type=str(sub_type) if sub_type is not None else None,
         operator_id=str(operator_id) if operator_id is not None else None,
+        self_id=str(get_field(raw, "self_id")) if get_field(raw, "self_id") is not None else None,
         raw_event=raw,
     )
 

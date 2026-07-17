@@ -333,6 +333,7 @@ class NjuQqAuditPlugin(Star):
                         increase.user_id,
                         notice_sub_type=increase.sub_type,
                         operator_id=increase.operator_id,
+                        self_id=increase.self_id,
                         list_cache=self.ctx.list_cache,
                     )
                     logger.info(

@@ -67,8 +67,12 @@ async def test_report_includes_counts(tmp_path):
 
 @pytest.mark.asyncio
 async def test_list_since_skips_invalid_timestamp(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
     store = RequestsStore(tmp_path / "requests.json")
+    recent = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     await store.upsert(_req(created_at="not-a-date"))
-    await store.upsert(_req(created_at="2026-07-09T12:00:00+00:00"))
+    await store.upsert(_req(created_at=recent))
     records = await store.list_since(days=7)
     assert len(records) == 1
+    assert records[0].created_at == recent

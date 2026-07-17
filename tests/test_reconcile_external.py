@@ -100,8 +100,10 @@ def test_reconcile_signature_accepts_list_cache_and_notifier():
     params = sig.parameters
     assert "list_cache" in params
     assert "notifier" in params
+    assert "self_id" in params
     assert params["list_cache"].default is None
     assert params["notifier"].default is None
+    assert params["self_id"].default is None
 
 
 @pytest.mark.asyncio

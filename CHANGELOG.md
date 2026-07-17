@@ -2,6 +2,12 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.12] - 2026-07-17
+
+### 修复
+
+- bot 自己审批后的 `group_increase`（`operator_id == self_id`）不再标 external、不再发「QQ 侧已通过」重复通知；仍保留其他管理员 QQ 侧处理后的 external 通知
+
 ## [v0.4.11] - 2026-07-16
 
 ### 优化
