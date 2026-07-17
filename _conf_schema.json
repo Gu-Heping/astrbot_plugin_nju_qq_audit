@@ -189,6 +189,11 @@
     "type": "bool",
     "default": false
   },
+  "grad_roster_parse_enabled": {
+    "description": "研究生名单姓名补全：连写「姓名+专业+硕/博」时从名单补全 parsed 字段",
+    "type": "bool",
+    "default": true
+  },
   "grad_target_group_ids": {
     "description": "研究生目标群号，逗号分隔。不得与本科 target_group_ids 重叠",
     "type": "string",

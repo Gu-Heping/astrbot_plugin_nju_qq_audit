@@ -45,6 +45,7 @@ from graduate.matcher import GraduateMatchResult, match_graduate
 from graduate.models import GraduateParsedApplication
 from graduate.njutable_provider import load_graduates_for_audit
 from graduate.parser import parse_graduate_comment
+from graduate.roster_parser import complete_graduate_parse_from_roster
 from profiles.router import (
     AuditProfile,
     configured_audit_group_ids,
@@ -504,6 +505,8 @@ class AuditPipeline:
         cache = self.grad_cache
         students = load_graduates_for_audit(self.settings, cache) if cache else []
         parsed = parse_graduate_comment(event.comment or "")
+        if self.settings.grad_roster_parse_enabled:
+            parsed = complete_graduate_parse_from_roster(parsed, students)
         match = match_graduate(parsed, students)
         decision = make_graduate_decision(parsed, match, is_target_group=True)
         decision = apply_graduate_auto_approve_flag(decision, mode, match)

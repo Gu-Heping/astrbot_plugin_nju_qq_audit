@@ -2,6 +2,13 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.13] - 2026-07-17
+
+### 新增
+
+- 研究生审核：名单姓名补全解析（`graduate/roster_parser.py`），支持「姓名+专业+硕/博」连写补全 `parsed` 字段
+- 可通过 `grad_roster_parse_enabled` 关闭；自动通过门槛不变（仍由现有 matcher/decision 判定）
+
 ## [v0.4.12] - 2026-07-17
 
 ### 修复

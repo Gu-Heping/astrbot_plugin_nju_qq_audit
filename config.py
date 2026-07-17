@@ -99,6 +99,7 @@ class PluginSettings:
     grad_col_name: str = "姓名"
     grad_col_short_code_id: str = "_short_code_id"
     grad_col_imported_at: str = "_imported_at"
+    grad_roster_parse_enabled: bool = True
 
     def __repr__(self) -> str:
         return (
@@ -302,6 +303,7 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         grad_col_name=str(config.get("grad_col_name", "姓名")),
         grad_col_short_code_id=str(config.get("grad_col_short_code_id", "_short_code_id")),
         grad_col_imported_at=str(config.get("grad_col_imported_at", "_imported_at")),
+        grad_roster_parse_enabled=bool(config.get("grad_roster_parse_enabled", True)),
     )
 
 
