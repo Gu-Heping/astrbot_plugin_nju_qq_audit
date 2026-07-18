@@ -17,6 +17,8 @@ STUDENT_ID_SHORT_PATTERN = re.compile(r"\b(261\d{5})\b")
 STUDENT_ID_LEGACY_PATTERN = re.compile(r"\b(2[0-9]1\d{6})\b")
 NOTICE_NO_PATTERN = re.compile(r"\b(202[56]\d{4})\b")
 LOOSE_TOKEN_PATTERN = re.compile(r"\b([A-Za-z0-9][A-Za-z0-9\-_/]{3,31})\b")
+# QQ 答案常见分隔：空白、中英文标点，以及 + / ＋ ／
+FIELD_SEPARATOR_PATTERN = re.compile(r"[\s,，、；;|+＋/／]+")
 NAME_LABEL_PATTERN = re.compile(
     r"(?:姓名|名字|真实姓名)[:：\s]+([\u4e00-\u9fa5·]{2,4})(?=\s|学号|通知书|编号|专业|$|[:：])",
     re.IGNORECASE,
@@ -342,7 +344,7 @@ def _split_mixed_token(token: str) -> dict[str, str]:
 
 
 def _parse_by_tokens(text: str, result: ParsedApplication) -> None:
-    tokens = [t for t in re.split(r"[\s,，、；;|]+", text) if t]
+    tokens = [t for t in FIELD_SEPARATOR_PATTERN.split(text) if t]
     majors: list[str] = []
     names: list[str] = []
 
@@ -361,16 +363,17 @@ def _parse_by_tokens(text: str, result: ParsedApplication) -> None:
             names.append(split["name"])
             continue
 
-        if not result.student_id:
-            sid = _find_student_id_in_text(token)
-            if sid:
+        # Prefer credential tokens before name/major heuristics.
+        sid = _find_student_id_in_text(token)
+        if sid:
+            if not result.student_id:
                 _assign_student_id(result, sid)
-                continue
-        if not result.notice_no:
-            notice_match = NOTICE_NO_PATTERN.search(token)
-            if notice_match and notice_match.group(1) != result.student_id:
+            continue
+        notice_match = NOTICE_NO_PATTERN.fullmatch(token) or NOTICE_NO_PATTERN.search(token)
+        if notice_match and notice_match.group(1) != result.student_id:
+            if not result.notice_no:
                 _add_notice_candidate(result, notice_match.group(1))
-                continue
+            continue
         if is_known_major_token(token):
             majors.append(token)
             continue
