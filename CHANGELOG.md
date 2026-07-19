@@ -20,6 +20,8 @@
 - 无 `_comment_hash` 的历史 pending 默认复用可用 stored parsed，避免 rematch 降级
 - AI 合并后残留的 `unable to parse` 不再阻止复用 stored parsed
 - 保留「问题：…\\n答案行」无显式「答案：」标记时的答案段提取
+- 紧凑答案「姓名生物学博」在已校验姓名后仍可保留硕/博类型证据；无姓名时不从「欧阳博」误剥
+- comment hash 分隔符补齐全角分号 `；`
 
 ## [v0.4.16] - 2026-07-19
 

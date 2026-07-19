@@ -13,7 +13,7 @@ from graduate.models import GraduateParsedApplication
 PARSER_VERSION = "v0.4.17"
 
 # Strip spaces around separators so「何聿璿+261」and「何聿璿 + 261」hash equal.
-_HASH_SEP = re.compile(r"\s*([+＋/／,，、|;：:（）()])\s*")
+_HASH_SEP = re.compile(r"\s*([+＋/／,，、|;；：:（）()])\s*")
 
 
 def normalize_comment_for_hash(comment: str) -> str:

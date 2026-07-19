@@ -532,3 +532,7 @@ async def test_legacy_empty_parsed_falls_back_to_deterministic(tmp_path, ai_call
 def test_comment_hash_stable():
     assert compute_comment_hash("a  b") == compute_comment_hash("a b")
     assert compute_comment_hash("a") != compute_comment_hash("b")
+    assert compute_comment_hash("何聿璿+261880009") == compute_comment_hash(
+        "何聿璿 + 261880009"
+    )
+    assert compute_comment_hash("张三；261") == compute_comment_hash("张三 ； 261")

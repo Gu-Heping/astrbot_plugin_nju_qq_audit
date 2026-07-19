@@ -51,22 +51,35 @@ def _evidence_ok(
 
 
 def _type_token_candidates(answer: str, *, exclude_name: str | None = None) -> list[str]:
-    """Standalone tokens for admission-type scanning.
+    """Tokens for admission-type scanning.
 
-    Does not peel trailing 硕/博 from multi-char tokens (avoids treating names
-    like 「欧阳博」as doctoral evidence when AI omits a validated name).
+    Trailing 硕/博 is peeled only after a validated name is removed from the
+    answer (e.g. 「陈俊毅生物学博」→「生物学博」→「博」). Without a validated name,
+    tokens like 「欧阳博」are left intact so the name suffix is not type evidence.
     """
     scan = answer or ""
+    name_removed = False
     if exclude_name:
         name = exclude_name.strip()
         if name:
-            scan = scan.replace(name, " ", 1)
+            if name in scan:
+                scan = scan.replace(name, " ", 1)
+                name_removed = True
+            else:
+                compact_name = name.replace(" ", "").replace("　", "")
+                compact_scan = scan.replace(" ", "").replace("　", "")
+                if compact_name and compact_name in compact_scan:
+                    scan = compact_scan.replace(compact_name, " ", 1)
+                    name_removed = True
 
     candidates: list[str] = []
     for part in _TOKEN_SPLIT.split(scan.strip()):
         part = part.strip()
-        if part:
-            candidates.append(part)
+        if not part:
+            continue
+        candidates.append(part)
+        if name_removed and len(part) >= 3 and part[-1] in {"硕", "博"}:
+            candidates.append(part[-1])
     return candidates
 
 

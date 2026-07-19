@@ -208,3 +208,21 @@ def test_name_ending_bo_without_validated_name_not_peeled():
         answer="欧阳博 生物学",
     )
     assert fields.admission_type is None
+
+
+def test_compact_major_bo_after_validated_name_kept():
+    """「陈俊毅生物学博」with validated name may keep admission_type=博士."""
+    fields = _fields(
+        name="陈俊毅",
+        major="生物学",
+        admission_type="博士",
+        evidence={"name": "陈俊毅", "major": "生物学", "admission_type": "博"},
+    )
+    fields = validate_ai_fields(
+        fields,
+        question="姓名 专业 硕or博",
+        answer="陈俊毅生物学博",
+    )
+    assert fields.name == "陈俊毅"
+    assert fields.major == "生物学"
+    assert fields.admission_type == "博士"
