@@ -316,6 +316,21 @@ class RequestsStore:
             self._write(store)
             return self._to_request(data)
 
+    async def refresh_flag_by_id(self, req_id: str, new_flag: str) -> PendingRequest | None:
+        async with self._lock:
+            store = self._read_unlocked()
+            data = store["by_id"].get(req_id)
+            if not data:
+                return None
+            old_flag = str(data.get("flag") or "")
+            if old_flag and store["by_flag"].get(old_flag) == req_id:
+                store["by_flag"].pop(old_flag, None)
+            data["flag"] = new_flag
+            store["by_id"][req_id] = data
+            store["by_flag"][new_flag] = req_id
+            self._write(store)
+            return self._to_request(data)
+
     async def update_by_flag(self, flag: str, update: dict[str, Any]) -> PendingRequest | None:
         async with self._lock:
             store = self._read_unlocked()
