@@ -20,6 +20,7 @@ from core.matcher import MatchResult, match_student
 from core.parser import parse_application_comment
 from core.parsed_store import (
     attach_parsed_meta,
+    can_reuse_stored_parsed,
     comment_hash_matches,
     grad_parsed_from_dict,
     parsed_needs_ai_fallback,
@@ -566,6 +567,10 @@ class AuditPipeline:
         students = load_graduates_for_audit(self.settings, cache) if cache else []
         if stored_parsed is not None:
             parsed = stored_parsed
+            # Rematch/catchup may reuse an incomplete stored parse that later
+            # roster sync can complete without another AI call.
+            if self.settings.grad_roster_parse_enabled:
+                parsed = complete_graduate_parse_from_roster(parsed, students)
         else:
             parsed = parse_graduate_comment(event.comment or "")
             if self.settings.grad_roster_parse_enabled:
@@ -638,18 +643,21 @@ class AuditPipeline:
         )
         stored = None
         ai_allowed = False
-        if reuse_stored_parsed and comment_hash_matches(req.parsed, req.comment or ""):
+        rematch_ai = bool(getattr(self.settings, "ai_parse_on_rematch", False))
+        if reuse_stored_parsed and can_reuse_stored_parsed(
+            req.parsed, req.comment or ""
+        ):
             if profile == "graduate":
                 stored = grad_parsed_from_dict(req.parsed, req.comment or "")
             else:
                 stored = undergrad_parsed_from_dict(req.parsed, req.comment or "")
             ai_allowed = False
         else:
-            # Comment changed / no hash: re-parse. AI only if explicitly allowed
-            # or ai_parse_on_rematch with missing/unparseable stored parsed.
+            # Unusable / missing stored: re-parse. AI only if explicitly allowed,
+            # or ai_parse_on_rematch for missing/unparseable rows (incl. hashed).
             if allow_ai_parse:
                 ai_allowed = True
-            elif bool(getattr(self.settings, "ai_parse_on_rematch", False)):
+            elif rematch_ai:
                 ai_allowed = parsed_needs_ai_fallback(req.parsed)
 
         if profile == "graduate":
@@ -777,11 +785,17 @@ class AuditPipeline:
         comment_changed = old_comment != new_comment
         stored = None
         allow_ai = True
-        if (
+        # Same answer revision (exact or whitespace-normalized hash): rematch only.
+        if comment_hash_matches(existing.parsed, new_comment):
+            if profile == "graduate":
+                stored = grad_parsed_from_dict(existing.parsed, new_comment)
+            else:
+                stored = undergrad_parsed_from_dict(existing.parsed, new_comment)
+            allow_ai = False
+        elif (
             not comment_changed
-            and comment_hash_matches(existing.parsed, new_comment)
+            and can_reuse_stored_parsed(existing.parsed, new_comment)
         ):
-            # Same answer revision: rematch only, do not re-call AI.
             if profile == "graduate":
                 stored = grad_parsed_from_dict(existing.parsed, new_comment)
             else:

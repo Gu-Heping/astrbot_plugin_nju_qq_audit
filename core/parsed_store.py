@@ -65,7 +65,46 @@ def parsed_needs_ai_fallback(stored: dict[str, Any] | None) -> bool:
     if not stored:
         return True
     errors = [str(e) for e in (stored.get("parse_errors") or [])]
-    return any("unable to parse" in e for e in errors)
+    if any("unable to parse" in e for e in errors):
+        return True
+    return not stored_parsed_has_fields(stored)
+
+
+def stored_parsed_has_fields(stored: dict[str, Any] | None) -> bool:
+    """True when stored parse has at least one usable applicant field."""
+    if not stored:
+        return False
+    return any(
+        stored.get(key)
+        for key in (
+            "name",
+            "student_id",
+            "notice_no",
+            "major",
+            "academy",
+            "major_text",
+            "admission_type",
+            "admission_type_raw",
+            "major_code_candidates",
+            "notice_no_candidates",
+        )
+    )
+
+
+def can_reuse_stored_parsed(
+    stored: dict[str, Any] | None, comment: str
+) -> bool:
+    """Reuse when hash matches, or legacy usable parse without hash metadata."""
+    if not stored:
+        return False
+    if parsed_needs_ai_fallback(stored):
+        return False
+    if comment_hash_matches(stored, comment):
+        return True
+    # Pre-v0.4.17 rows: no hash, but fields are still worth rematching.
+    if not stored.get("_comment_hash") and stored_parsed_has_fields(stored):
+        return True
+    return False
 
 
 def strip_internal_parsed_keys(data: dict[str, Any] | None) -> dict[str, Any]:

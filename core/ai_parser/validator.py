@@ -15,10 +15,11 @@ _AMBIGUOUS_TYPE = re.compile(
     r"硕\s*or\s*博|master\s*[/／]\s*phd)",
     re.IGNORECASE,
 )
+_TOKEN_SPLIT = re.compile(r"[\s\u3000,，、+/／|]+")
 
-# Longer tokens first for answer scanning.
-_MASTER_TOKENS = ("硕士生", "硕士", "专硕", "学硕", "master", "硕")
-_DOCTOR_TOKENS = ("博士生", "博士", "直博", "ph.d.", "ph.d", "phd", "博")
+# Longer multi-char tokens first; single-char 硕/博 handled via token candidates.
+_MASTER_MULTI = ("硕士生", "硕士", "专硕", "学硕", "master")
+_DOCTOR_MULTI = ("博士生", "博士", "直博", "ph.d.", "ph.d", "phd")
 
 
 def _in_text(needle: str | None, haystack: str) -> bool:
@@ -41,39 +42,76 @@ def _evidence_ok(
     answer_haystack: str,
 ) -> bool:
     """Evidence must appear in answer only (never question template)."""
+    if not answer_haystack.strip():
+        return False
     ev = evidence.get(field_name)
     if ev and _in_text(ev, answer_haystack):
         return True
     return _in_text(value, answer_haystack)
 
 
-def _scan_admission_signals(answer: str) -> tuple[set[str], bool]:
-    """Return ({硕士, 博士}, ambiguous_placeholder_in_answer)."""
-    if not answer:
+def _type_token_candidates(answer: str, *, exclude_name: str | None = None) -> list[str]:
+    """Tokens for admission-type scanning; peel trailing 硕/博 from long tails."""
+    scan = answer or ""
+    if exclude_name:
+        name = exclude_name.strip()
+        if name:
+            scan = scan.replace(name, " ", 1)
+
+    candidates: list[str] = []
+    for part in _TOKEN_SPLIT.split(scan.strip()):
+        part = part.strip()
+        if not part:
+            continue
+        candidates.append(part)
+        # 「生物学博」→ allow standalone 「博」; 「王博」remainder too short → skip.
+        if len(part) >= 3 and part[-1] in {"硕", "博"}:
+            candidates.append(part[-1])
+    return candidates
+
+
+def _scan_admission_signals(
+    answer: str, *, exclude_name: str | None = None
+) -> tuple[set[str], bool]:
+    """Return ({硕士, 博士}, ambiguous_placeholder_in_answer).
+
+    Single-char 硕/博 inside names (e.g. 王博) are ignored.
+    """
+    if not answer or not answer.strip():
         return set(), False
     if _AMBIGUOUS_TYPE.search(answer):
         return set(), True
 
-    compact = answer.replace(" ", "").replace("　", "")
-    lower = compact.lower()
     found: set[str] = set()
+    scan = answer
+    if exclude_name:
+        name = exclude_name.strip()
+        if name:
+            scan = scan.replace(name, " ", 1)
 
-    # Prefer longer matches; mark occupied spans to avoid 博 in 博士 double-count issues
-    # by checking tokens in length order on original compact text.
-    remaining = compact
-    remaining_lower = lower
-    for token in _DOCTOR_TOKENS:
+    compact = scan.replace(" ", "").replace("　", "")
+    lower = compact.lower()
+
+    for token in _DOCTOR_MULTI:
         needle = token.lower() if token.isascii() else token
-        hay = remaining_lower if token.isascii() else remaining
+        hay = lower if token.isascii() else compact
         if needle in hay:
             found.add("博士")
             break
-    for token in _MASTER_TOKENS:
+    for token in _MASTER_MULTI:
         needle = token.lower() if token.isascii() else token
-        hay = remaining_lower if token.isascii() else remaining
+        hay = lower if token.isascii() else compact
         if needle in hay:
             found.add("硕士")
             break
+
+    for part in _type_token_candidates(answer, exclude_name=exclude_name):
+        compact_part = part.replace(" ", "").replace("　", "").lower()
+        if compact_part in {"博", "博士", "博士生", "直博", "phd", "ph.d", "ph.d."}:
+            found.add("博士")
+        elif compact_part in {"硕", "硕士", "硕士生", "专硕", "学硕", "master"}:
+            found.add("硕士")
+
     return found, False
 
 
@@ -86,9 +124,10 @@ def validate_ai_fields(
     """Drop invalid fields; never raise for field-level failures.
 
     Evidence is answer-only: question templates (e.g. 硕or博) must not prove fields.
+    Empty answer segments yield no evidence.
     """
     _ = question  # intentionally unused for evidence; kept for API compatibility
-    answer_haystack = answer or ""
+    answer_haystack = (answer or "").strip()
     warnings = list(fields.warnings)
     evidence = dict(fields.evidence or {})
 
@@ -164,7 +203,9 @@ def validate_ai_fields(
             warnings.append("admission_type:ambiguous_placeholder")
             evidence.pop("admission_type", None)
         else:
-            answer_signals, answer_ambiguous = _scan_admission_signals(answer_haystack)
+            answer_signals, answer_ambiguous = _scan_admission_signals(
+                answer_haystack, exclude_name=fields.name
+            )
             if answer_ambiguous:
                 fields.admission_type = None
                 fields.ambiguous = True
@@ -179,20 +220,7 @@ def validate_ai_fields(
                 normalized = normalize_admission_type(raw_type)
                 if normalized not in {"硕士", "博士"}:
                     _drop("admission_type", "invalid_admission_type")
-                elif not answer_signals:
-                    _drop("admission_type", "evidence_missing")
                 elif normalized not in answer_signals:
-                    _drop("admission_type", "evidence_missing")
-                elif not (
-                    _evidence_ok("admission_type", raw_type, evidence, answer_haystack)
-                    or _in_text(normalized, answer_haystack)
-                    or any(
-                        _in_text(tok, answer_haystack)
-                        for tok in (
-                            _MASTER_TOKENS if normalized == "硕士" else _DOCTOR_TOKENS
-                        )
-                    )
-                ):
                     _drop("admission_type", "evidence_missing")
                 else:
                     fields.admission_type = normalized

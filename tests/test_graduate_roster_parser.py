@@ -198,6 +198,78 @@ def test_existing_name_without_span_skips_major_type():
     assert parsed.admission_type is None
 
 
+@pytest.mark.asyncio
+async def test_reuse_stored_graduate_still_runs_roster_completion(tmp_path):
+    """Stored incomplete graduate parse can upgrade after roster sync+rematch."""
+    from core.parsed_store import attach_parsed_meta, grad_parsed_from_dict
+    from data_source.students import PendingRequest
+    from storage.requests_store import RequestsStore
+
+    comment = "张三生物学博"
+    # Deterministic-only fields before roster completion (name/type missing).
+    stored = attach_parsed_meta(
+        {"major_text": "生物学博", "parse_errors": []},
+        comment=comment,
+        profile="graduate",
+    )
+    settings = load_settings(
+        DummyConfig(
+            {
+                "target_group_ids": "100",
+                "grad_enabled": True,
+                "grad_target_group_ids": "200",
+                "grad_roster_parse_enabled": True,
+                "admin_notify": False,
+                "mode": "record-only",
+            }
+        )
+    )
+    students = _fixture_students()
+    cache = GraduateStudentCache(tmp_path)
+    cache.save_students(students)
+    requests = RequestsStore(tmp_path / "requests.json")
+    pipe = AuditPipeline(
+        settings,
+        requests,
+        AuditLog(tmp_path / "audit.jsonl", settings),
+        RuntimeStore(tmp_path / "runtime.json"),
+        StudentCache(tmp_path),
+        MagicMock(),
+        MagicMock(),
+        grad_cache=cache,
+    )
+    await requests.upsert(
+        PendingRequest(
+            id="g1",
+            group_id="200",
+            user_id="9",
+            comment=comment,
+            flag="fg1",
+            sub_type="add",
+            status="pending",
+            decision="manual_review",
+            confidence=0,
+            reason="x",
+            mode="record-only",
+            created_at="t",
+            parsed=stored,
+            match={"strength": "none"},
+            match_strength="none",
+            profile="graduate",
+        )
+    )
+    summary = await pipe.rematch_active_pending(source="catchup")
+    updated = await requests.get_by_id("g1")
+    assert updated is not None
+    assert updated.parsed.get("name") == "张三"
+    assert updated.parsed.get("admission_type") == "博士"
+    assert updated.match_strength == "strong"
+    assert summary.upgraded_to_strong >= 1
+    # Sanity: stored path used roster completion, not a blank re-parse only.
+    rebuilt = grad_parsed_from_dict(stored, comment)
+    assert rebuilt.name is None
+
+
 def test_decision_still_manual_when_incomplete():
     parsed = _parse_and_complete("张三生物学")
     match = match_graduate(parsed, _fixture_students())

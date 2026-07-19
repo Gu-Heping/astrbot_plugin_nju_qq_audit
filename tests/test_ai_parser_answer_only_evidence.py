@@ -160,3 +160,35 @@ def test_missing_from_answer_dropped():
         answer="张三 261880009",
     )
     assert fields.name is None
+
+
+def test_empty_answer_segment_rejects_question_evidence():
+    fields = _fields(
+        name="张三",
+        student_id="261880009",
+        evidence={"name": "张三", "student_id": "261880009"},
+    )
+    fields = validate_ai_fields(
+        fields,
+        question="姓名：张三 学号：261880009",
+        answer="",
+    )
+    assert fields.name is None
+    assert fields.student_id is None
+
+
+def test_name_embedded_bo_not_admission_evidence():
+    fields = _fields(
+        name="王博",
+        major="生物学",
+        admission_type="博士",
+        evidence={"name": "王博", "major": "生物学", "admission_type": "博"},
+    )
+    fields = validate_ai_fields(
+        fields,
+        question="姓名 专业 硕or博",
+        answer="王博 生物学",
+    )
+    assert fields.name == "王博"
+    assert fields.major == "生物学"
+    assert fields.admission_type is None

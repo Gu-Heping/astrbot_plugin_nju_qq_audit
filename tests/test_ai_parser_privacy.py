@@ -39,6 +39,18 @@ def test_prompt_excludes_flag_token_raw_event_and_roster():
     assert "261880009" in blob
 
 
+def test_split_question_answer_empty_when_only_question_template():
+    question, answer = split_question_answer("问题：姓名：张三 学号：261880009")
+    assert "张三" in question or "姓名" in question
+    assert answer == ""
+
+
+def test_split_question_answer_empty_after_blank_answer_marker():
+    question, answer = split_question_answer("问题：姓名 学号\n答案：")
+    assert answer == ""
+    assert question
+
+
 def test_prompt_does_not_include_student_roster():
     roster_snippet = "张三|261220001|计算机类"
     messages = build_ai_parse_messages(

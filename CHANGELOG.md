@@ -11,6 +11,14 @@
 - 修正 AI auto-approve guard 顺序，确保默认不允许 AI 触发自动通过
 - 新增 `ai_parse_on_rematch`（默认 false）
 
+### 修复
+
+- rematch 复用研究生 stored parsed 时仍执行名单补全（`complete_graduate_parse_from_roster`）
+- `ai_parse_on_rematch` 对 hash 匹配但 unable_to_parse / 无字段的记录仍可补一次 AI
+- comment 仅空白变化时按 `_comment_hash` 复用 parsed，不重复调用 AI
+- 无答案段时不把题目模板当作 evidence；姓名中的「硕/博」不计入录取类型
+- 无 `_comment_hash` 的历史 pending 默认复用可用 stored parsed，避免 rematch 降级
+
 ## [v0.4.16] - 2026-07-19
 
 ### 新增

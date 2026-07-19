@@ -236,13 +236,14 @@ async def test_comment_change_allows_ai_again(tmp_path, ai_calls):
 
 
 @pytest.mark.asyncio
-async def test_legacy_pending_without_hash_no_ai_by_default(tmp_path, ai_calls):
+async def test_legacy_pending_without_hash_preserves_ai_fields(tmp_path, ai_calls):
+    """Pre-hash stored parse (AI-only name) must be reused, not wiped by rematch."""
     pipe = _pipeline(tmp_path, students=[_student()])
     req = PendingRequest(
         id="r4",
         group_id=GROUP_ID,
         user_id="4",
-        comment="何聿璿 261880009",
+        comment="无法本地解析的乱码答案",
         flag="f4",
         sub_type="add",
         status="pending",
@@ -251,13 +252,105 @@ async def test_legacy_pending_without_hash_no_ai_by_default(tmp_path, ai_calls):
         reason="x",
         mode="auto",
         created_at="t",
-        parsed={"name": "何聿璿", "student_id": "261880009"},  # no _comment_hash
+        parsed={
+            "name": "何聿璿",
+            "student_id": "261880009",
+            "parse_errors": ["ai_parse_merged"],
+        },
         match={},
         profile="undergraduate",
     )
     await pipe.requests.upsert(req)
     await pipe.rematch_active_pending(source="test")
     assert len(ai_calls) == 0
+    updated = await pipe.requests.get_by_id("r4")
+    assert updated is not None
+    assert updated.parsed.get("name") == "何聿璿"
+    assert updated.parsed.get("student_id") == "261880009"
+    assert updated.match_strength == "strong"
+
+
+@pytest.mark.asyncio
+async def test_ai_parse_on_rematch_hashed_unable_to_parse(tmp_path, ai_calls):
+    comment = "答案：test"
+    parsed = attach_parsed_meta(
+        {"parse_errors": ["unable to parse any field"]},
+        comment=comment,
+        profile="undergraduate",
+    )
+    pipe = _pipeline(
+        tmp_path,
+        students=[_student()],
+        extra_settings={"ai_parse_on_rematch": True},
+    )
+    await pipe.requests.upsert(
+        PendingRequest(
+            id="r4b",
+            group_id=GROUP_ID,
+            user_id="4",
+            comment=comment,
+            flag="f4b",
+            sub_type="add",
+            status="pending",
+            decision="manual_review",
+            confidence=0,
+            reason="x",
+            mode="auto",
+            created_at="t",
+            parsed=parsed,
+            match={},
+            profile="undergraduate",
+        )
+    )
+    await pipe.rematch_active_pending(source="test")
+    assert len(ai_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_whitespace_only_comment_change_reuses_parsed(tmp_path, ai_calls):
+    old_comment = "答案：何聿璿  261880009"
+    new_comment = "答案：何聿璿 261880009"
+    assert compute_comment_hash(old_comment) == compute_comment_hash(new_comment)
+    parsed = attach_parsed_meta(
+        {
+            "name": "何聿璿",
+            "student_id": "261880009",
+            "parse_errors": ["ai_parse_merged"],
+        },
+        comment=old_comment,
+        profile="undergraduate",
+    )
+    pipe = _pipeline(tmp_path, students=[_student()])
+    existing = PendingRequest(
+        id="r4c",
+        group_id=GROUP_ID,
+        user_id="4",
+        comment=old_comment,
+        flag="f4c",
+        sub_type="add",
+        status="pending",
+        decision="manual_review",
+        confidence=0,
+        reason="x",
+        mode="auto",
+        created_at="t",
+        parsed=parsed,
+        match={},
+        profile="undergraduate",
+    )
+    await pipe.requests.upsert(existing)
+    event = GroupJoinRequest(
+        group_id=GROUP_ID,
+        user_id="4",
+        comment=new_comment,
+        flag="f4c",
+        sub_type="add",
+    )
+    await pipe._audit_and_update_pending(event, existing)
+    assert len(ai_calls) == 0
+    updated = await pipe.requests.get_by_id("r4c")
+    assert updated.parsed.get("name") == "何聿璿"
+    assert "ai_parse_merged" in (updated.parsed.get("parse_errors") or [])
 
 
 @pytest.mark.asyncio
