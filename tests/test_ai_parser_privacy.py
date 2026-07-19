@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 
+import pytest
+
 from config import PluginSettings, load_settings, redact_tokens_in_string
 from core.ai_parser.prompt import build_ai_parse_messages, split_question_answer
 from core.ai_parser.service import maybe_run_ai_parse
@@ -67,7 +69,8 @@ def test_log_redacts_api_key(monkeypatch):
     assert "***" in redacted
 
 
-def test_service_does_not_put_api_key_in_prompt(monkeypatch):
+@pytest.mark.asyncio
+async def test_service_does_not_put_api_key_in_prompt(monkeypatch):
     monkeypatch.setenv("NJU_AUDIT_AI_API_KEY", "sk-should-never-appear")
     settings = load_settings(
         DummyConfig(
@@ -101,7 +104,7 @@ def test_service_does_not_put_api_key_in_prompt(monkeypatch):
         return json.dumps(payload, ensure_ascii=False), "m"
 
     parsed = ParsedApplication(raw="何聿璿+261880009+技术科学试验班")
-    maybe_run_ai_parse(
+    await maybe_run_ai_parse(
         settings,
         profile="undergraduate",
         raw_comment="答案：何聿璿+261880009+技术科学试验班",

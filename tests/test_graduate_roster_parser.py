@@ -144,7 +144,8 @@ def test_two_different_names_no_completion():
     assert "multiple roster names" in parsed.parse_errors
 
 
-def test_roster_parse_disabled_in_pipeline(tmp_path):
+@pytest.mark.asyncio
+async def test_roster_parse_disabled_in_pipeline(tmp_path):
     settings = load_settings(
         DummyConfig(
             {
@@ -175,7 +176,7 @@ def test_roster_parse_disabled_in_pipeline(tmp_path):
         flag="f",
         sub_type="add",
     )
-    ev = pipe._evaluate_graduate_request(event)
+    ev = await pipe._evaluate_graduate_request(event)
     assert ev.parsed.name is None
     assert ev.match.strength != "strong"
 

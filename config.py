@@ -103,7 +103,8 @@ class PluginSettings:
     # Optional AI JSON parser fallback (field extraction only; default off + shadow)
     ai_parse_enabled: bool = False
     ai_parse_shadow_mode: bool = True
-    ai_parse_provider: str = "openai_compatible"
+    ai_parse_backend: str = "openai_compatible"
+    ai_parse_provider: str = "openai_compatible"  # legacy alias of ai_parse_backend
     ai_parse_base_url: str = ""
     ai_parse_model: str = ""
     ai_parse_api_key_env: str = "NJU_AUDIT_AI_API_KEY"
@@ -213,6 +214,20 @@ def mask_http_url(url: str) -> str:
             return f"{scheme}://***@{host_part.split('/')[0]}"
         return f"{scheme}://{rest.split('/')[0]}"
     return url.split("/")[0]
+
+
+def _normalize_ai_parse_backend(config: Mapping) -> str:
+    raw = str(
+        config.get("ai_parse_backend")
+        or config.get("ai_parse_provider")
+        or "openai_compatible"
+    ).strip()
+    if raw not in {"openai_compatible", "astrbot_default"}:
+        logger.warning(
+            "Invalid ai_parse_backend %r, fallback to openai_compatible", raw
+        )
+        return "openai_compatible"
+    return raw
 
 
 def _clamp_int(value: Any, default: int, minimum: int = 0, maximum: int | None = None) -> int:
@@ -328,10 +343,8 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         grad_roster_parse_enabled=bool(config.get("grad_roster_parse_enabled", True)),
         ai_parse_enabled=bool(config.get("ai_parse_enabled", False)),
         ai_parse_shadow_mode=bool(config.get("ai_parse_shadow_mode", True)),
-        ai_parse_provider=str(
-            config.get("ai_parse_provider", "openai_compatible")
-        ).strip()
-        or "openai_compatible",
+        ai_parse_backend=_normalize_ai_parse_backend(config),
+        ai_parse_provider=_normalize_ai_parse_backend(config),
         ai_parse_base_url=str(config.get("ai_parse_base_url", "")).strip(),
         ai_parse_model=str(config.get("ai_parse_model", "")).strip(),
         ai_parse_api_key_env=str(

@@ -183,6 +183,7 @@ class AuditPipeline:
         actions: ActionClient,
         notifier: AdminNotifier,
         grad_cache: GraduateStudentCache | None = None,
+        astrbot_context: Any = None,
     ) -> None:
         self.settings = settings
         self.requests = requests
@@ -192,18 +193,22 @@ class AuditPipeline:
         self.grad_cache = grad_cache
         self.actions = actions
         self.notifier = notifier
+        self.astrbot_context = astrbot_context
 
     def reload_settings(
         self,
         settings: PluginSettings,
         actions: ActionClient | None = None,
         notifier: AdminNotifier | None = None,
+        astrbot_context: Any = None,
     ) -> None:
         self.settings = settings
         if actions is not None:
             self.actions = actions
         if notifier is not None:
             self.notifier = notifier
+        if astrbot_context is not None:
+            self.astrbot_context = astrbot_context
 
     def _effective_mode(self) -> tuple[str, str]:
         return get_effective_mode(self.settings, self.runtime.get_mode_override())
@@ -497,16 +502,17 @@ class AuditPipeline:
             profile=profile,
         )
 
-    def _evaluate_undergraduate_request(self, event: GroupJoinRequest):
+    async def _evaluate_undergraduate_request(self, event: GroupJoinRequest):
         mode, _ = self._effective_mode()
         students = load_students_for_audit(self.settings, self.cache)
         parsed = parse_application_comment(event.comment or "")
-        maybe_run_ai_parse(
+        await maybe_run_ai_parse(
             self.settings,
             profile="undergraduate",
             raw_comment=event.comment or "",
             parsed=parsed,
             incomplete=undergrad_parse_incomplete(parsed),
+            astrbot_context=self.astrbot_context,
         )
         match = match_student(parsed, students, applicant_user_id=event.user_id)
         decision = make_decision(parsed, match, is_target_group=True)
@@ -524,19 +530,20 @@ class AuditPipeline:
             decision=decision,
         )
 
-    def _evaluate_graduate_request(self, event: GroupJoinRequest):
+    async def _evaluate_graduate_request(self, event: GroupJoinRequest):
         mode, _ = self._effective_mode()
         cache = self.grad_cache
         students = load_graduates_for_audit(self.settings, cache) if cache else []
         parsed = parse_graduate_comment(event.comment or "")
         if self.settings.grad_roster_parse_enabled:
             parsed = complete_graduate_parse_from_roster(parsed, students)
-        maybe_run_ai_parse(
+        await maybe_run_ai_parse(
             self.settings,
             profile="graduate",
             raw_comment=event.comment or "",
             parsed=parsed,
             incomplete=grad_parse_incomplete(parsed),
+            astrbot_context=self.astrbot_context,
         )
         match = match_graduate(parsed, students)
         decision = make_graduate_decision(parsed, match, is_target_group=True)
@@ -554,15 +561,15 @@ class AuditPipeline:
             decision=decision,
         )
 
-    def _evaluate_request(
+    async def _evaluate_request(
         self, event: GroupJoinRequest, *, profile: AuditProfile | None = None
     ):
         resolved = profile or resolve_profile(event.group_id, self.settings) or "undergraduate"
         if resolved == "graduate":
-            return self._evaluate_graduate_request(event)
-        return self._evaluate_undergraduate_request(event)
+            return await self._evaluate_graduate_request(event)
+        return await self._evaluate_undergraduate_request(event)
 
-    def _evaluate_pending_fields(self, req: PendingRequest):
+    async def _evaluate_pending_fields(self, req: PendingRequest):
         """Re-parse and rematch a stored pending against the current student cache."""
         profile = getattr(req, "profile", None) or "undergraduate"
         # Synthetic event for shared evaluators
@@ -574,9 +581,9 @@ class AuditPipeline:
             sub_type=req.sub_type or "add",
         )
         if profile == "graduate":
-            ev = self._evaluate_graduate_request(event)
+            ev = await self._evaluate_graduate_request(event)
         else:
-            ev = self._evaluate_undergraduate_request(event)
+            ev = await self._evaluate_undergraduate_request(event)
         return ev.mode, ev.parsed, ev.match, ev.decision
 
     async def rematch_active_pending(
@@ -608,7 +615,7 @@ class AuditPipeline:
             old_parsed = req.parsed or {}
             old_match = req.match or {}
 
-            mode, parsed, match, decision = self._evaluate_pending_fields(req)
+            mode, parsed, match, decision = await self._evaluate_pending_fields(req)
             new_parsed = _parsed_to_dict(parsed)
             new_match = _match_to_dict(match)
 
@@ -679,7 +686,7 @@ class AuditPipeline:
             or resolve_profile(event.group_id, self.settings)
             or "undergraduate"
         )
-        evaluation = self._evaluate_request(event, profile=profile)
+        evaluation = await self._evaluate_request(event, profile=profile)
         mode, parsed, match, decision = (
             evaluation.mode,
             evaluation.parsed,
@@ -799,7 +806,7 @@ class AuditPipeline:
             or resolve_profile(event.group_id, self.settings)
             or "undergraduate"
         )
-        evaluation = self._evaluate_request(event, profile=resolved_profile)
+        evaluation = await self._evaluate_request(event, profile=resolved_profile)
         mode, parsed, match, decision = (
             evaluation.mode,
             evaluation.parsed,

@@ -254,24 +254,30 @@
     "type": "bool",
     "default": true
   },
-  "ai_parse_provider": {
-    "description": "AI 提供方（当前仅 openai_compatible）",
+  "ai_parse_backend": {
+    "description": "AI 后端：openai_compatible（自配 URL/Key）或 astrbot_default（用 AstrBot 当前/默认会话模型）",
     "type": "string",
     "default": "openai_compatible",
-    "options": ["openai_compatible"]
+    "options": ["openai_compatible", "astrbot_default"]
+  },
+  "ai_parse_provider": {
+    "description": "（兼容旧配置）同 ai_parse_backend；优先读 ai_parse_backend",
+    "type": "string",
+    "default": "openai_compatible",
+    "options": ["openai_compatible", "astrbot_default"]
   },
   "ai_parse_base_url": {
-    "description": "OpenAI-compatible API base URL（如 https://api.openai.com/v1）",
+    "description": "OpenAI-compatible API base URL（backend=openai_compatible 时需要）",
     "type": "string",
     "default": ""
   },
   "ai_parse_model": {
-    "description": "模型名",
+    "description": "模型名（backend=openai_compatible 时需要；astrbot_default 可留空）",
     "type": "string",
     "default": ""
   },
   "ai_parse_api_key_env": {
-    "description": "存放 API Key 的环境变量名（不写入配置文件）",
+    "description": "API Key 环境变量名（仅 openai_compatible；astrbot_default 不需要）",
     "type": "string",
     "default": "NJU_AUDIT_AI_API_KEY"
   },
