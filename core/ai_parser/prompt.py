@@ -66,18 +66,22 @@ def split_question_answer(raw: str) -> tuple[str, str]:
     """Split QQ verify text into (question, answer).
 
     When an explicit ``答案：`` marker exists, never fall back to the full raw
-    text (empty answer stays empty). When only a question template is present,
-    answer is empty so validators cannot treat template text as evidence.
-    Free-form comments without markers keep the whole text as answer.
+    text (empty answer stays empty).
+
+    When a question line exists without ``答案：``, keep newline-separated answer
+    text from ``extract_answer_segment``; only treat answer as empty when the
+    remainder is missing or identical to the question template.
     """
     text = raw or ""
     question = extract_question_segment(text)
     has_answer_marker = bool(ANSWER_MARKER_PATTERN.search(text))
-    extracted = extract_answer_segment(text)
+    extracted = (extract_answer_segment(text) or "").strip()
     if has_answer_marker:
-        return question, extracted or ""
+        return question, extracted
     if question:
-        return question, ""
+        if not extracted or extracted == question.strip():
+            return question, ""
+        return question, extracted
     return question, extracted or text
 
 

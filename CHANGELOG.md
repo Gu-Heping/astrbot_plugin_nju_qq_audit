@@ -14,10 +14,12 @@
 ### 修复
 
 - rematch 复用研究生 stored parsed 时仍执行名单补全（`complete_graduate_parse_from_roster`）
-- `ai_parse_on_rematch` 对 hash 匹配但 unable_to_parse / 无字段的记录仍可补一次 AI
-- comment 仅空白变化时按 `_comment_hash` 复用 parsed，不重复调用 AI
+- `ai_parse_on_rematch` 对 hash 匹配但无字段的记录仍可补一次 AI
+- comment 仅空白/分隔符空格变化时按 `_comment_hash` 复用 parsed，不重复调用 AI
 - 无答案段时不把题目模板当作 evidence；姓名中的「硕/博」不计入录取类型
 - 无 `_comment_hash` 的历史 pending 默认复用可用 stored parsed，避免 rematch 降级
+- AI 合并后残留的 `unable to parse` 不再阻止复用 stored parsed
+- 保留「问题：…\\n答案行」无显式「答案：」标记时的答案段提取
 
 ## [v0.4.16] - 2026-07-19
 

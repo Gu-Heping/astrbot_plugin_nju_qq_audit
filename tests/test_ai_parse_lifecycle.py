@@ -307,9 +307,48 @@ async def test_ai_parse_on_rematch_hashed_unable_to_parse(tmp_path, ai_calls):
 
 
 @pytest.mark.asyncio
+async def test_ai_merged_with_stale_unable_to_parse_is_reused(tmp_path, ai_calls):
+    comment = "答案：乱码无法本地解析"
+    parsed = attach_parsed_meta(
+        {
+            "name": "何聿璿",
+            "student_id": "261880009",
+            "parse_errors": ["unable to parse any field", "ai_parse_merged"],
+        },
+        comment=comment,
+        profile="undergraduate",
+    )
+    pipe = _pipeline(tmp_path, students=[_student()])
+    await pipe.requests.upsert(
+        PendingRequest(
+            id="r4d",
+            group_id=GROUP_ID,
+            user_id="4",
+            comment=comment,
+            flag="f4d",
+            sub_type="add",
+            status="pending",
+            decision="manual_review",
+            confidence=0,
+            reason="x",
+            mode="auto",
+            created_at="t",
+            parsed=parsed,
+            match={},
+            profile="undergraduate",
+        )
+    )
+    await pipe.rematch_active_pending(source="test")
+    assert len(ai_calls) == 0
+    updated = await pipe.requests.get_by_id("r4d")
+    assert updated.parsed.get("name") == "何聿璿"
+    assert updated.match_strength == "strong"
+
+
+@pytest.mark.asyncio
 async def test_whitespace_only_comment_change_reuses_parsed(tmp_path, ai_calls):
-    old_comment = "答案：何聿璿  261880009"
-    new_comment = "答案：何聿璿 261880009"
+    old_comment = "答案：何聿璿+261880009"
+    new_comment = "答案： 何聿璿 + 261880009"
     assert compute_comment_hash(old_comment) == compute_comment_hash(new_comment)
     parsed = attach_parsed_meta(
         {

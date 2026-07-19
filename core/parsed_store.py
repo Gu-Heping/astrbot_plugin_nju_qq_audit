@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Any
 
 from core.normalize import normalize_whitespace
@@ -11,9 +12,19 @@ from graduate.models import GraduateParsedApplication
 
 PARSER_VERSION = "v0.4.17"
 
+# Strip spaces around separators so「何聿璿+261」and「何聿璿 + 261」hash equal.
+_HASH_SEP = re.compile(r"\s*([+＋/／,，、|;：:（）()])\s*")
+
+
+def normalize_comment_for_hash(comment: str) -> str:
+    """Normalize comment for revision identity (whitespace-insensitive around seps)."""
+    text = normalize_whitespace(comment or "")
+    text = _HASH_SEP.sub(r"\1", text)
+    return text
+
 
 def compute_comment_hash(comment: str) -> str:
-    text = normalize_whitespace(comment or "")
+    text = normalize_comment_for_hash(comment)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
@@ -60,16 +71,6 @@ def comment_hash_matches(stored: dict[str, Any] | None, comment: str) -> bool:
     return str(stored_hash) == compute_comment_hash(comment)
 
 
-def parsed_needs_ai_fallback(stored: dict[str, Any] | None) -> bool:
-    """Conservative rematch AI: only when missing or explicitly unparseable."""
-    if not stored:
-        return True
-    errors = [str(e) for e in (stored.get("parse_errors") or [])]
-    if any("unable to parse" in e for e in errors):
-        return True
-    return not stored_parsed_has_fields(stored)
-
-
 def stored_parsed_has_fields(stored: dict[str, Any] | None) -> bool:
     """True when stored parse has at least one usable applicant field."""
     if not stored:
@@ -91,18 +92,27 @@ def stored_parsed_has_fields(stored: dict[str, Any] | None) -> bool:
     )
 
 
+def parsed_needs_ai_fallback(stored: dict[str, Any] | None) -> bool:
+    """True when rematch may call AI: missing stored parse or no usable fields.
+
+    Stale ``unable to parse`` markers left beside ``ai_parse_merged`` fields must
+    NOT force another AI call or block reuse.
+    """
+    if not stored:
+        return True
+    return not stored_parsed_has_fields(stored)
+
+
 def can_reuse_stored_parsed(
     stored: dict[str, Any] | None, comment: str
 ) -> bool:
     """Reuse when hash matches, or legacy usable parse without hash metadata."""
-    if not stored:
-        return False
-    if parsed_needs_ai_fallback(stored):
+    if not stored or not stored_parsed_has_fields(stored):
         return False
     if comment_hash_matches(stored, comment):
         return True
     # Pre-v0.4.17 rows: no hash, but fields are still worth rematching.
-    if not stored.get("_comment_hash") and stored_parsed_has_fields(stored):
+    if not stored.get("_comment_hash"):
         return True
     return False
 

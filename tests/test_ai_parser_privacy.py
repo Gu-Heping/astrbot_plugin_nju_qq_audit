@@ -51,6 +51,13 @@ def test_split_question_answer_empty_after_blank_answer_marker():
     assert question
 
 
+def test_split_question_answer_keeps_newline_answer_without_marker():
+    question, answer = split_question_answer("问题：姓名 学号\n何聿璿 261880009")
+    assert "姓名" in question
+    assert "何聿璿" in answer
+    assert "261880009" in answer
+
+
 def test_prompt_does_not_include_student_roster():
     roster_snippet = "张三|261220001|计算机类"
     messages = build_ai_parse_messages(

@@ -192,3 +192,19 @@ def test_name_embedded_bo_not_admission_evidence():
     assert fields.name == "王博"
     assert fields.major == "生物学"
     assert fields.admission_type is None
+
+
+def test_name_ending_bo_without_validated_name_not_peeled():
+    """「欧阳博」must not become doctoral evidence when AI omits name."""
+    fields = _fields(
+        name=None,
+        major="生物学",
+        admission_type="博士",
+        evidence={"major": "生物学", "admission_type": "博"},
+    )
+    fields = validate_ai_fields(
+        fields,
+        question="姓名 专业 硕or博",
+        answer="欧阳博 生物学",
+    )
+    assert fields.admission_type is None
