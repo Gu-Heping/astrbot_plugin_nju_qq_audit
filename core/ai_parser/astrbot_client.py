@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any
 
 from core.ai_parser.prompt import flatten_messages_for_astrbot
@@ -48,6 +49,24 @@ async def resolve_astrbot_provider_id(
     raise RuntimeError("astrbot chat provider not found")
 
 
+def _llm_generate_supports(astrbot_context: Any, *names: str) -> dict[str, bool]:
+    """Detect supported llm_generate kwargs without trial-and-error retries."""
+    result = {name: True for name in names}
+    try:
+        sig = inspect.signature(astrbot_context.llm_generate)
+    except (TypeError, ValueError):
+        return result
+    params = sig.parameters
+    has_var_kw = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+    if has_var_kw:
+        return result
+    for name in names:
+        result[name] = name in params
+    return result
+
+
 async def call_astrbot_default_llm(
     astrbot_context: Any,
     messages: list[dict[str, str]],
@@ -59,6 +78,7 @@ async def call_astrbot_default_llm(
     """Call AstrBot llm_generate. Returns (content, model_label).
 
     Does not write conversation history explicitly; uses one-shot prompt/system_prompt.
+    Never retries on provider TypeError (avoids double-sending applicant text).
     """
     if astrbot_context is None:
         raise RuntimeError("astrbot context missing")
@@ -68,24 +88,23 @@ async def call_astrbot_default_llm(
     system_prompt, user_prompt = flatten_messages_for_astrbot(messages)
     provider_id = await resolve_astrbot_provider_id(astrbot_context, umo=umo)
     model_label = f"astrbot_default:{provider_id}"
+    supports = _llm_generate_supports(
+        astrbot_context, "system_prompt", "temperature"
+    )
 
     async def _generate() -> str:
-        # Prefer system_prompt + prompt (AstrBot v4.5.7+). Fall back to single prompt.
-        try:
-            llm_resp = await astrbot_context.llm_generate(
-                chat_provider_id=provider_id,
-                system_prompt=system_prompt or None,
-                prompt=user_prompt,
-                temperature=temperature,
-            )
-        except TypeError:
-            combined = user_prompt
-            if system_prompt:
-                combined = f"{system_prompt}\n\n{user_prompt}"
-            llm_resp = await astrbot_context.llm_generate(
-                chat_provider_id=provider_id,
-                prompt=combined,
-            )
+        kwargs: dict[str, Any] = {
+            "chat_provider_id": provider_id,
+            "prompt": user_prompt,
+        }
+        if supports.get("system_prompt", True) and system_prompt:
+            kwargs["system_prompt"] = system_prompt
+        elif system_prompt:
+            kwargs["prompt"] = f"{system_prompt}\n\n{user_prompt}"
+        if supports.get("temperature", True):
+            kwargs["temperature"] = temperature
+
+        llm_resp = await astrbot_context.llm_generate(**kwargs)
         content = getattr(llm_resp, "completion_text", None)
         if content is None:
             raise RuntimeError("astrbot empty completion_text")

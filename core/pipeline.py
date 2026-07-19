@@ -513,6 +513,7 @@ class AuditPipeline:
             parsed=parsed,
             incomplete=undergrad_parse_incomplete(parsed),
             astrbot_context=self.astrbot_context,
+            umo=getattr(event, "umo", None),
         )
         match = match_student(parsed, students, applicant_user_id=event.user_id)
         decision = make_decision(parsed, match, is_target_group=True)
@@ -544,6 +545,7 @@ class AuditPipeline:
             parsed=parsed,
             incomplete=grad_parse_incomplete(parsed),
             astrbot_context=self.astrbot_context,
+            umo=getattr(event, "umo", None),
         )
         match = match_graduate(parsed, students)
         decision = make_graduate_decision(parsed, match, is_target_group=True)

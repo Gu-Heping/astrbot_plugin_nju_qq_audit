@@ -6,7 +6,7 @@ import logging
 import re
 from typing import Any
 
-from config import PluginSettings
+from config import PluginSettings, redact_tokens_in_string
 from core.ai_parser.client import (
     call_openai_compatible_json,
     parse_model_response,
@@ -20,6 +20,20 @@ from core.parser import ParsedApplication
 from graduate.models import GraduateParsedApplication
 
 logger = logging.getLogger(__name__)
+
+_SECRETISH_ERROR = re.compile(
+    r"(?i)(api[_-]?key|authorization|bearer|sk-|access[_-]?token|secret)"
+    r"[=:\s\"']*\S+"
+)
+
+
+def _safe_ai_error_text(exc: BaseException, settings: PluginSettings) -> str:
+    """Sanitize exception text before logging (no API keys / auth headers)."""
+    text = str(exc)[:400]
+    text = redact_tokens_in_string(text, settings)
+    text = _SECRETISH_ERROR.sub("***", text)
+    text = re.sub(r"(?i)\b[a-z0-9_\-]{32,}\b", "***", text)
+    return text[:200]
 
 _TEMPLATE_NAME_BAD = frozenset(
     {
@@ -173,11 +187,15 @@ def _log_ai_result(
     merged: bool,
     backend: str | None = None,
 ) -> None:
+    error = result.error
+    if error:
+        error = redact_tokens_in_string(error, settings)
+        error = _SECRETISH_ERROR.sub("***", error)[:200]
     payload = {
         "ai_parse_used": True,
         "ai_parse_backend": backend or getattr(settings, "ai_parse_backend", None),
         "ok": result.ok,
-        "error": result.error,
+        "error": error,
         "model": result.model,
         "provider_id": (
             result.model.split(":", 1)[1]
@@ -295,7 +313,7 @@ async def maybe_run_ai_parse(
     except Exception as exc:  # noqa: BLE001 — fallback to deterministic parser
         result = AiParseResult(
             ok=False,
-            error=str(exc)[:200],
+            error=_safe_ai_error_text(exc, settings),
             model=settings.ai_parse_model or backend,
         )
         _mark_shadow_or_used(parsed, shadow=shadow, model=result.model)

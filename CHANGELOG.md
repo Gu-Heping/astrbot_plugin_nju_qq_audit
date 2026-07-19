@@ -9,6 +9,12 @@
 - AI JSON parser 支持 `ai_parse_backend=astrbot_default`，使用 AstrBot 当前/默认会话模型
 - 保留 `openai_compatible` 后端；默认仍关闭 AI parser、shadow mode，且不允许 AI 触发自动通过
 
+### 修复
+
+- 入群事件透传 `unified_msg_origin`（umo）以解析会话级 LLM provider
+- AstrBot `llm_generate` 不再因 TypeError 二次重试（避免重复发送申请内容）
+- AI 异常日志脱敏，避免泄露 AstrBot provider 侧 API key / Authorization
+
 ## [v0.4.15] - 2026-07-19
 
 ### 新增

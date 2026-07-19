@@ -266,3 +266,98 @@ async def test_call_astrbot_default_llm_direct():
     )
     assert "张三" in text
     assert model == "astrbot_default:p2"
+    context.get_current_chat_provider_id.assert_awaited_once_with(umo="u1")
+
+
+@pytest.mark.asyncio
+async def test_umo_passed_to_provider_resolver():
+    settings = load_settings(
+        DummyConfig(
+            {
+                "ai_parse_enabled": True,
+                "ai_parse_backend": "astrbot_default",
+                "ai_parse_shadow_mode": True,
+            }
+        )
+    )
+    context = MagicMock()
+    context.get_current_chat_provider_id = AsyncMock(return_value="session-prov")
+    context.llm_generate = AsyncMock(
+        return_value=SimpleNamespace(completion_text=_ai_json(name="何聿璿"))
+    )
+    parsed = ParsedApplication(raw="何聿璿+261880009+技术科学试验班")
+    await maybe_run_ai_parse(
+        settings,
+        profile="undergraduate",
+        raw_comment="答案：何聿璿+261880009+技术科学试验班",
+        parsed=parsed,
+        incomplete=True,
+        astrbot_context=context,
+        umo="qq:group:100",
+    )
+    context.get_current_chat_provider_id.assert_awaited_once_with(umo="qq:group:100")
+
+
+@pytest.mark.asyncio
+async def test_llm_generate_typeerror_does_not_double_call():
+    """Provider TypeError must not trigger a second llm_generate with applicant text."""
+    calls: list[dict] = []
+
+    async def boom(*, chat_provider_id, prompt, system_prompt=None, temperature=0.0):
+        calls.append(
+            {
+                "chat_provider_id": chat_provider_id,
+                "prompt": prompt,
+                "system_prompt": system_prompt,
+            }
+        )
+        raise TypeError("provider internal type error")
+
+    context = MagicMock()
+    context.get_current_chat_provider_id = AsyncMock(return_value="p")
+    context.llm_generate = boom
+
+    messages = build_ai_parse_messages(
+        profile="undergraduate",
+        question="姓名",
+        answer="何聿璿",
+        max_chars=100,
+    )
+    with pytest.raises(TypeError):
+        await call_astrbot_default_llm(context, messages, umo="u", timeout_ms=3000)
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_astrbot_error_is_redacted_in_result():
+    settings = load_settings(
+        DummyConfig(
+            {
+                "ai_parse_enabled": True,
+                "ai_parse_backend": "astrbot_default",
+                "ai_parse_shadow_mode": True,
+                "ai_parse_api_key_env": "NJU_AUDIT_AI_API_KEY",
+            }
+        )
+    )
+    context = MagicMock()
+    context.get_current_chat_provider_id = AsyncMock(return_value="p")
+    context.llm_generate = AsyncMock(
+        side_effect=RuntimeError(
+            "Authorization: Bearer sk-astrbot-secret-key-should-not-leak"
+        )
+    )
+    parsed = ParsedApplication(raw="何聿璿+261880009+技术科学试验班")
+    result = await maybe_run_ai_parse(
+        settings,
+        profile="undergraduate",
+        raw_comment="答案：何聿璿+261880009+技术科学试验班",
+        parsed=parsed,
+        incomplete=True,
+        astrbot_context=context,
+        umo="u",
+    )
+    assert result is not None
+    assert result.ok is False
+    assert "sk-astrbot-secret-key-should-not-leak" not in (result.error or "")
+    assert "***" in (result.error or "")

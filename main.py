@@ -354,6 +354,9 @@ class NjuQqAuditPlugin(Star):
             return
         join_req = extract_group_request(raw)
         if join_req:
+            umo = getattr(event, "unified_msg_origin", None)
+            if umo:
+                join_req.umo = str(umo)
             await self.ctx.pipeline.handle_group_request(join_req)
 
     @filter.command_group("audit")
