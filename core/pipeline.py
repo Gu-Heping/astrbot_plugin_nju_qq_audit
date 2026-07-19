@@ -9,6 +9,12 @@ from astrbot.api import logger
 from config import PluginSettings, get_effective_mode
 from admin.action_error import classify_action_failure
 from admin.labels import applicant_summary
+from core.ai_parser.service import (
+    apply_ai_auto_approve_guard,
+    grad_parse_incomplete,
+    maybe_run_ai_parse,
+    undergrad_parse_incomplete,
+)
 from core.decision import apply_auto_approve_flag, make_decision, should_auto_approve
 from core.matcher import MatchResult, match_student
 from core.parser import parse_application_comment
@@ -86,15 +92,21 @@ def _external_join_message(
 
 def _parsed_to_dict(parsed) -> dict:
     if isinstance(parsed, GraduateParsedApplication):
-        return parsed.to_dict()
-    return {
-        "name": parsed.name,
-        "student_id": parsed.student_id,
-        "notice_no": parsed.notice_no,
-        "major": parsed.major,
-        "academy": parsed.academy,
-        "notice_no_candidates": parsed.notice_no_candidates,
-    }
+        data = parsed.to_dict()
+    else:
+        data = {
+            "name": parsed.name,
+            "student_id": parsed.student_id,
+            "notice_no": parsed.notice_no,
+            "major": parsed.major,
+            "academy": parsed.academy,
+            "notice_no_candidates": parsed.notice_no_candidates,
+        }
+    errors = getattr(parsed, "parse_errors", None) or []
+    ai_markers = [e for e in errors if str(e).startswith("ai_parse")]
+    if ai_markers:
+        data["parse_errors"] = ai_markers
+    return data
 
 
 def _match_to_dict(match) -> dict:
@@ -489,8 +501,20 @@ class AuditPipeline:
         mode, _ = self._effective_mode()
         students = load_students_for_audit(self.settings, self.cache)
         parsed = parse_application_comment(event.comment or "")
+        maybe_run_ai_parse(
+            self.settings,
+            profile="undergraduate",
+            raw_comment=event.comment or "",
+            parsed=parsed,
+            incomplete=undergrad_parse_incomplete(parsed),
+        )
         match = match_student(parsed, students, applicant_user_id=event.user_id)
         decision = make_decision(parsed, match, is_target_group=True)
+        decision = apply_ai_auto_approve_guard(
+            decision,
+            parsed,
+            allow_auto_approve=self.settings.ai_parse_allow_auto_approve,
+        )
         decision = apply_auto_approve_flag(decision, mode, match)
         return AuditEvaluation(
             profile="undergraduate",
@@ -507,8 +531,20 @@ class AuditPipeline:
         parsed = parse_graduate_comment(event.comment or "")
         if self.settings.grad_roster_parse_enabled:
             parsed = complete_graduate_parse_from_roster(parsed, students)
+        maybe_run_ai_parse(
+            self.settings,
+            profile="graduate",
+            raw_comment=event.comment or "",
+            parsed=parsed,
+            incomplete=grad_parse_incomplete(parsed),
+        )
         match = match_graduate(parsed, students)
         decision = make_graduate_decision(parsed, match, is_target_group=True)
+        decision = apply_ai_auto_approve_guard(
+            decision,
+            parsed,
+            allow_auto_approve=self.settings.ai_parse_allow_auto_approve,
+        )
         decision = apply_graduate_auto_approve_flag(decision, mode, match)
         return AuditEvaluation(
             profile="graduate",

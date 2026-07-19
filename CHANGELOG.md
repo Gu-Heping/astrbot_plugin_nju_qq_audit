@@ -2,6 +2,14 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.15] - 2026-07-19
+
+### 新增
+
+- 可选 AI JSON parser fallback（默认关闭、shadow mode）：仅做字段抽取，不参与审核判断
+- 默认不允许 AI 解析结果触发自动通过（`ai_parse_allow_auto_approve=false`）
+- API Key 仅从环境变量读取；失败/超时/非法 JSON 回退本地 parser
+
 ## [v0.4.14] - 2026-07-18
 
 ### 修复

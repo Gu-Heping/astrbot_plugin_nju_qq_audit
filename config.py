@@ -100,6 +100,17 @@ class PluginSettings:
     grad_col_short_code_id: str = "_short_code_id"
     grad_col_imported_at: str = "_imported_at"
     grad_roster_parse_enabled: bool = True
+    # Optional AI JSON parser fallback (field extraction only; default off + shadow)
+    ai_parse_enabled: bool = False
+    ai_parse_shadow_mode: bool = True
+    ai_parse_provider: str = "openai_compatible"
+    ai_parse_base_url: str = ""
+    ai_parse_model: str = ""
+    ai_parse_api_key_env: str = "NJU_AUDIT_AI_API_KEY"
+    ai_parse_timeout_ms: int = 3000
+    ai_parse_max_chars: int = 500
+    ai_parse_allow_auto_approve: bool = False
+    ai_parse_log_raw: bool = False
 
     def __repr__(self) -> str:
         return (
@@ -117,14 +128,25 @@ def mask_secret(value: str, visible: int = 4) -> str:
     return value[:visible] + "***"
 
 
+def resolve_ai_parse_api_key(settings: PluginSettings) -> str:
+    import os
+
+    env_name = (settings.ai_parse_api_key_env or "").strip()
+    if not env_name:
+        return ""
+    return (os.environ.get(env_name) or "").strip()
+
+
 def redact_tokens_in_string(text: str, settings: PluginSettings | None = None) -> str:
     result = text
     if settings:
-        for token in (
+        secrets = [
             settings.onebot_access_token,
             settings.njutable_api_token,
             settings.grad_njutable_api_token,
-        ):
+            resolve_ai_parse_api_key(settings),
+        ]
+        for token in secrets:
             if token:
                 result = result.replace(token, "***")
     for pattern in (r"Bearer\s+\S+", r"access_token['\"]?\s*[:=]\s*\S+"):
@@ -304,6 +326,28 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         grad_col_short_code_id=str(config.get("grad_col_short_code_id", "_short_code_id")),
         grad_col_imported_at=str(config.get("grad_col_imported_at", "_imported_at")),
         grad_roster_parse_enabled=bool(config.get("grad_roster_parse_enabled", True)),
+        ai_parse_enabled=bool(config.get("ai_parse_enabled", False)),
+        ai_parse_shadow_mode=bool(config.get("ai_parse_shadow_mode", True)),
+        ai_parse_provider=str(
+            config.get("ai_parse_provider", "openai_compatible")
+        ).strip()
+        or "openai_compatible",
+        ai_parse_base_url=str(config.get("ai_parse_base_url", "")).strip(),
+        ai_parse_model=str(config.get("ai_parse_model", "")).strip(),
+        ai_parse_api_key_env=str(
+            config.get("ai_parse_api_key_env", "NJU_AUDIT_AI_API_KEY")
+        ).strip()
+        or "NJU_AUDIT_AI_API_KEY",
+        ai_parse_timeout_ms=_clamp_int(
+            config.get("ai_parse_timeout_ms"), 3000, minimum=500, maximum=30000
+        ),
+        ai_parse_max_chars=_clamp_int(
+            config.get("ai_parse_max_chars"), 500, minimum=50, maximum=4000
+        ),
+        ai_parse_allow_auto_approve=bool(
+            config.get("ai_parse_allow_auto_approve", False)
+        ),
+        ai_parse_log_raw=bool(config.get("ai_parse_log_raw", False)),
     )
 
 

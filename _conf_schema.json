@@ -243,5 +243,56 @@
   "grad_col_major_name": { "description": "研究生列名：录取专业名称", "type": "string", "default": "录取专业名称" },
   "grad_col_name": { "description": "研究生列名：姓名", "type": "string", "default": "姓名" },
   "grad_col_short_code_id": { "description": "研究生列名：_short_code_id", "type": "string", "default": "_short_code_id" },
-  "grad_col_imported_at": { "description": "研究生列名：_imported_at", "type": "string", "default": "_imported_at" }
+  "grad_col_imported_at": { "description": "研究生列名：_imported_at", "type": "string", "default": "_imported_at" },
+  "ai_parse_enabled": {
+    "description": "是否启用可选 AI JSON 字段抽取（默认关闭；AI 不做审核判断）",
+    "type": "bool",
+    "default": false
+  },
+  "ai_parse_shadow_mode": {
+    "description": "AI 解析影子模式：只记录结果，不合并进 parsed，不影响审核（默认 true）",
+    "type": "bool",
+    "default": true
+  },
+  "ai_parse_provider": {
+    "description": "AI 提供方（当前仅 openai_compatible）",
+    "type": "string",
+    "default": "openai_compatible",
+    "options": ["openai_compatible"]
+  },
+  "ai_parse_base_url": {
+    "description": "OpenAI-compatible API base URL（如 https://api.openai.com/v1）",
+    "type": "string",
+    "default": ""
+  },
+  "ai_parse_model": {
+    "description": "模型名",
+    "type": "string",
+    "default": ""
+  },
+  "ai_parse_api_key_env": {
+    "description": "存放 API Key 的环境变量名（不写入配置文件）",
+    "type": "string",
+    "default": "NJU_AUDIT_AI_API_KEY"
+  },
+  "ai_parse_timeout_ms": {
+    "description": "AI 请求超时（毫秒）",
+    "type": "int",
+    "default": 3000
+  },
+  "ai_parse_max_chars": {
+    "description": "发送给 AI 的 question/answer 最大字符数",
+    "type": "int",
+    "default": 500
+  },
+  "ai_parse_allow_auto_approve": {
+    "description": "允许 AI 合并字段后触发自动通过（默认 false，仍需本地 strong 匹配）",
+    "type": "bool",
+    "default": false
+  },
+  "ai_parse_log_raw": {
+    "description": "是否记录更详细 AI 调试信息（仅本地调试，不建议线上开启）",
+    "type": "bool",
+    "default": false
+  }
 }
