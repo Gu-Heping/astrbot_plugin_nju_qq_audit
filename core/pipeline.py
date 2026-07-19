@@ -18,6 +18,20 @@ from core.ai_parser.service import (
 from core.decision import apply_auto_approve_flag, make_decision, should_auto_approve
 from core.matcher import MatchResult, match_student
 from core.parser import parse_application_comment
+from core.parsed_store import (
+    ai_parse_already_attempted,
+    attach_parsed_meta,
+    can_reuse_stored_parsed,
+    carry_ai_attempt_markers,
+    comment_hash_matches,
+    fill_grad_gaps_from_stored,
+    fill_undergrad_gaps_from_stored,
+    grad_parsed_from_dict,
+    is_same_comment_revision,
+    parsed_needs_ai_fallback,
+    strip_internal_parsed_keys,
+    undergrad_parsed_from_dict,
+)
 from core.event_fingerprint import (
     compute_event_fingerprint,
     extract_event_time_iso,
@@ -90,23 +104,28 @@ def _external_join_message(
     return f"QQ 侧已入群（{inner}）"
 
 
-def _parsed_to_dict(parsed) -> dict:
+def _parsed_to_dict(parsed, *, comment: str | None = None, profile: str | None = None) -> dict:
     if isinstance(parsed, GraduateParsedApplication):
         data = parsed.to_dict()
+        data["raw"] = getattr(parsed, "raw", None)
     else:
         data = {
+            "raw": getattr(parsed, "raw", None),
             "name": parsed.name,
             "student_id": parsed.student_id,
             "notice_no": parsed.notice_no,
             "major": parsed.major,
             "academy": parsed.academy,
-            "notice_no_candidates": parsed.notice_no_candidates,
+            "notice_no_candidates": list(parsed.notice_no_candidates or []),
         }
     errors = getattr(parsed, "parse_errors", None) or []
-    ai_markers = [e for e in errors if str(e).startswith("ai_parse")]
-    if ai_markers:
-        data["parse_errors"] = ai_markers
-    return data
+    if errors:
+        data["parse_errors"] = list(errors)
+    meta_comment = comment if comment is not None else str(getattr(parsed, "raw", "") or "")
+    meta_profile = profile or (
+        "graduate" if isinstance(parsed, GraduateParsedApplication) else "undergraduate"
+    )
+    return attach_parsed_meta(data, comment=meta_comment, profile=meta_profile)
 
 
 def _match_to_dict(match) -> dict:
@@ -481,6 +500,7 @@ class AuditPipeline:
                     event_time=event_time,
                     fingerprint=fingerprint,
                     profile=profile,
+                    reuse_parsed_from=existing,
                 )
                 return
 
@@ -492,7 +512,9 @@ class AuditPipeline:
         active_pending = await self.requests.find_active_pending_by_user_group(
             event.group_id, event.user_id
         )
+        reuse_from = None
         if active_pending and active_pending.flag != event.flag:
+            reuse_from = active_pending
             await self.requests.supersede_pending(active_pending.flag, event.flag)
 
         await self._audit_and_act(
@@ -500,29 +522,41 @@ class AuditPipeline:
             event_time=event_time,
             fingerprint=fingerprint,
             profile=profile,
+            reuse_parsed_from=reuse_from,
         )
 
-    async def _evaluate_undergraduate_request(self, event: GroupJoinRequest):
+    async def _evaluate_undergraduate_request(
+        self,
+        event: GroupJoinRequest,
+        *,
+        allow_ai_parse: bool = True,
+        stored_parsed=None,
+    ):
         mode, _ = self._effective_mode()
         students = load_students_for_audit(self.settings, self.cache)
+        # Always run deterministic parse; stored (often AI) only fills gaps so
+        # rematch/catchup can still upgrade when the comment contains more fields.
         parsed = parse_application_comment(event.comment or "")
-        await maybe_run_ai_parse(
-            self.settings,
-            profile="undergraduate",
-            raw_comment=event.comment or "",
-            parsed=parsed,
-            incomplete=undergrad_parse_incomplete(parsed),
-            astrbot_context=self.astrbot_context,
-            umo=getattr(event, "umo", None),
-        )
+        if stored_parsed is not None:
+            parsed = fill_undergrad_gaps_from_stored(parsed, stored_parsed)
+        elif allow_ai_parse:
+            await maybe_run_ai_parse(
+                self.settings,
+                profile="undergraduate",
+                raw_comment=event.comment or "",
+                parsed=parsed,
+                incomplete=undergrad_parse_incomplete(parsed),
+                astrbot_context=self.astrbot_context,
+                umo=getattr(event, "umo", None),
+            )
         match = match_student(parsed, students, applicant_user_id=event.user_id)
         decision = make_decision(parsed, match, is_target_group=True)
+        decision = apply_auto_approve_flag(decision, mode, match)
         decision = apply_ai_auto_approve_guard(
             decision,
             parsed,
             allow_auto_approve=self.settings.ai_parse_allow_auto_approve,
         )
-        decision = apply_auto_approve_flag(decision, mode, match)
         return AuditEvaluation(
             profile="undergraduate",
             mode=mode,
@@ -531,30 +565,39 @@ class AuditPipeline:
             decision=decision,
         )
 
-    async def _evaluate_graduate_request(self, event: GroupJoinRequest):
+    async def _evaluate_graduate_request(
+        self,
+        event: GroupJoinRequest,
+        *,
+        allow_ai_parse: bool = True,
+        stored_parsed=None,
+    ):
         mode, _ = self._effective_mode()
         cache = self.grad_cache
         students = load_graduates_for_audit(self.settings, cache) if cache else []
         parsed = parse_graduate_comment(event.comment or "")
+        if stored_parsed is not None:
+            parsed = fill_grad_gaps_from_stored(parsed, stored_parsed)
         if self.settings.grad_roster_parse_enabled:
             parsed = complete_graduate_parse_from_roster(parsed, students)
-        await maybe_run_ai_parse(
-            self.settings,
-            profile="graduate",
-            raw_comment=event.comment or "",
-            parsed=parsed,
-            incomplete=grad_parse_incomplete(parsed),
-            astrbot_context=self.astrbot_context,
-            umo=getattr(event, "umo", None),
-        )
+        if stored_parsed is None and allow_ai_parse:
+            await maybe_run_ai_parse(
+                self.settings,
+                profile="graduate",
+                raw_comment=event.comment or "",
+                parsed=parsed,
+                incomplete=grad_parse_incomplete(parsed),
+                astrbot_context=self.astrbot_context,
+                umo=getattr(event, "umo", None),
+            )
         match = match_graduate(parsed, students)
         decision = make_graduate_decision(parsed, match, is_target_group=True)
+        decision = apply_graduate_auto_approve_flag(decision, mode, match)
         decision = apply_ai_auto_approve_guard(
             decision,
             parsed,
             allow_auto_approve=self.settings.ai_parse_allow_auto_approve,
         )
-        decision = apply_graduate_auto_approve_flag(decision, mode, match)
         return AuditEvaluation(
             profile="graduate",
             mode=mode,
@@ -564,17 +607,38 @@ class AuditPipeline:
         )
 
     async def _evaluate_request(
-        self, event: GroupJoinRequest, *, profile: AuditProfile | None = None
+        self,
+        event: GroupJoinRequest,
+        *,
+        profile: AuditProfile | None = None,
+        allow_ai_parse: bool = True,
+        stored_parsed=None,
     ):
         resolved = profile or resolve_profile(event.group_id, self.settings) or "undergraduate"
         if resolved == "graduate":
-            return await self._evaluate_graduate_request(event)
-        return await self._evaluate_undergraduate_request(event)
+            return await self._evaluate_graduate_request(
+                event,
+                allow_ai_parse=allow_ai_parse,
+                stored_parsed=stored_parsed,
+            )
+        return await self._evaluate_undergraduate_request(
+            event,
+            allow_ai_parse=allow_ai_parse,
+            stored_parsed=stored_parsed,
+        )
 
-    async def _evaluate_pending_fields(self, req: PendingRequest):
-        """Re-parse and rematch a stored pending against the current student cache."""
+    async def _evaluate_pending_fields(
+        self,
+        req: PendingRequest,
+        *,
+        allow_ai_parse: bool = False,
+        reuse_stored_parsed: bool = True,
+    ):
+        """Re-parse and rematch a stored pending against the current student cache.
+
+        Default: reuse stored parsed when comment hash matches; do not call AI.
+        """
         profile = getattr(req, "profile", None) or "undergraduate"
-        # Synthetic event for shared evaluators
         event = GroupJoinRequest(
             group_id=req.group_id,
             user_id=req.user_id,
@@ -582,10 +646,47 @@ class AuditPipeline:
             flag=req.flag,
             sub_type=req.sub_type or "add",
         )
-        if profile == "graduate":
-            ev = await self._evaluate_graduate_request(event)
+        stored = None
+        ai_allowed = False
+        carry_markers_from = None
+        rematch_ai = bool(getattr(self.settings, "ai_parse_on_rematch", False))
+        if reuse_stored_parsed and can_reuse_stored_parsed(
+            req.parsed,
+            req.comment or "",
+            allow_unhashed_without_raw=True,
+        ):
+            if profile == "graduate":
+                stored = grad_parsed_from_dict(req.parsed, req.comment or "")
+            else:
+                stored = undergrad_parsed_from_dict(req.parsed, req.comment or "")
+            ai_allowed = False
         else:
-            ev = await self._evaluate_undergraduate_request(event)
+            # Unusable / missing stored: re-parse. AI only if explicitly allowed,
+            # or ai_parse_on_rematch for missing/unparseable rows (incl. hashed).
+            if allow_ai_parse:
+                ai_allowed = True
+            elif rematch_ai:
+                ai_allowed = parsed_needs_ai_fallback(req.parsed)
+            # Same revision already tried AI with no fields: keep markers after
+            # deterministic re-parse so the next rematch does not call AI again.
+            # Rematch always uses req.comment, so unhashed legacy rows qualify too.
+            if not ai_allowed and ai_parse_already_attempted(req.parsed):
+                carry_markers_from = req.parsed
+
+        if profile == "graduate":
+            ev = await self._evaluate_graduate_request(
+                event,
+                allow_ai_parse=ai_allowed,
+                stored_parsed=stored,
+            )
+        else:
+            ev = await self._evaluate_undergraduate_request(
+                event,
+                allow_ai_parse=ai_allowed,
+                stored_parsed=stored,
+            )
+        if carry_markers_from is not None:
+            carry_ai_attempt_markers(ev.parsed, carry_markers_from)
         return ev.mode, ev.parsed, ev.match, ev.decision
 
     async def rematch_active_pending(
@@ -617,8 +718,16 @@ class AuditPipeline:
             old_parsed = req.parsed or {}
             old_match = req.match or {}
 
-            mode, parsed, match, decision = await self._evaluate_pending_fields(req)
-            new_parsed = _parsed_to_dict(parsed)
+            mode, parsed, match, decision = await self._evaluate_pending_fields(
+                req,
+                allow_ai_parse=False,
+                reuse_stored_parsed=True,
+            )
+            new_parsed = _parsed_to_dict(
+                parsed,
+                comment=req.comment or "",
+                profile=req_profile,
+            )
             new_match = _match_to_dict(match)
 
             changed = (
@@ -688,7 +797,35 @@ class AuditPipeline:
             or resolve_profile(event.group_id, self.settings)
             or "undergraduate"
         )
-        evaluation = await self._evaluate_request(event, profile=profile)
+        comment_changed = old_comment != new_comment
+        stored = None
+        allow_ai = True
+        # Same answer revision (exact or whitespace-normalized hash): rematch only.
+        if comment_hash_matches(existing.parsed, new_comment):
+            if profile == "graduate":
+                stored = grad_parsed_from_dict(existing.parsed, new_comment)
+            else:
+                stored = undergrad_parsed_from_dict(existing.parsed, new_comment)
+            allow_ai = False
+        elif (
+            not comment_changed
+            and can_reuse_stored_parsed(
+                existing.parsed,
+                new_comment,
+                allow_unhashed_without_raw=True,
+            )
+        ):
+            if profile == "graduate":
+                stored = grad_parsed_from_dict(existing.parsed, new_comment)
+            else:
+                stored = undergrad_parsed_from_dict(existing.parsed, new_comment)
+            allow_ai = False
+        evaluation = await self._evaluate_request(
+            event,
+            profile=profile,
+            allow_ai_parse=allow_ai,
+            stored_parsed=stored,
+        )
         mode, parsed, match, decision = (
             evaluation.mode,
             evaluation.parsed,
@@ -705,7 +842,7 @@ class AuditPipeline:
         update = {
             "comment": new_comment,
             "sub_type": event.sub_type,
-            "parsed": _parsed_to_dict(parsed),
+            "parsed": _parsed_to_dict(parsed, comment=new_comment, profile=profile),
             "match": _match_to_dict(match),
             "decision": decision.decision,
             "confidence": decision.confidence,
@@ -770,6 +907,7 @@ class AuditPipeline:
             attempt_no=int(existing.attempt_no or 1) + 1,
             event_time=event_time,
             fingerprint=fingerprint,
+            reuse_parsed_from=existing,
         )
         record: dict = {
             "type": "reapplication_created",
@@ -802,19 +940,55 @@ class AuditPipeline:
         event_time: str | None = None,
         fingerprint: str | None = None,
         profile: AuditProfile | None = None,
+        reuse_parsed_from: PendingRequest | None = None,
     ) -> str:
         resolved_profile = (
             profile
             or resolve_profile(event.group_id, self.settings)
             or "undergraduate"
         )
-        evaluation = await self._evaluate_request(event, profile=resolved_profile)
+        comment = event.comment or ""
+        source = reuse_parsed_from
+        if source is None and request_id:
+            source = await self.requests.get_by_id(request_id)
+
+        stored = None
+        allow_ai = True
+        carry_markers_from = None
+        if source is not None:
+            if can_reuse_stored_parsed(source.parsed, comment):
+                if resolved_profile == "graduate":
+                    stored = grad_parsed_from_dict(source.parsed, comment)
+                else:
+                    stored = undergrad_parsed_from_dict(source.parsed, comment)
+                allow_ai = False
+            elif is_same_comment_revision(
+                source.parsed,
+                comment,
+                allow_unhashed_without_raw=(source.comment or "") == comment,
+            ) and (
+                ai_parse_already_attempted(source.parsed)
+                or not parsed_needs_ai_fallback(source.parsed)
+            ):
+                # Same answer revision already evaluated / AI-attempted: no repeat LLM.
+                allow_ai = False
+                if ai_parse_already_attempted(source.parsed):
+                    carry_markers_from = source.parsed
+
+        evaluation = await self._evaluate_request(
+            event,
+            profile=resolved_profile,
+            allow_ai_parse=allow_ai,
+            stored_parsed=stored,
+        )
         mode, parsed, match, decision = (
             evaluation.mode,
             evaluation.parsed,
             evaluation.match,
             evaluation.decision,
         )
+        if carry_markers_from is not None:
+            carry_ai_attempt_markers(parsed, carry_markers_from)
 
         req_id = request_id or new_request_id()
         pending = PendingRequest(
@@ -824,7 +998,9 @@ class AuditPipeline:
             comment=event.comment or "",
             flag=event.flag,
             sub_type=event.sub_type,
-            parsed=_parsed_to_dict(parsed),
+            parsed=_parsed_to_dict(
+                parsed, comment=event.comment or "", profile=resolved_profile
+            ),
             match=_match_to_dict(match),
             decision=decision.decision,
             confidence=decision.confidence,
@@ -930,7 +1106,7 @@ class AuditPipeline:
                 and decision.decision == "manual_review"
             ):
                 try:
-                    notify_parsed = dict(pending.parsed or {})
+                    notify_parsed = strip_internal_parsed_keys(pending.parsed or {})
                     notify_parsed["_profile"] = getattr(pending, "profile", None) or "undergraduate"
                     match_dict = pending.match or {}
                     if match_dict.get("college") and not notify_parsed.get("college"):
@@ -985,7 +1161,7 @@ class AuditPipeline:
                         or (pending.match or {}).get("strength")
                     ),
                     action_message=action_result.message,
-                    parsed=pending.parsed or {},
+                    parsed=strip_internal_parsed_keys(pending.parsed or {}),
                 )
 
     async def _record_action_outcome(

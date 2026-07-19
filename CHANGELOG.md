@@ -2,6 +2,36 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.17] - 2026-07-19
+
+### 优化
+
+- AI parser 生命周期：同一版答案只调用一次 AI；catchup/release/rematch 默认复用 stored parsed
+- AI evidence 改为 answer-only，避免从题目模板「硕or博」误取录取类型
+- 修正 AI auto-approve guard 顺序，确保默认不允许 AI 触发自动通过
+- 新增 `ai_parse_on_rematch`（默认 false）
+
+### 修复
+
+- rematch 复用研究生 stored parsed 时仍执行名单补全（`complete_graduate_parse_from_roster`）
+- `ai_parse_on_rematch` 对 hash 匹配但无字段的记录仍可补一次 AI
+- comment 仅空白/分隔符空格变化时按 `_comment_hash` 复用 parsed，不重复调用 AI
+- 无答案段时不把题目模板当作 evidence；姓名中的「硕/博」不计入录取类型
+- 无 `_comment_hash` 的历史 pending 默认复用可用 stored parsed，避免 rematch 降级
+- AI 合并后残留的 `unable to parse` 不再阻止复用 stored parsed
+- 保留「问题：…\\n答案行」无显式「答案：」标记时的答案段提取
+- 紧凑答案「姓名生物学博」在已校验姓名后仍可保留硕/博类型证据；无姓名时不从「欧阳博」误剥
+- comment hash 分隔符补齐全角分号 `；`
+- AI evidence 分隔符对齐 `;；＋`；录取类型别名对齐 `MSc`/`doctor` 等，占位 `MSc/PhD` 视为 ambiguous
+- 短别名 `dr`/`ma` 仅做整词匹配，避免 `Drama` 误成博士
+- 歧义正则对 `ma`/`dr` 使用词边界，避免 `Drama/PhD` 误判 ambiguous
+- 同一版答案若已标记 `ai_parse_used`，rematch/retry 确定性重解析会保留该标记（含无 hash 历史行）
+- failed retry 在 `source.comment` 未变时，即使无 hash/raw 也视为同版答案，不重复调 AI
+- rematch 复用 stored 时仍跑 deterministic，仅用 stored 补缺口，避免仅有姓名的旧 parsed 挡升级
+- 仅当 stored 真正补上字段时保留 `ai_parse_merged`，避免 deterministic 已能 strong 却被 guard 挡 release
+- 歧义扫描前剥离已校验姓名，避免「王硕博」误伤真实「博士」
+- failed retry / supersede / reapply 在 hash 匹配时复用 stored parsed
+
 ## [v0.4.16] - 2026-07-19
 
 ### 新增

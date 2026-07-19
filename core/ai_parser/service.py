@@ -165,12 +165,16 @@ def apply_ai_auto_approve_guard(
     *,
     allow_auto_approve: bool,
 ) -> DecisionResult:
-    """When AI merged fields and allow_auto_approve is false, force manual_review."""
+    """When AI merged fields and allow_auto_approve is false, force manual_review.
+
+    Must run AFTER apply_*_auto_approve_flag so should_auto_approve cannot be
+    restored from an approve decision.
+    """
     if allow_auto_approve:
         return decision
     if not ai_parse_was_merged(parsed):
         return decision
-    if decision.decision != "approve":
+    if decision.decision != "approve" and not decision.should_auto_approve:
         return decision
     decision.decision = "manual_review"
     decision.should_auto_approve = False

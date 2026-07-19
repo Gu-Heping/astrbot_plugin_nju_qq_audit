@@ -5,6 +5,7 @@ import re
 from core.ai_parser.schema import ai_fields_json_schema_hint
 from core.parser import ANSWER_MARKER_PATTERN, extract_answer_segment
 
+
 _QUESTION_MARKER = re.compile(r"问题\s*[：:]\s*", re.IGNORECASE)
 
 
@@ -62,9 +63,26 @@ def build_ai_parse_messages(
 
 
 def split_question_answer(raw: str) -> tuple[str, str]:
-    answer = extract_answer_segment(raw) or (raw or "")
-    question = extract_question_segment(raw)
-    return question, answer
+    """Split QQ verify text into (question, answer).
+
+    When an explicit ``答案：`` marker exists, never fall back to the full raw
+    text (empty answer stays empty).
+
+    When a question line exists without ``答案：``, keep newline-separated answer
+    text from ``extract_answer_segment``; only treat answer as empty when the
+    remainder is missing or identical to the question template.
+    """
+    text = raw or ""
+    question = extract_question_segment(text)
+    has_answer_marker = bool(ANSWER_MARKER_PATTERN.search(text))
+    extracted = (extract_answer_segment(text) or "").strip()
+    if has_answer_marker:
+        return question, extracted
+    if question:
+        if not extracted or extracted == question.strip():
+            return question, ""
+        return question, extracted
+    return question, extracted or text
 
 
 def flatten_messages_for_astrbot(messages: list[dict[str, str]]) -> tuple[str, str]:

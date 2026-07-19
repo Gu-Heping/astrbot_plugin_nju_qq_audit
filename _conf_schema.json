@@ -296,6 +296,11 @@
     "type": "bool",
     "default": false
   },
+  "ai_parse_on_rematch": {
+    "description": "批量 rematch/catchup/release 时，若 stored parsed 缺失或无法解析，是否允许补一次 AI（默认 false）",
+    "type": "bool",
+    "default": false
+  },
   "ai_parse_log_raw": {
     "description": "是否记录更详细 AI 调试信息（仅本地调试，不建议线上开启）",
     "type": "bool",
