@@ -313,6 +313,41 @@ async def test_ai_attempted_no_fields_rematch_does_not_recall_ai(tmp_path, ai_ca
 
 
 @pytest.mark.asyncio
+async def test_legacy_unhashed_ai_markers_survive_rematch(tmp_path, ai_calls):
+    """Pre-hash rows with ai_parse_used must keep markers across rematch."""
+    pipe = _pipeline(
+        tmp_path,
+        students=[_student()],
+        extra_settings={"ai_parse_on_rematch": True},
+    )
+    await pipe.requests.upsert(
+        PendingRequest(
+            id="r4g",
+            group_id=GROUP_ID,
+            user_id="4",
+            comment="答案：无法解析",
+            flag="f4g",
+            sub_type="add",
+            status="pending",
+            decision="manual_review",
+            confidence=0,
+            reason="x",
+            mode="auto",
+            created_at="t",
+            parsed={"parse_errors": ["unable to parse any field", "ai_parse_used"]},
+            match={},
+            profile="undergraduate",
+        )
+    )
+    await pipe.rematch_active_pending(source="catchup")
+    assert len(ai_calls) == 0
+    updated = await pipe.requests.get_by_id("r4g")
+    assert "ai_parse_used" in (updated.parsed.get("parse_errors") or [])
+    await pipe.rematch_active_pending(source="catchup")
+    assert len(ai_calls) == 0
+
+
+@pytest.mark.asyncio
 async def test_failed_retry_same_comment_reuses_parsed(tmp_path, ai_calls):
     comment = "答案：何聿璿+261880009+技术科学试验班"
     parsed = attach_parsed_meta(

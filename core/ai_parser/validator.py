@@ -13,8 +13,10 @@ _AMBIGUOUS_TYPE = re.compile(
     r"(硕\s*[/／或]\s*博|博\s*[/／或]\s*硕|"
     r"硕士\s*[/／或]\s*博士|博士\s*[/／或]\s*硕士|硕博|"
     r"硕\s*or\s*博|"
-    r"(?:msc|ma|mba|mpa|master)\s*[/／]\s*(?:phd|ph\.?d\.?|doctor|dr)|"
-    r"(?:phd|ph\.?d\.?|doctor|dr)\s*[/／]\s*(?:msc|ma|mba|mpa|master))",
+    # English slash placeholders — short ma/dr require non-letter boundaries
+    # so「Drama/PhD」「Cinema/Dr」do not look like master/doctor placeholders.
+    r"(?<![A-Za-z])(?:msc|mba|mpa|master|ma)\s*[/／]\s*(?:phd|ph\.?d\.?|doctor|dr)(?![A-Za-z])|"
+    r"(?<![A-Za-z])(?:phd|ph\.?d\.?|doctor|dr)\s*[/／]\s*(?:msc|mba|mpa|master|ma)(?![A-Za-z]))",
     re.IGNORECASE,
 )
 # Keep in sync with deterministic graduate separators (+ comment-hash seps).

@@ -25,6 +25,7 @@ from core.parsed_store import (
     carry_ai_attempt_markers,
     comment_hash_matches,
     grad_parsed_from_dict,
+    is_same_comment_revision,
     parsed_needs_ai_fallback,
     strip_internal_parsed_keys,
     undergrad_parsed_from_dict,
@@ -670,11 +671,8 @@ class AuditPipeline:
                 ai_allowed = parsed_needs_ai_fallback(req.parsed)
             # Same revision already tried AI with no fields: keep markers after
             # deterministic re-parse so the next rematch does not call AI again.
-            if (
-                not ai_allowed
-                and comment_hash_matches(req.parsed, req.comment or "")
-                and ai_parse_already_attempted(req.parsed)
-            ):
+            # Rematch always uses req.comment, so unhashed legacy rows qualify too.
+            if not ai_allowed and ai_parse_already_attempted(req.parsed):
                 carry_markers_from = req.parsed
 
         if profile == "graduate":
@@ -958,6 +956,7 @@ class AuditPipeline:
 
         stored = None
         allow_ai = True
+        carry_markers_from = None
         if source is not None:
             if can_reuse_stored_parsed(source.parsed, comment):
                 if resolved_profile == "graduate":
@@ -965,12 +964,14 @@ class AuditPipeline:
                 else:
                     stored = undergrad_parsed_from_dict(source.parsed, comment)
                 allow_ai = False
-            elif comment_hash_matches(source.parsed, comment) and (
+            elif is_same_comment_revision(source.parsed, comment) and (
                 ai_parse_already_attempted(source.parsed)
                 or not parsed_needs_ai_fallback(source.parsed)
             ):
                 # Same answer revision already evaluated / AI-attempted: no repeat LLM.
                 allow_ai = False
+                if ai_parse_already_attempted(source.parsed):
+                    carry_markers_from = source.parsed
 
         evaluation = await self._evaluate_request(
             event,
@@ -984,6 +985,8 @@ class AuditPipeline:
             evaluation.match,
             evaluation.decision,
         )
+        if carry_markers_from is not None:
+            carry_ai_attempt_markers(parsed, carry_markers_from)
 
         req_id = request_id or new_request_id()
         pending = PendingRequest(

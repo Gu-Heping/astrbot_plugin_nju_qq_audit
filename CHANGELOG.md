@@ -24,7 +24,8 @@
 - comment hash 分隔符补齐全角分号 `；`
 - AI evidence 分隔符对齐 `;；＋`；录取类型别名对齐 `MSc`/`doctor` 等，占位 `MSc/PhD` 视为 ambiguous
 - 短别名 `dr`/`ma` 仅做整词匹配，避免 `Drama` 误成博士
-- 同一版答案若已标记 `ai_parse_used`，rematch 不再重复调用 AI；确定性重解析会保留该标记
+- 歧义正则对 `ma`/`dr` 使用词边界，避免 `Drama/PhD` 误判 ambiguous
+- 同一版答案若已标记 `ai_parse_used`，rematch/retry 确定性重解析会保留该标记（含无 hash 历史行）
 - failed retry / supersede / reapply 在 hash 匹配时复用 stored parsed
 
 ## [v0.4.16] - 2026-07-19

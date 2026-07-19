@@ -71,6 +71,27 @@ def comment_hash_matches(stored: dict[str, Any] | None, comment: str) -> bool:
     return str(stored_hash) == compute_comment_hash(comment)
 
 
+def is_same_comment_revision(
+    stored: dict[str, Any] | None,
+    comment: str,
+    *,
+    allow_unhashed_without_raw: bool = False,
+) -> bool:
+    """True when stored metadata refers to the same answer revision as comment."""
+    if not stored:
+        return False
+    if comment_hash_matches(stored, comment):
+        return True
+    if not stored.get("_comment_hash"):
+        raw = str(stored.get("raw") or "")
+        if raw:
+            return normalize_comment_for_hash(raw) == normalize_comment_for_hash(
+                comment
+            )
+        return bool(allow_unhashed_without_raw)
+    return False
+
+
 def stored_parsed_has_fields(stored: dict[str, Any] | None) -> bool:
     """True when stored parse has at least one usable applicant field."""
     if not stored:
