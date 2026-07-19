@@ -92,28 +92,56 @@ def stored_parsed_has_fields(stored: dict[str, Any] | None) -> bool:
     )
 
 
-def parsed_needs_ai_fallback(stored: dict[str, Any] | None) -> bool:
-    """True when rematch may call AI: missing stored parse or no usable fields.
+_AI_ATTEMPTED_MARKERS = ("ai_parse_used", "ai_parse_merged", "ai_parse_shadow")
 
-    Stale ``unable to parse`` markers left beside ``ai_parse_merged`` fields must
-    NOT force another AI call or block reuse.
+
+def ai_parse_already_attempted(stored: dict[str, Any] | None) -> bool:
+    """True when this revision already invoked AI (success, shadow, or empty)."""
+    if not stored:
+        return False
+    errors = [str(e) for e in (stored.get("parse_errors") or [])]
+    return any(marker in errors for marker in _AI_ATTEMPTED_MARKERS)
+
+
+def parsed_needs_ai_fallback(stored: dict[str, Any] | None) -> bool:
+    """True when rematch may call AI for this stored row.
+
+    - Missing parse / no fields and never attempted AI → allow rematch AI.
+    - Usable fields present → no AI.
+    - AI already attempted for this revision (even with no fields) → no AI.
     """
     if not stored:
         return True
-    return not stored_parsed_has_fields(stored)
+    if stored_parsed_has_fields(stored):
+        return False
+    if ai_parse_already_attempted(stored):
+        return False
+    return True
 
 
 def can_reuse_stored_parsed(
-    stored: dict[str, Any] | None, comment: str
+    stored: dict[str, Any] | None,
+    comment: str,
+    *,
+    allow_unhashed_without_raw: bool = False,
 ) -> bool:
-    """Reuse when hash matches, or legacy usable parse without hash metadata."""
+    """Reuse when hash matches, or legacy usable parse for the same comment.
+
+    ``allow_unhashed_without_raw`` is for rematch of pre-hash rows that lack
+    ``raw``; never enable it when the caller may pass a *changed* comment
+    (reapply / supersede / failed retry).
+    """
     if not stored or not stored_parsed_has_fields(stored):
         return False
     if comment_hash_matches(stored, comment):
         return True
-    # Pre-v0.4.17 rows: no hash, but fields are still worth rematching.
     if not stored.get("_comment_hash"):
-        return True
+        raw = str(stored.get("raw") or "")
+        if raw:
+            return normalize_comment_for_hash(raw) == normalize_comment_for_hash(
+                comment
+            )
+        return bool(allow_unhashed_without_raw)
     return False
 
 

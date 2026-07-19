@@ -12,14 +12,38 @@ _NOTICE_NO_DIGIT = re.compile(r"^202[56]\d{4}$")
 _AMBIGUOUS_TYPE = re.compile(
     r"(硕\s*[/／或]\s*博|博\s*[/／或]\s*硕|"
     r"硕士\s*[/／或]\s*博士|博士\s*[/／或]\s*硕士|硕博|"
-    r"硕\s*or\s*博|master\s*[/／]\s*phd)",
+    r"硕\s*or\s*博|"
+    r"(?:msc|ma|mba|mpa|master)\s*[/／]\s*(?:phd|ph\.?d\.?|doctor|dr)|"
+    r"(?:phd|ph\.?d\.?|doctor|dr)\s*[/／]\s*(?:msc|ma|mba|mpa|master))",
     re.IGNORECASE,
 )
-_TOKEN_SPLIT = re.compile(r"[\s\u3000,，、+/／|]+")
+# Keep in sync with deterministic graduate separators (+ comment-hash seps).
+_TOKEN_SPLIT = re.compile(r"[\s\u3000,，、;；|+＋/／|]+")
 
-# Longer multi-char tokens first; single-char 硕/博 handled via token candidates.
-_MASTER_MULTI = ("硕士生", "硕士", "专硕", "学硕", "master")
-_DOCTOR_MULTI = ("博士生", "博士", "直博", "ph.d.", "ph.d", "phd")
+# Longer multi-char tokens first; aliases aligned with normalize_admission_type.
+_MASTER_MULTI = (
+    "硕士生",
+    "硕士",
+    "专硕",
+    "学硕",
+    "master",
+    "msc",
+    "mba",
+    "mpa",
+    "ma",
+)
+_DOCTOR_MULTI = (
+    "博士生",
+    "博士",
+    "直博",
+    "ph.d.",
+    "ph.d",
+    "phd",
+    "doctor",
+    "dr",
+)
+_MASTER_EXACT = frozenset({"硕", *_MASTER_MULTI})
+_DOCTOR_EXACT = frozenset({"博", *_DOCTOR_MULTI})
 
 
 def _in_text(needle: str | None, haystack: str) -> bool:
@@ -120,9 +144,9 @@ def _scan_admission_signals(
 
     for part in _type_token_candidates(answer, exclude_name=exclude_name):
         compact_part = part.replace(" ", "").replace("　", "").lower()
-        if compact_part in {"博", "博士", "博士生", "直博", "phd", "ph.d", "ph.d."}:
+        if compact_part in _DOCTOR_EXACT:
             found.add("博士")
-        elif compact_part in {"硕", "硕士", "硕士生", "专硕", "学硕", "master"}:
+        elif compact_part in _MASTER_EXACT:
             found.add("硕士")
 
     return found, False

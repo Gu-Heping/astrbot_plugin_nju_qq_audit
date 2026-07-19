@@ -19,6 +19,7 @@ from core.decision import apply_auto_approve_flag, make_decision, should_auto_ap
 from core.matcher import MatchResult, match_student
 from core.parser import parse_application_comment
 from core.parsed_store import (
+    ai_parse_already_attempted,
     attach_parsed_meta,
     can_reuse_stored_parsed,
     comment_hash_matches,
@@ -495,6 +496,7 @@ class AuditPipeline:
                     event_time=event_time,
                     fingerprint=fingerprint,
                     profile=profile,
+                    reuse_parsed_from=existing,
                 )
                 return
 
@@ -506,7 +508,9 @@ class AuditPipeline:
         active_pending = await self.requests.find_active_pending_by_user_group(
             event.group_id, event.user_id
         )
+        reuse_from = None
         if active_pending and active_pending.flag != event.flag:
+            reuse_from = active_pending
             await self.requests.supersede_pending(active_pending.flag, event.flag)
 
         await self._audit_and_act(
@@ -514,6 +518,7 @@ class AuditPipeline:
             event_time=event_time,
             fingerprint=fingerprint,
             profile=profile,
+            reuse_parsed_from=reuse_from,
         )
 
     async def _evaluate_undergraduate_request(
@@ -645,7 +650,9 @@ class AuditPipeline:
         ai_allowed = False
         rematch_ai = bool(getattr(self.settings, "ai_parse_on_rematch", False))
         if reuse_stored_parsed and can_reuse_stored_parsed(
-            req.parsed, req.comment or ""
+            req.parsed,
+            req.comment or "",
+            allow_unhashed_without_raw=True,
         ):
             if profile == "graduate":
                 stored = grad_parsed_from_dict(req.parsed, req.comment or "")
@@ -794,7 +801,11 @@ class AuditPipeline:
             allow_ai = False
         elif (
             not comment_changed
-            and can_reuse_stored_parsed(existing.parsed, new_comment)
+            and can_reuse_stored_parsed(
+                existing.parsed,
+                new_comment,
+                allow_unhashed_without_raw=True,
+            )
         ):
             if profile == "graduate":
                 stored = grad_parsed_from_dict(existing.parsed, new_comment)
@@ -888,6 +899,7 @@ class AuditPipeline:
             attempt_no=int(existing.attempt_no or 1) + 1,
             event_time=event_time,
             fingerprint=fingerprint,
+            reuse_parsed_from=existing,
         )
         record: dict = {
             "type": "reapplication_created",
@@ -920,14 +932,39 @@ class AuditPipeline:
         event_time: str | None = None,
         fingerprint: str | None = None,
         profile: AuditProfile | None = None,
+        reuse_parsed_from: PendingRequest | None = None,
     ) -> str:
         resolved_profile = (
             profile
             or resolve_profile(event.group_id, self.settings)
             or "undergraduate"
         )
+        comment = event.comment or ""
+        source = reuse_parsed_from
+        if source is None and request_id:
+            source = await self.requests.get_by_id(request_id)
+
+        stored = None
+        allow_ai = True
+        if source is not None:
+            if can_reuse_stored_parsed(source.parsed, comment):
+                if resolved_profile == "graduate":
+                    stored = grad_parsed_from_dict(source.parsed, comment)
+                else:
+                    stored = undergrad_parsed_from_dict(source.parsed, comment)
+                allow_ai = False
+            elif comment_hash_matches(source.parsed, comment) and (
+                ai_parse_already_attempted(source.parsed)
+                or not parsed_needs_ai_fallback(source.parsed)
+            ):
+                # Same answer revision already evaluated / AI-attempted: no repeat LLM.
+                allow_ai = False
+
         evaluation = await self._evaluate_request(
-            event, profile=resolved_profile, allow_ai_parse=True
+            event,
+            profile=resolved_profile,
+            allow_ai_parse=allow_ai,
+            stored_parsed=stored,
         )
         mode, parsed, match, decision = (
             evaluation.mode,

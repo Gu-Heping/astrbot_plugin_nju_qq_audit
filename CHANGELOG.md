@@ -22,6 +22,9 @@
 - 保留「问题：…\\n答案行」无显式「答案：」标记时的答案段提取
 - 紧凑答案「姓名生物学博」在已校验姓名后仍可保留硕/博类型证据；无姓名时不从「欧阳博」误剥
 - comment hash 分隔符补齐全角分号 `；`
+- AI evidence 分隔符对齐 `;；＋`；录取类型别名对齐 `MSc`/`doctor` 等，占位 `MSc/PhD` 视为 ambiguous
+- 同一版答案若已标记 `ai_parse_used`，rematch 不再重复调用 AI
+- failed retry / supersede / reapply 在 hash 匹配时复用 stored parsed
 
 ## [v0.4.16] - 2026-07-19
 

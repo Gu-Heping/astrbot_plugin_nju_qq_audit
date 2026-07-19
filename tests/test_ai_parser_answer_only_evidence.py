@@ -226,3 +226,64 @@ def test_compact_major_bo_after_validated_name_kept():
     assert fields.name == "陈俊毅"
     assert fields.major == "生物学"
     assert fields.admission_type == "博士"
+
+
+def test_semicolon_separated_bo_kept():
+    fields = _fields(
+        name="陈俊毅",
+        major="生物学",
+        admission_type="博士",
+        evidence={"name": "陈俊毅", "major": "生物学", "admission_type": "博"},
+    )
+    fields = validate_ai_fields(
+        fields,
+        question="姓名 专业 硕or博",
+        answer="陈俊毅；博；生物学",
+    )
+    assert fields.admission_type == "博士"
+
+
+def test_fullwidth_plus_separated_bo_kept():
+    fields = _fields(
+        name="陈俊毅",
+        major="生物学",
+        admission_type="博士",
+        evidence={"name": "陈俊毅", "major": "生物学", "admission_type": "博"},
+    )
+    fields = validate_ai_fields(
+        fields,
+        question="",
+        answer="陈俊毅＋博＋生物学",
+    )
+    assert fields.admission_type == "博士"
+
+
+def test_msc_alone_is_master():
+    fields = _fields(
+        name="张三",
+        major="生物学",
+        admission_type="硕士",
+        evidence={"name": "张三", "major": "生物学", "admission_type": "MSc"},
+    )
+    fields = validate_ai_fields(
+        fields,
+        question="",
+        answer="张三 生物学 MSc",
+    )
+    assert fields.admission_type == "硕士"
+
+
+def test_msc_slash_phd_ambiguous():
+    fields = _fields(
+        name="张三",
+        major="生物学",
+        admission_type="博士",
+        evidence={"name": "张三", "major": "生物学", "admission_type": "PhD"},
+    )
+    fields = validate_ai_fields(
+        fields,
+        question="",
+        answer="张三 生物学 MSc/PhD",
+    )
+    assert fields.admission_type is None
+    assert fields.ambiguous is True

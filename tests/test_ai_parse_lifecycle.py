@@ -271,6 +271,92 @@ async def test_legacy_pending_without_hash_preserves_ai_fields(tmp_path, ai_call
 
 
 @pytest.mark.asyncio
+async def test_ai_attempted_no_fields_rematch_does_not_recall_ai(tmp_path, ai_calls):
+    comment = "答案：无法解析"
+    parsed = attach_parsed_meta(
+        {"parse_errors": ["unable to parse any field", "ai_parse_used"]},
+        comment=comment,
+        profile="undergraduate",
+    )
+    pipe = _pipeline(
+        tmp_path,
+        students=[_student()],
+        extra_settings={"ai_parse_on_rematch": True},
+    )
+    await pipe.requests.upsert(
+        PendingRequest(
+            id="r4e",
+            group_id=GROUP_ID,
+            user_id="4",
+            comment=comment,
+            flag="f4e",
+            sub_type="add",
+            status="pending",
+            decision="manual_review",
+            confidence=0,
+            reason="x",
+            mode="auto",
+            created_at="t",
+            parsed=parsed,
+            match={},
+            profile="undergraduate",
+        )
+    )
+    await pipe.rematch_active_pending(source="catchup")
+    assert len(ai_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_retry_same_comment_reuses_parsed(tmp_path, ai_calls):
+    comment = "答案：何聿璿+261880009+技术科学试验班"
+    parsed = attach_parsed_meta(
+        {
+            "name": "何聿璿",
+            "student_id": "261880009",
+            "major": "技术科学试验班",
+            "parse_errors": ["ai_parse_merged"],
+        },
+        comment=comment,
+        profile="undergraduate",
+    )
+    pipe = _pipeline(tmp_path, students=[_student()])
+    existing = PendingRequest(
+        id="r4f",
+        group_id=GROUP_ID,
+        user_id="4",
+        comment=comment,
+        flag="f4f",
+        sub_type="add",
+        status="failed",
+        decision="approve",
+        confidence=0,
+        reason="x",
+        mode="auto",
+        created_at="t",
+        parsed=parsed,
+        match={"strength": "strong"},
+        match_strength="strong",
+        profile="undergraduate",
+        processed_at="t",
+    )
+    await pipe.requests.upsert(existing)
+    event = GroupJoinRequest(
+        group_id=GROUP_ID,
+        user_id="4",
+        comment=comment,
+        flag="f4f",
+        sub_type="add",
+    )
+    await pipe._audit_and_act(
+        event,
+        resubmit=True,
+        request_id=existing.id,
+        reuse_parsed_from=existing,
+    )
+    assert len(ai_calls) == 0
+
+
+@pytest.mark.asyncio
 async def test_ai_parse_on_rematch_hashed_unable_to_parse(tmp_path, ai_calls):
     comment = "答案：test"
     parsed = attach_parsed_meta(
