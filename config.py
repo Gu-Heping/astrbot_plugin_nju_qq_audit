@@ -111,6 +111,7 @@ class PluginSettings:
     ai_parse_timeout_ms: int = 3000
     ai_parse_max_chars: int = 500
     ai_parse_allow_auto_approve: bool = False
+    ai_parse_on_rematch: bool = False
     ai_parse_log_raw: bool = False
 
     def __repr__(self) -> str:
@@ -360,6 +361,7 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         ai_parse_allow_auto_approve=bool(
             config.get("ai_parse_allow_auto_approve", False)
         ),
+        ai_parse_on_rematch=bool(config.get("ai_parse_on_rematch", False)),
         ai_parse_log_raw=bool(config.get("ai_parse_log_raw", False)),
     )
 

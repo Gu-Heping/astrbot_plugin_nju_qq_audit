@@ -2,6 +2,15 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.17] - 2026-07-19
+
+### 优化
+
+- AI parser 生命周期：同一版答案只调用一次 AI；catchup/release/rematch 默认复用 stored parsed
+- AI evidence 改为 answer-only，避免从题目模板「硕or博」误取录取类型
+- 修正 AI auto-approve guard 顺序，确保默认不允许 AI 触发自动通过
+- 新增 `ai_parse_on_rematch`（默认 false）
+
 ## [v0.4.16] - 2026-07-19
 
 ### 新增
