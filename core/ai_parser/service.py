@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 import logging
 import re
 from typing import Any
 
-from config import PluginSettings
+from config import PluginSettings, redact_tokens_in_string
 from core.ai_parser.client import (
     call_openai_compatible_json,
     parse_model_response,
@@ -18,6 +20,20 @@ from core.parser import ParsedApplication
 from graduate.models import GraduateParsedApplication
 
 logger = logging.getLogger(__name__)
+
+_SECRETISH_ERROR = re.compile(
+    r"(?i)(api[_-]?key|authorization|bearer|sk-|access[_-]?token|secret)"
+    r"[=:\s\"']*\S+"
+)
+
+
+def _safe_ai_error_text(exc: BaseException, settings: PluginSettings) -> str:
+    """Sanitize exception text before logging (no API keys / auth headers)."""
+    text = str(exc)[:400]
+    text = redact_tokens_in_string(text, settings)
+    text = _SECRETISH_ERROR.sub("***", text)
+    text = re.sub(r"(?i)\b[a-z0-9_\-]{32,}\b", "***", text)
+    return text[:200]
 
 _TEMPLATE_NAME_BAD = frozenset(
     {
@@ -169,12 +185,23 @@ def _log_ai_result(
     *,
     shadow: bool,
     merged: bool,
+    backend: str | None = None,
 ) -> None:
+    error = result.error
+    if error:
+        error = redact_tokens_in_string(error, settings)
+        error = _SECRETISH_ERROR.sub("***", error)[:200]
     payload = {
         "ai_parse_used": True,
+        "ai_parse_backend": backend or getattr(settings, "ai_parse_backend", None),
         "ok": result.ok,
-        "error": result.error,
+        "error": error,
         "model": result.model,
+        "provider_id": (
+            result.model.split(":", 1)[1]
+            if result.model and str(result.model).startswith("astrbot_default:")
+            else None
+        ),
         "response_hash": result.raw_response_hash,
         "shadow": shadow,
         "merged": merged,
@@ -186,7 +213,17 @@ def _log_ai_result(
         logger.info("[ai_parse] %s", payload)
 
 
-def maybe_run_ai_parse(
+def _normalize_backend(settings: PluginSettings) -> str:
+    backend = (getattr(settings, "ai_parse_backend", None) or "").strip()
+    if not backend:
+        backend = (getattr(settings, "ai_parse_provider", None) or "").strip()
+    backend = backend or "openai_compatible"
+    if backend not in {"openai_compatible", "astrbot_default"}:
+        return "openai_compatible"
+    return backend
+
+
+async def maybe_run_ai_parse(
     settings: PluginSettings,
     *,
     profile: str,
@@ -194,12 +231,14 @@ def maybe_run_ai_parse(
     parsed: ParsedApplication | GraduateParsedApplication,
     incomplete: bool,
     client_call=None,
+    astrbot_context: Any = None,
+    umo: str | None = None,
 ) -> AiParseResult | None:
     """Optionally call AI. Shadow mode records only; non-shadow merges when incomplete.
 
     Returns AiParseResult when AI was invoked; None when skipped.
     client_call: optional injectable for tests
-      (messages, settings) -> (content_text, model_name)
+      sync or async (messages, settings) -> (content_text, model_name)
     """
     if not settings.ai_parse_enabled:
         return None
@@ -208,6 +247,7 @@ def maybe_run_ai_parse(
     if not shadow and not incomplete:
         return None
 
+    backend = _normalize_backend(settings)
     question, answer = split_question_answer(raw_comment)
     messages = build_ai_parse_messages(
         profile=profile,
@@ -224,25 +264,45 @@ def maybe_run_ai_parse(
 
     try:
         if client_call is not None:
-            content, model_name = client_call(messages, settings)
+            maybe = client_call(messages, settings)
+            if inspect.isawaitable(maybe):
+                content, model_name = await maybe
+            else:
+                content, model_name = maybe
+        elif backend == "astrbot_default":
+            from core.ai_parser.astrbot_client import call_astrbot_default_llm
+
+            content, model_name = await call_astrbot_default_llm(
+                astrbot_context,
+                messages,
+                umo=umo,
+                timeout_ms=settings.ai_parse_timeout_ms,
+                temperature=0.0,
+            )
         else:
             if not settings.ai_parse_base_url or not settings.ai_parse_model:
                 result = AiParseResult(ok=False, error="ai_parse config incomplete")
                 _mark_shadow_or_used(parsed, shadow=shadow, model=None)
-                _log_ai_result(settings, result, shadow=shadow, merged=False)
+                _log_ai_result(
+                    settings, result, shadow=shadow, merged=False, backend=backend
+                )
                 return result
             if not api_key:
                 result = AiParseResult(ok=False, error="ai api key missing")
                 _mark_shadow_or_used(parsed, shadow=shadow, model=None)
-                _log_ai_result(settings, result, shadow=shadow, merged=False)
+                _log_ai_result(
+                    settings, result, shadow=shadow, merged=False, backend=backend
+                )
                 return result
-            content, meta = call_openai_compatible_json(
-                base_url=settings.ai_parse_base_url,
-                api_key=api_key,
-                model=settings.ai_parse_model,
-                messages=messages,
-                timeout_ms=settings.ai_parse_timeout_ms,
-                temperature=0.0,
+            content, meta = await asyncio.to_thread(
+                lambda: call_openai_compatible_json(
+                    base_url=settings.ai_parse_base_url,
+                    api_key=api_key,
+                    model=settings.ai_parse_model,
+                    messages=messages,
+                    timeout_ms=settings.ai_parse_timeout_ms,
+                    temperature=0.0,
+                )
             )
             model_name = str(meta.get("model") or settings.ai_parse_model)
         result = parse_model_response(
@@ -251,9 +311,13 @@ def maybe_run_ai_parse(
             model=model_name,
         )
     except Exception as exc:  # noqa: BLE001 — fallback to deterministic parser
-        result = AiParseResult(ok=False, error=str(exc)[:200], model=settings.ai_parse_model)
-        _mark_shadow_or_used(parsed, shadow=shadow, model=settings.ai_parse_model)
-        _log_ai_result(settings, result, shadow=shadow, merged=False)
+        result = AiParseResult(
+            ok=False,
+            error=_safe_ai_error_text(exc, settings),
+            model=settings.ai_parse_model or backend,
+        )
+        _mark_shadow_or_used(parsed, shadow=shadow, model=result.model)
+        _log_ai_result(settings, result, shadow=shadow, merged=False, backend=backend)
         return result
 
     if result.ok and result.fields is not None:
@@ -277,7 +341,7 @@ def maybe_run_ai_parse(
         _append_marker(parsed.parse_errors, "ai_parse_used")
         _append_model_marker(parsed.parse_errors, result.model)
 
-    _log_ai_result(settings, result, shadow=shadow, merged=merged)
+    _log_ai_result(settings, result, shadow=shadow, merged=merged, backend=backend)
     return result
 
 

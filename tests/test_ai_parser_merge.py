@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from config import PluginSettings, load_settings
 from core.ai_parser.models import AiParsedFields
 from core.ai_parser.service import (
@@ -110,7 +112,8 @@ def test_grad_merge_compact():
     assert parsed.admission_type == "博士"
 
 
-def test_grad_missing_evidence_dropped_via_service(monkeypatch):
+@pytest.mark.asyncio
+async def test_grad_missing_evidence_dropped_via_service(monkeypatch):
     settings = load_settings(
         DummyConfig(
             {
@@ -138,7 +141,7 @@ def test_grad_missing_evidence_dropped_via_service(monkeypatch):
 
     parsed = parse_graduate_comment("答案：陈俊毅生物学博")
     before = (parsed.name, parsed.major_text, parsed.admission_type)
-    result = maybe_run_ai_parse(
+    result = await maybe_run_ai_parse(
         settings,
         profile="graduate",
         raw_comment="答案：陈俊毅生物学博",
@@ -155,7 +158,8 @@ def test_grad_missing_evidence_dropped_via_service(monkeypatch):
         assert result.fields.major is None
 
 
-def test_shadow_mode_does_not_change_parsed_match_decision():
+@pytest.mark.asyncio
+async def test_shadow_mode_does_not_change_parsed_match_decision():
     settings = load_settings(
         DummyConfig(
             {
@@ -181,7 +185,7 @@ def test_shadow_mode_does_not_change_parsed_match_decision():
             "test-model",
         )
 
-    maybe_run_ai_parse(
+    await maybe_run_ai_parse(
         settings,
         profile="undergraduate",
         raw_comment=comment,
@@ -239,7 +243,8 @@ def test_ai_assist_strong_stays_manual_when_auto_approve_disallowed():
     assert "AI 辅助解析" in decision.reason
 
 
-def test_non_shadow_merge_fills_missing_fields():
+@pytest.mark.asyncio
+async def test_non_shadow_merge_fills_missing_fields():
     settings = load_settings(
         DummyConfig(
             {
@@ -262,7 +267,7 @@ def test_non_shadow_merge_fills_missing_fields():
             "test-model",
         )
 
-    maybe_run_ai_parse(
+    await maybe_run_ai_parse(
         settings,
         profile="undergraduate",
         raw_comment="答案：何聿璿+261880009+技术科学试验班",

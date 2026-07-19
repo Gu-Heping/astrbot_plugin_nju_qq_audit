@@ -65,3 +65,19 @@ def split_question_answer(raw: str) -> tuple[str, str]:
     answer = extract_answer_segment(raw) or (raw or "")
     question = extract_question_segment(raw)
     return question, answer
+
+
+def flatten_messages_for_astrbot(messages: list[dict[str, str]]) -> tuple[str, str]:
+    """Split chat messages into (system_prompt, user_prompt) for AstrBot llm_generate."""
+    system_parts: list[str] = []
+    user_parts: list[str] = []
+    for message in messages:
+        role = (message.get("role") or "").strip().lower()
+        content = str(message.get("content") or "")
+        if not content:
+            continue
+        if role == "system":
+            system_parts.append(content)
+        else:
+            user_parts.append(content)
+    return "\n\n".join(system_parts).strip(), "\n\n".join(user_parts).strip()

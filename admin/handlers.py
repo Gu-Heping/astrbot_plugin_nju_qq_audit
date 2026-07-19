@@ -62,6 +62,7 @@ class PluginContext:
             self.actions,
             self.notifier,
             grad_cache=self.grad_cache,
+            astrbot_context=astrbot_context,
         )
         self._http_session: aiohttp.ClientSession | None = None
         self._platform_id: str | None = None
@@ -92,7 +93,12 @@ class PluginContext:
             self.list_cache,
             display=getattr(self, "display", None),
         )
-        self.pipeline.reload_settings(self.settings, self.actions, self.notifier)
+        self.pipeline.reload_settings(
+            self.settings,
+            self.actions,
+            self.notifier,
+            astrbot_context=self.astrbot_context,
+        )
         self._adapter_probe = {}
 
     async def start(self) -> None:

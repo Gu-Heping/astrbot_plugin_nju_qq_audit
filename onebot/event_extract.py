@@ -15,6 +15,9 @@ class GroupJoinRequest:
     sub_type: str
     self_id: str | None = None
     raw_event: dict[str, Any] | None = None
+    # AstrBot unified_msg_origin for session-scoped LLM provider resolution.
+    # Never send this value to AI prompts; only used for provider lookup.
+    umo: str | None = None
 
 
 def extract_raw_dict(message_obj: Any) -> dict[str, Any] | None:
