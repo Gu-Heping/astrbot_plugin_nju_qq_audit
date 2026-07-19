@@ -152,7 +152,9 @@ async def test_rematch_same_comment_does_not_call_ai(tmp_path, ai_calls):
     assert updated is not None
     assert updated.parsed.get("name") == "何聿璿"
     assert updated.parsed.get("student_id") == "261880009"
-    assert "ai_parse_merged" in (updated.parsed.get("parse_errors") or [])
+    errors = updated.parsed.get("parse_errors") or []
+    assert "ai_parse_merged" not in errors or "ai_parse_used" in errors
+    assert any(m in errors for m in ("ai_parse_used", "ai_parse_merged", "ai_parse_shadow"))
 
 
 @pytest.mark.asyncio
@@ -516,7 +518,8 @@ async def test_whitespace_only_comment_change_reuses_parsed(tmp_path, ai_calls):
     assert len(ai_calls) == 0
     updated = await pipe.requests.get_by_id("r4c")
     assert updated.parsed.get("name") == "何聿璿"
-    assert "ai_parse_merged" in (updated.parsed.get("parse_errors") or [])
+    errors = updated.parsed.get("parse_errors") or []
+    assert any(m in errors for m in ("ai_parse_used", "ai_parse_merged", "ai_parse_shadow"))
 
 
 @pytest.mark.asyncio
@@ -621,7 +624,8 @@ async def test_catchup_paths_do_not_call_ai(tmp_path, ai_calls):
     await pipe.rematch_active_pending(source="catchup_batch")
     assert len(ai_calls) == 0
     updated = await pipe.requests.get_by_id("r7")
-    assert "ai_parse_merged" in (updated.parsed.get("parse_errors") or [])
+    errors = updated.parsed.get("parse_errors") or []
+    assert any(m in errors for m in ("ai_parse_used", "ai_parse_merged", "ai_parse_shadow"))
 
 
 @pytest.mark.asyncio
@@ -691,7 +695,11 @@ async def test_partial_stored_rematch_upgrades_via_deterministic(tmp_path, ai_ca
     updated = await pipe.requests.get_by_id("r9")
     assert updated.parsed.get("student_id") == "261880009"
     assert updated.match_strength == "strong"
-    assert "ai_parse_merged" in (updated.parsed.get("parse_errors") or [])
+    # Deterministic extracted credentials → do not keep ai_parse_merged (release-safe),
+    # but keep an attempt marker so rematch won't call AI again.
+    assert "ai_parse_merged" not in (updated.parsed.get("parse_errors") or [])
+    assert "ai_parse_used" in (updated.parsed.get("parse_errors") or [])
+    assert updated.decision == "approve"
 
 
 @pytest.mark.asyncio

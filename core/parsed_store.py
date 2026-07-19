@@ -129,19 +129,18 @@ def carry_ai_attempt_markers(parsed: Any, source: dict[str, Any] | None) -> None
 
     Rematch may re-run deterministic parse without calling AI; without carrying
     markers, the next rematch would think AI was never attempted.
+
+    Does not copy ``ai_parse_merged`` — that marker must only survive when a
+    stored AI field actually filled a gap (see fill_*_gaps_from_stored).
     """
     if not source or not ai_parse_already_attempted(source):
         return
     errors = getattr(parsed, "parse_errors", None)
     if errors is None:
         return
-    for item in source.get("parse_errors") or []:
-        text = str(item)
-        if text.startswith("ai_parse_model:") or any(
-            marker in text for marker in _AI_ATTEMPTED_MARKERS
-        ):
-            if text not in errors:
-                errors.append(text)
+    _carry_stored_parse_errors(
+        errors, source.get("parse_errors"), include_merged=False
+    )
 
 
 def parsed_needs_ai_fallback(stored: dict[str, Any] | None) -> bool:
@@ -197,27 +196,30 @@ def fill_undergrad_gaps_from_stored(
     fresh: ParsedApplication, stored: ParsedApplication
 ) -> ParsedApplication:
     """Keep deterministic fields; fill only missing slots from stored (e.g. AI)."""
+    filled_from_stored = False
     if not fresh.name and stored.name:
         fresh.name = stored.name
+        filled_from_stored = True
     if not fresh.student_id and stored.student_id:
         fresh.student_id = stored.student_id
+        filled_from_stored = True
     if not fresh.notice_no and stored.notice_no:
         fresh.notice_no = stored.notice_no
+        filled_from_stored = True
     if not fresh.major and stored.major:
         fresh.major = stored.major
+        filled_from_stored = True
     if not fresh.academy and stored.academy:
         fresh.academy = stored.academy
+        filled_from_stored = True
     if not fresh.notice_no_candidates and stored.notice_no_candidates:
         fresh.notice_no_candidates = list(stored.notice_no_candidates)
-    for err in stored.parse_errors or []:
-        text = str(err)
-        if text not in fresh.parse_errors:
-            if text.startswith("ai_parse_model:") or any(
-                marker in text for marker in _AI_ATTEMPTED_MARKERS
-            ):
-                fresh.parse_errors.append(text)
-            elif "unable to parse" in text and not fresh.name and not fresh.student_id:
-                fresh.parse_errors.append(text)
+        filled_from_stored = True
+    _carry_stored_parse_errors(
+        fresh.parse_errors,
+        stored.parse_errors,
+        include_merged=filled_from_stored,
+    )
     return fresh
 
 
@@ -225,24 +227,63 @@ def fill_grad_gaps_from_stored(
     fresh: GraduateParsedApplication, stored: GraduateParsedApplication
 ) -> GraduateParsedApplication:
     """Keep deterministic fields; fill only missing slots from stored (e.g. AI)."""
+    filled_from_stored = False
     if not fresh.name and stored.name:
         fresh.name = stored.name
+        filled_from_stored = True
     if not fresh.major_text and stored.major_text:
         fresh.major_text = stored.major_text
+        filled_from_stored = True
     if not fresh.admission_type and stored.admission_type:
         fresh.admission_type = stored.admission_type
+        filled_from_stored = True
     if not fresh.admission_type_raw and stored.admission_type_raw:
         fresh.admission_type_raw = stored.admission_type_raw
+        filled_from_stored = True
     if not fresh.major_code_candidates and stored.major_code_candidates:
         fresh.major_code_candidates = list(stored.major_code_candidates)
-    for err in stored.parse_errors or []:
-        text = str(err)
-        if text not in fresh.parse_errors:
-            if text.startswith("ai_parse_model:") or any(
-                marker in text for marker in _AI_ATTEMPTED_MARKERS
-            ):
-                fresh.parse_errors.append(text)
+        filled_from_stored = True
+    _carry_stored_parse_errors(
+        fresh.parse_errors,
+        stored.parse_errors,
+        include_merged=filled_from_stored,
+    )
     return fresh
+
+
+def _carry_stored_parse_errors(
+    dest: list[str],
+    source: list[str] | None,
+    *,
+    include_merged: bool,
+) -> None:
+    """Carry AI attempt markers; only keep ai_parse_merged when a stored field was used."""
+    saw_attempt = False
+    for err in source or []:
+        text = str(err)
+        if text == "ai_parse_merged" or text in (
+            "ai_parse_used",
+            "ai_parse_shadow",
+        ) or text.startswith("ai_parse_model:"):
+            saw_attempt = True
+        if text in dest:
+            continue
+        if text == "ai_parse_merged":
+            if include_merged:
+                dest.append(text)
+            continue
+        if text.startswith("ai_parse_model:") or text in (
+            "ai_parse_used",
+            "ai_parse_shadow",
+        ):
+            dest.append(text)
+    # Deterministic won all fields: drop merged, but keep a used marker so rematch
+    # does not re-call AI for the same answer revision.
+    if saw_attempt and not include_merged:
+        if not any(
+            m in dest for m in ("ai_parse_used", "ai_parse_shadow", "ai_parse_merged")
+        ):
+            dest.append("ai_parse_used")
 
 
 def attach_parsed_meta(

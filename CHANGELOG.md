@@ -28,6 +28,7 @@
 - 同一版答案若已标记 `ai_parse_used`，rematch/retry 确定性重解析会保留该标记（含无 hash 历史行）
 - failed retry 在 `source.comment` 未变时，即使无 hash/raw 也视为同版答案，不重复调 AI
 - rematch 复用 stored 时仍跑 deterministic，仅用 stored 补缺口，避免仅有姓名的旧 parsed 挡升级
+- 仅当 stored 真正补上字段时保留 `ai_parse_merged`，避免 deterministic 已能 strong 却被 guard 挡 release
 - 歧义扫描前剥离已校验姓名，避免「王硕博」误伤真实「博士」
 - failed retry / supersede / reapply 在 hash 匹配时复用 stored parsed
 
