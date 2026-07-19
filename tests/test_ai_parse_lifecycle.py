@@ -656,6 +656,82 @@ async def test_legacy_empty_parsed_falls_back_to_deterministic(tmp_path, ai_call
     assert updated.match_strength == "strong"
 
 
+@pytest.mark.asyncio
+async def test_partial_stored_rematch_upgrades_via_deterministic(tmp_path, ai_calls):
+    """Stored name-only must still reparse comment credentials on rematch."""
+    comment = "何聿璿 261880009"
+    parsed = attach_parsed_meta(
+        {"name": "何聿璿", "parse_errors": ["ai_parse_merged"]},
+        comment=comment,
+        profile="undergraduate",
+    )
+    pipe = _pipeline(tmp_path, students=[_student()])
+    await pipe.requests.upsert(
+        PendingRequest(
+            id="r9",
+            group_id=GROUP_ID,
+            user_id="9",
+            comment=comment,
+            flag="f9",
+            sub_type="add",
+            status="pending",
+            decision="manual_review",
+            confidence=0,
+            reason="x",
+            mode="auto",
+            created_at="t",
+            parsed=parsed,
+            match={"strength": "none"},
+            match_strength="none",
+            profile="undergraduate",
+        )
+    )
+    await pipe.rematch_active_pending(source="catchup")
+    assert len(ai_calls) == 0
+    updated = await pipe.requests.get_by_id("r9")
+    assert updated.parsed.get("student_id") == "261880009"
+    assert updated.match_strength == "strong"
+    assert "ai_parse_merged" in (updated.parsed.get("parse_errors") or [])
+
+
+@pytest.mark.asyncio
+async def test_legacy_retry_same_comment_skips_ai_without_hash(tmp_path, ai_calls):
+    comment = "答案：乱码"
+    pipe = _pipeline(tmp_path, students=[_student()])
+    existing = PendingRequest(
+        id="r10",
+        group_id=GROUP_ID,
+        user_id="10",
+        comment=comment,
+        flag="f10",
+        sub_type="add",
+        status="failed",
+        decision="manual_review",
+        confidence=0,
+        reason="x",
+        mode="auto",
+        created_at="t",
+        parsed={"parse_errors": ["ai_parse_used"]},  # no hash / raw
+        match={},
+        profile="undergraduate",
+        processed_at="t",
+    )
+    await pipe.requests.upsert(existing)
+    await pipe._audit_and_act(
+        GroupJoinRequest(
+            group_id=GROUP_ID,
+            user_id="10",
+            comment=comment,
+            flag="f10",
+            sub_type="add",
+        ),
+        resubmit=True,
+        request_id=existing.id,
+        reuse_parsed_from=existing,
+    )
+    assert len(ai_calls) == 0
+
+
 def test_comment_hash_stable():
     assert compute_comment_hash("a  b") == compute_comment_hash("a b")
     assert compute_comment_hash("a") != compute_comment_hash("b")

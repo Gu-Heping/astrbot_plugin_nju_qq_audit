@@ -24,6 +24,8 @@ from core.parsed_store import (
     can_reuse_stored_parsed,
     carry_ai_attempt_markers,
     comment_hash_matches,
+    fill_grad_gaps_from_stored,
+    fill_undergrad_gaps_from_stored,
     grad_parsed_from_dict,
     is_same_comment_revision,
     parsed_needs_ai_fallback,
@@ -532,20 +534,21 @@ class AuditPipeline:
     ):
         mode, _ = self._effective_mode()
         students = load_students_for_audit(self.settings, self.cache)
+        # Always run deterministic parse; stored (often AI) only fills gaps so
+        # rematch/catchup can still upgrade when the comment contains more fields.
+        parsed = parse_application_comment(event.comment or "")
         if stored_parsed is not None:
-            parsed = stored_parsed
-        else:
-            parsed = parse_application_comment(event.comment or "")
-            if allow_ai_parse:
-                await maybe_run_ai_parse(
-                    self.settings,
-                    profile="undergraduate",
-                    raw_comment=event.comment or "",
-                    parsed=parsed,
-                    incomplete=undergrad_parse_incomplete(parsed),
-                    astrbot_context=self.astrbot_context,
-                    umo=getattr(event, "umo", None),
-                )
+            parsed = fill_undergrad_gaps_from_stored(parsed, stored_parsed)
+        elif allow_ai_parse:
+            await maybe_run_ai_parse(
+                self.settings,
+                profile="undergraduate",
+                raw_comment=event.comment or "",
+                parsed=parsed,
+                incomplete=undergrad_parse_incomplete(parsed),
+                astrbot_context=self.astrbot_context,
+                umo=getattr(event, "umo", None),
+            )
         match = match_student(parsed, students, applicant_user_id=event.user_id)
         decision = make_decision(parsed, match, is_target_group=True)
         decision = apply_auto_approve_flag(decision, mode, match)
@@ -572,26 +575,21 @@ class AuditPipeline:
         mode, _ = self._effective_mode()
         cache = self.grad_cache
         students = load_graduates_for_audit(self.settings, cache) if cache else []
+        parsed = parse_graduate_comment(event.comment or "")
         if stored_parsed is not None:
-            parsed = stored_parsed
-            # Rematch/catchup may reuse an incomplete stored parse that later
-            # roster sync can complete without another AI call.
-            if self.settings.grad_roster_parse_enabled:
-                parsed = complete_graduate_parse_from_roster(parsed, students)
-        else:
-            parsed = parse_graduate_comment(event.comment or "")
-            if self.settings.grad_roster_parse_enabled:
-                parsed = complete_graduate_parse_from_roster(parsed, students)
-            if allow_ai_parse:
-                await maybe_run_ai_parse(
-                    self.settings,
-                    profile="graduate",
-                    raw_comment=event.comment or "",
-                    parsed=parsed,
-                    incomplete=grad_parse_incomplete(parsed),
-                    astrbot_context=self.astrbot_context,
-                    umo=getattr(event, "umo", None),
-                )
+            parsed = fill_grad_gaps_from_stored(parsed, stored_parsed)
+        if self.settings.grad_roster_parse_enabled:
+            parsed = complete_graduate_parse_from_roster(parsed, students)
+        if stored_parsed is None and allow_ai_parse:
+            await maybe_run_ai_parse(
+                self.settings,
+                profile="graduate",
+                raw_comment=event.comment or "",
+                parsed=parsed,
+                incomplete=grad_parse_incomplete(parsed),
+                astrbot_context=self.astrbot_context,
+                umo=getattr(event, "umo", None),
+            )
         match = match_graduate(parsed, students)
         decision = make_graduate_decision(parsed, match, is_target_group=True)
         decision = apply_graduate_auto_approve_flag(decision, mode, match)
@@ -964,7 +962,11 @@ class AuditPipeline:
                 else:
                     stored = undergrad_parsed_from_dict(source.parsed, comment)
                 allow_ai = False
-            elif is_same_comment_revision(source.parsed, comment) and (
+            elif is_same_comment_revision(
+                source.parsed,
+                comment,
+                allow_unhashed_without_raw=(source.comment or "") == comment,
+            ) and (
                 ai_parse_already_attempted(source.parsed)
                 or not parsed_needs_ai_fallback(source.parsed)
             ):

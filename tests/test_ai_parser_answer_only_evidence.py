@@ -335,3 +335,19 @@ def test_cinema_slash_dr_not_ambiguous_placeholder():
     )
     assert fields.admission_type == "博士"
     assert fields.ambiguous is False
+
+
+def test_name_containing_shuobo_does_not_make_doctor_ambiguous():
+    fields = _fields(
+        name="王硕博",
+        major="生物学",
+        admission_type="博士",
+        evidence={"name": "王硕博", "major": "生物学", "admission_type": "博士"},
+    )
+    fields = validate_ai_fields(
+        fields,
+        question="",
+        answer="王硕博 生物学 博士",
+    )
+    assert fields.admission_type == "博士"
+    assert fields.ambiguous is False

@@ -193,6 +193,58 @@ def strip_internal_parsed_keys(data: dict[str, Any] | None) -> dict[str, Any]:
     return {k: v for k, v in data.items() if not str(k).startswith("_")}
 
 
+def fill_undergrad_gaps_from_stored(
+    fresh: ParsedApplication, stored: ParsedApplication
+) -> ParsedApplication:
+    """Keep deterministic fields; fill only missing slots from stored (e.g. AI)."""
+    if not fresh.name and stored.name:
+        fresh.name = stored.name
+    if not fresh.student_id and stored.student_id:
+        fresh.student_id = stored.student_id
+    if not fresh.notice_no and stored.notice_no:
+        fresh.notice_no = stored.notice_no
+    if not fresh.major and stored.major:
+        fresh.major = stored.major
+    if not fresh.academy and stored.academy:
+        fresh.academy = stored.academy
+    if not fresh.notice_no_candidates and stored.notice_no_candidates:
+        fresh.notice_no_candidates = list(stored.notice_no_candidates)
+    for err in stored.parse_errors or []:
+        text = str(err)
+        if text not in fresh.parse_errors:
+            if text.startswith("ai_parse_model:") or any(
+                marker in text for marker in _AI_ATTEMPTED_MARKERS
+            ):
+                fresh.parse_errors.append(text)
+            elif "unable to parse" in text and not fresh.name and not fresh.student_id:
+                fresh.parse_errors.append(text)
+    return fresh
+
+
+def fill_grad_gaps_from_stored(
+    fresh: GraduateParsedApplication, stored: GraduateParsedApplication
+) -> GraduateParsedApplication:
+    """Keep deterministic fields; fill only missing slots from stored (e.g. AI)."""
+    if not fresh.name and stored.name:
+        fresh.name = stored.name
+    if not fresh.major_text and stored.major_text:
+        fresh.major_text = stored.major_text
+    if not fresh.admission_type and stored.admission_type:
+        fresh.admission_type = stored.admission_type
+    if not fresh.admission_type_raw and stored.admission_type_raw:
+        fresh.admission_type_raw = stored.admission_type_raw
+    if not fresh.major_code_candidates and stored.major_code_candidates:
+        fresh.major_code_candidates = list(stored.major_code_candidates)
+    for err in stored.parse_errors or []:
+        text = str(err)
+        if text not in fresh.parse_errors:
+            if text.startswith("ai_parse_model:") or any(
+                marker in text for marker in _AI_ATTEMPTED_MARKERS
+            ):
+                fresh.parse_errors.append(text)
+    return fresh
+
+
 def attach_parsed_meta(
     data: dict[str, Any],
     *,

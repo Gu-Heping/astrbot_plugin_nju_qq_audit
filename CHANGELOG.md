@@ -26,6 +26,9 @@
 - 短别名 `dr`/`ma` 仅做整词匹配，避免 `Drama` 误成博士
 - 歧义正则对 `ma`/`dr` 使用词边界，避免 `Drama/PhD` 误判 ambiguous
 - 同一版答案若已标记 `ai_parse_used`，rematch/retry 确定性重解析会保留该标记（含无 hash 历史行）
+- failed retry 在 `source.comment` 未变时，即使无 hash/raw 也视为同版答案，不重复调 AI
+- rematch 复用 stored 时仍跑 deterministic，仅用 stored 补缺口，避免仅有姓名的旧 parsed 挡升级
+- 歧义扫描前剥离已校验姓名，避免「王硕博」误伤真实「博士」
 - failed retry / supersede / reapply 在 hash 匹配时复用 stored parsed
 
 ## [v0.4.16] - 2026-07-19

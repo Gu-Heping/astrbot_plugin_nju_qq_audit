@@ -118,16 +118,25 @@ def _scan_admission_signals(
     """
     if not answer or not answer.strip():
         return set(), False
-    if _AMBIGUOUS_TYPE.search(answer):
-        return set(), True
 
-    found: set[str] = set()
+    # Strip validated name before placeholder / signal scans so names like
+    # 「王硕博」do not make a concrete 「博士」look ambiguous.
     scan = answer
     if exclude_name:
         name = exclude_name.strip()
         if name:
-            scan = scan.replace(name, " ", 1)
+            if name in scan:
+                scan = scan.replace(name, " ", 1)
+            else:
+                compact_name = name.replace(" ", "").replace("　", "")
+                compact_scan = scan.replace(" ", "").replace("　", "")
+                if compact_name and compact_name in compact_scan:
+                    scan = compact_scan.replace(compact_name, " ", 1)
 
+    if _AMBIGUOUS_TYPE.search(scan):
+        return set(), True
+
+    found: set[str] = set()
     compact = scan.replace(" ", "").replace("　", "")
     lower = compact.lower()
 
