@@ -1225,6 +1225,42 @@ class AuditPipeline:
         admin_user_id: str | None,
         admin_command: str,
     ) -> str:
+        member_present = None
+        try:
+            member_result = await self.actions.get_group_member_info(
+                req.group_id, req.user_id
+            )
+            member_present = is_user_in_group(member_result)
+        except Exception:
+            logger.warning(
+                "[audit] stale member check failed request=%s",
+                req.id,
+                exc_info=True,
+            )
+
+        if member_present is True:
+            message = "QQ 侧申请已不存在，但用户已在群内，按外部通过处理"
+            await self._apply_external_status(
+                req,
+                message,
+                source="action_stale_member_present",
+                list_cache=list_cache,
+                admin_user_id=admin_user_id,
+                admin_command=admin_command,
+            )
+            await self.audit.append(
+                {
+                    "type": "request_stale_member_present",
+                    "request_id": req.id,
+                    "group_id": req.group_id,
+                    "user_id": req.user_id,
+                    "admin_user_id": admin_user_id,
+                    "admin_command": admin_command,
+                    "reason": reason[:200],
+                }
+            )
+            return "external"
+
         await self._apply_stale_status(req, reason, list_cache=list_cache)
         await self.audit.append(
             {

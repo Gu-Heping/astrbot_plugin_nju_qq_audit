@@ -2,6 +2,14 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.18] - 2026-07-19
+
+### 优化
+
+- 批量补放前增加 QQ 侧待处理预检查，优先刷新 live flag。
+- 审批返回 not found 时，先检查用户是否已在群内；已入群则标 external，否则 stale。
+- release/catchup 结果区分成功、已失效、外部已入群、真实失败。
+
 ## [v0.4.17] - 2026-07-19
 
 ### 优化

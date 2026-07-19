@@ -7,9 +7,16 @@ from typing import Awaitable, Callable
 from admin.labels import applicant_summary
 from config import PluginSettings
 from core.normalize import has_non_grade26_keyword, is_grade26_student_id
+from core.pending_reconcile import build_group_snapshot_fetch
 from core.pipeline import RematchSummary
 from data_source.student_cache import SyncState
 from data_source.students import PendingRequest
+from onebot.group_system_msg import (
+    filter_entries_for_group,
+    match_pending_to_entries,
+    pending_seen_in_snapshot,
+)
+from onebot.member_info import is_user_in_group
 
 
 @dataclass
@@ -35,6 +42,7 @@ class ReleaseLineResult:
     summary: str
     ok: bool
     message: str
+    final_status: str = "success"
 
 
 @dataclass
@@ -44,6 +52,9 @@ class ReleaseResult:
     success: int
     failed: int
     remaining: int
+    stale_count: int = 0
+    external_count: int = 0
+    skipped_count: int = 0
     lines: list[ReleaseLineResult] = field(default_factory=list)
     cancelled: bool = False
     rematch: RematchSummary | None = None
@@ -143,6 +154,139 @@ async def rematch_and_list_releasable(
     return summary, items
 
 
+async def preflight_releasable_with_live_snapshot(
+    pipeline,
+    requests_store,
+    settings: PluginSettings,
+    items: list[PendingRequest],
+) -> list[PendingRequest]:
+    del settings
+    by_group: dict[str, list[PendingRequest]] = {}
+    for item in items:
+        by_group.setdefault(item.group_id, []).append(item)
+
+    releasable: list[PendingRequest] = []
+    releasable_ids: set[str] = set()
+    for group_id, group_items in by_group.items():
+        try:
+            raw = await pipeline.actions.get_group_system_msg(group_id, no_cache=True)
+            fetch = build_group_snapshot_fetch(raw)
+        except Exception:
+            fetch = None
+
+        if (
+            fetch is None
+            or not fetch.ok
+            or not fetch.reliable
+            or fetch.empty_untrusted
+            or fetch.snapshot_saturated
+        ):
+            for item in group_items:
+                if item.id not in releasable_ids:
+                    releasable.append(item)
+                    releasable_ids.add(item.id)
+            continue
+
+        current_entries = filter_entries_for_group(fetch.entries, group_id)
+        for item in group_items:
+            latest = await requests_store.get_by_id(item.id)
+            if latest is None or latest.status != "pending":
+                continue
+            match = match_pending_to_entries(
+                flag=latest.flag,
+                group_id=latest.group_id,
+                user_id=latest.user_id,
+                comment=latest.comment or "",
+                entries=current_entries,
+            )
+            if match.kind == "ambiguous":
+                await pipeline.audit.append(
+                    {
+                        "type": "batch_preflight_match_ambiguous",
+                        "request_id": latest.id,
+                        "group_id": latest.group_id,
+                        "user_id": latest.user_id,
+                    }
+                )
+                continue
+            if match.kind == "unique":
+                refreshed = latest
+                entry = match.entry
+                if entry is not None and entry.flag and entry.flag != latest.flag:
+                    maybe_refreshed = await requests_store.refresh_flag_by_id(
+                        latest.id, entry.flag
+                    )
+                    if maybe_refreshed is not None:
+                        refreshed = maybe_refreshed
+                    await pipeline.audit.append(
+                        {
+                            "type": "batch_preflight_flag_refreshed",
+                            "request_id": latest.id,
+                            "group_id": latest.group_id,
+                            "user_id": latest.user_id,
+                            "old_flag": latest.flag,
+                            "new_flag": entry.flag,
+                        }
+                    )
+                releasable.append(refreshed)
+                releasable_ids.add(refreshed.id)
+                continue
+
+            if not _seen_in_snapshot_history(pipeline, latest):
+                releasable.append(latest)
+                releasable_ids.add(latest.id)
+                await pipeline.audit.append(
+                    {
+                        "type": "batch_preflight_absence_not_trusted",
+                        "request_id": latest.id,
+                        "group_id": latest.group_id,
+                        "user_id": latest.user_id,
+                        "reason": "not_seen_before",
+                    }
+                )
+                continue
+
+            member_present = None
+            try:
+                member_result = await pipeline.actions.get_group_member_info(
+                    latest.group_id, latest.user_id
+                )
+                member_present = is_user_in_group(member_result)
+            except Exception:
+                member_present = None
+
+            if member_present is True:
+                await pipeline._apply_external_status(
+                    latest,
+                    "批量补放前 QQ 侧待处理列表已无此申请，但用户已在群内，按外部通过处理",
+                    source="batch_preflight_member_present",
+                    admin_command="release_preflight",
+                    notify=True,
+                )
+                await pipeline.audit.append(
+                    {
+                        "type": "batch_preflight_external",
+                        "request_id": latest.id,
+                        "group_id": latest.group_id,
+                        "user_id": latest.user_id,
+                    }
+                )
+            else:
+                await pipeline._apply_stale_status(
+                    latest,
+                    "批量补放前 QQ 侧待处理列表已无此申请",
+                )
+                await pipeline.audit.append(
+                    {
+                        "type": "batch_preflight_stale",
+                        "request_id": latest.id,
+                        "group_id": latest.group_id,
+                        "user_id": latest.user_id,
+                    }
+                )
+    return releasable
+
+
 def build_preview(items: list[PendingRequest]) -> ReleasePreview:
     previews = []
     for idx, req in enumerate(items, start=1):
@@ -156,6 +300,27 @@ def build_preview(items: list[PendingRequest]) -> ReleasePreview:
             )
         )
     return ReleasePreview(items=previews, total_releasable=len(items))
+
+
+def _seen_in_snapshot_history(pipeline, pending: PendingRequest) -> bool:
+    previous_index = pipeline.runtime.get_qq_snapshot_index(pending.group_id)
+    if pending_seen_in_snapshot(
+        flag=pending.flag,
+        group_id=pending.group_id,
+        user_id=pending.user_id,
+        snapshot=previous_index,
+    ):
+        return True
+    meta = pipeline.runtime.get_qq_snapshot_meta(pending.group_id) or {}
+    for hist in meta.get("history") or []:
+        if pending_seen_in_snapshot(
+            flag=pending.flag,
+            group_id=pending.group_id,
+            user_id=pending.user_id,
+            snapshot=hist.get("index") if isinstance(hist, dict) else None,
+        ):
+            return True
+    return False
 
 
 def _format_rematch_lines(rematch: RematchSummary | None) -> list[str]:
@@ -286,12 +451,20 @@ def format_release_result(result: ReleaseResult, settings: PluginSettings) -> st
         lines.append("正在处理：")
         for line in result.lines:
             status = "成功" if line.ok else f"失败：{line.message}"
+            if line.final_status == "stale":
+                status = "QQ 侧已无此申请，已移出队列"
+            elif line.final_status == "external":
+                status = "用户已在群内，已标记外部通过"
+            elif line.final_status == "skipped":
+                status = f"已跳过：{line.message}"
             lines.append(f"[{line.index}] {line.summary} ... {status}")
         lines.append("")
     lines.extend(
         [
             "完成：",
             f"成功：{result.success}",
+            f"已失效：{result.stale_count}",
+            f"外部已入群：{result.external_count}",
             f"失败：{result.failed}",
             f"剩余可通过：{result.remaining}",
             "",
@@ -366,6 +539,9 @@ def format_catchup_result(result: CatchupResult, settings: PluginSettings) -> st
         success=result.release.success,
         failed=result.release.failed,
         remaining=result.release.remaining,
+        stale_count=result.release.stale_count,
+        external_count=result.release.external_count,
+        skipped_count=result.release.skipped_count,
         lines=result.release.lines,
         cancelled=result.release.cancelled,
         rematch=None,
@@ -568,8 +744,61 @@ class ReleaseService:
             lines=[],
         )
 
+        preflight_batch = await preflight_releasable_with_live_snapshot(
+            pipeline, requests_store, settings, batch
+        )
+        preflight_ids = {req.id for req in preflight_batch}
+        index_by_id = {req.id: idx for idx, req in enumerate(batch, start=1)}
+        summary_by_id = {req.id: applicant_summary(req) for req in batch}
+        for req in batch:
+            if req.id in preflight_ids:
+                continue
+            latest = await requests_store.get_by_id(req.id)
+            if latest is None:
+                continue
+            if latest.status == "stale":
+                result.processed += 1
+                result.stale_count += 1
+                result.lines.append(
+                    ReleaseLineResult(
+                        index=index_by_id[req.id],
+                        request_id=req.id,
+                        summary=summary_by_id[req.id],
+                        ok=True,
+                        message="QQ 侧已无此申请，已移出队列",
+                        final_status="stale",
+                    )
+                )
+            elif latest.status == "external":
+                result.processed += 1
+                result.external_count += 1
+                result.lines.append(
+                    ReleaseLineResult(
+                        index=index_by_id[req.id],
+                        request_id=req.id,
+                        summary=summary_by_id[req.id],
+                        ok=True,
+                        message="用户已在群内，已标记外部通过",
+                        final_status="external",
+                    )
+                )
+            elif latest.status == "pending":
+                result.processed += 1
+                result.skipped_count += 1
+                result.lines.append(
+                    ReleaseLineResult(
+                        index=index_by_id[req.id],
+                        request_id=req.id,
+                        summary=summary_by_id[req.id],
+                        ok=True,
+                        message="QQ 侧待处理匹配不唯一，保留 pending",
+                        final_status="skipped",
+                    )
+                )
+
         interval = settings.batch_approve_interval_ms / 1000.0
-        for idx, req in enumerate(batch, start=1):
+        for position, req in enumerate(preflight_batch, start=1):
+            idx = index_by_id.get(req.id, position)
             if self._cancel.is_set():
                 result.cancelled = True
                 break
@@ -577,16 +806,35 @@ class ReleaseService:
                 continue
 
             action = await pipeline.admin_approve(req, admin_user_id)
+            latest = await requests_store.get_by_id(req.id)
+            final_status = "success"
+            line_ok = action.ok
+            message = "" if action.ok else (action.message or "未知错误")
+            if not action.ok and latest is not None and latest.status == "stale":
+                final_status = "stale"
+                line_ok = True
+                message = "QQ 侧已无此申请，已移出队列"
+            elif not action.ok and latest is not None and latest.status == "external":
+                final_status = "external"
+                line_ok = True
+                message = "用户已在群内，已标记外部通过"
             result.processed += 1
             line = ReleaseLineResult(
                 index=idx,
                 request_id=req.id,
-                summary=applicant_summary(req),
-                ok=action.ok,
+                summary=summary_by_id.get(req.id, applicant_summary(req)),
+                ok=line_ok,
+                final_status=final_status,
                 message="" if action.ok else (action.message or "未知错误"),
             )
+            if final_status != "success":
+                line.message = message
             result.lines.append(line)
-            if action.ok:
+            if final_status == "stale":
+                result.stale_count += 1
+            elif final_status == "external":
+                result.external_count += 1
+            elif action.ok:
                 result.success += 1
             else:
                 result.failed += 1
@@ -597,12 +845,12 @@ class ReleaseService:
                         "type": "batch_release",
                         "request_id": req.id,
                         "admin_user_id": admin_user_id,
-                        "ok": action.ok,
-                        "message": action.message if not action.ok else "ok",
+                        "ok": line_ok,
+                        "message": message if not line_ok else final_status,
                     }
                 )
 
-            if idx < len(batch) and not self._cancel.is_set():
+            if position < len(preflight_batch) and not self._cancel.is_set():
                 await asyncio.sleep(interval)
 
         remaining_all = await list_releasable(requests_store, settings)
