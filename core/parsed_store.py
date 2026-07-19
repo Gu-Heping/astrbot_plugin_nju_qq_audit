@@ -103,6 +103,26 @@ def ai_parse_already_attempted(stored: dict[str, Any] | None) -> bool:
     return any(marker in errors for marker in _AI_ATTEMPTED_MARKERS)
 
 
+def carry_ai_attempt_markers(parsed: Any, source: dict[str, Any] | None) -> None:
+    """Preserve AI attempt markers onto a re-parsed object for the same revision.
+
+    Rematch may re-run deterministic parse without calling AI; without carrying
+    markers, the next rematch would think AI was never attempted.
+    """
+    if not source or not ai_parse_already_attempted(source):
+        return
+    errors = getattr(parsed, "parse_errors", None)
+    if errors is None:
+        return
+    for item in source.get("parse_errors") or []:
+        text = str(item)
+        if text.startswith("ai_parse_model:") or any(
+            marker in text for marker in _AI_ATTEMPTED_MARKERS
+        ):
+            if text not in errors:
+                errors.append(text)
+
+
 def parsed_needs_ai_fallback(stored: dict[str, Any] | None) -> bool:
     """True when rematch may call AI for this stored row.
 

@@ -287,3 +287,19 @@ def test_msc_slash_phd_ambiguous():
     )
     assert fields.admission_type is None
     assert fields.ambiguous is True
+
+
+def test_drama_msc_does_not_false_doctor_from_dr_substring():
+    fields = _fields(
+        name="张三",
+        major="Drama",
+        admission_type="硕士",
+        evidence={"name": "张三", "major": "Drama", "admission_type": "MSc"},
+    )
+    fields = validate_ai_fields(
+        fields,
+        question="",
+        answer="张三 Drama MSc",
+    )
+    assert fields.admission_type == "硕士"
+    assert fields.ambiguous is False

@@ -22,6 +22,7 @@ from core.parsed_store import (
     ai_parse_already_attempted,
     attach_parsed_meta,
     can_reuse_stored_parsed,
+    carry_ai_attempt_markers,
     comment_hash_matches,
     grad_parsed_from_dict,
     parsed_needs_ai_fallback,
@@ -648,6 +649,7 @@ class AuditPipeline:
         )
         stored = None
         ai_allowed = False
+        carry_markers_from = None
         rematch_ai = bool(getattr(self.settings, "ai_parse_on_rematch", False))
         if reuse_stored_parsed and can_reuse_stored_parsed(
             req.parsed,
@@ -666,6 +668,14 @@ class AuditPipeline:
                 ai_allowed = True
             elif rematch_ai:
                 ai_allowed = parsed_needs_ai_fallback(req.parsed)
+            # Same revision already tried AI with no fields: keep markers after
+            # deterministic re-parse so the next rematch does not call AI again.
+            if (
+                not ai_allowed
+                and comment_hash_matches(req.parsed, req.comment or "")
+                and ai_parse_already_attempted(req.parsed)
+            ):
+                carry_markers_from = req.parsed
 
         if profile == "graduate":
             ev = await self._evaluate_graduate_request(
@@ -679,6 +689,8 @@ class AuditPipeline:
                 allow_ai_parse=ai_allowed,
                 stored_parsed=stored,
             )
+        if carry_markers_from is not None:
+            carry_ai_attempt_markers(ev.parsed, carry_markers_from)
         return ev.mode, ev.parsed, ev.match, ev.decision
 
     async def rematch_active_pending(

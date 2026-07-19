@@ -304,6 +304,12 @@ async def test_ai_attempted_no_fields_rematch_does_not_recall_ai(tmp_path, ai_ca
     )
     await pipe.rematch_active_pending(source="catchup")
     assert len(ai_calls) == 0
+    updated = await pipe.requests.get_by_id("r4e")
+    assert updated is not None
+    assert "ai_parse_used" in (updated.parsed.get("parse_errors") or [])
+    # Second rematch must still skip AI because markers were preserved.
+    await pipe.rematch_active_pending(source="catchup")
+    assert len(ai_calls) == 0
 
 
 @pytest.mark.asyncio

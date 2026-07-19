@@ -20,7 +20,8 @@ _AMBIGUOUS_TYPE = re.compile(
 # Keep in sync with deterministic graduate separators (+ comment-hash seps).
 _TOKEN_SPLIT = re.compile(r"[\s\u3000,，、;；|+＋/／|]+")
 
-# Longer multi-char tokens first; aliases aligned with normalize_admission_type.
+# Longer multi-char tokens for compact substring scan.
+# Short ASCII aliases (dr/ma) are exact-token only — avoids "Drama" → doctor.
 _MASTER_MULTI = (
     "硕士生",
     "硕士",
@@ -30,7 +31,6 @@ _MASTER_MULTI = (
     "msc",
     "mba",
     "mpa",
-    "ma",
 )
 _DOCTOR_MULTI = (
     "博士生",
@@ -40,10 +40,10 @@ _DOCTOR_MULTI = (
     "ph.d",
     "phd",
     "doctor",
-    "dr",
 )
-_MASTER_EXACT = frozenset({"硕", *_MASTER_MULTI})
-_DOCTOR_EXACT = frozenset({"博", *_DOCTOR_MULTI})
+_MASTER_EXACT = frozenset({"硕", "ma", *_MASTER_MULTI})
+_DOCTOR_EXACT = frozenset({"博", "dr", *_DOCTOR_MULTI})
+_SHORT_ASCII_EXACT_ONLY = frozenset({"dr", "ma"})
 
 
 def _in_text(needle: str | None, haystack: str) -> bool:
@@ -131,12 +131,16 @@ def _scan_admission_signals(
 
     for token in _DOCTOR_MULTI:
         needle = token.lower() if token.isascii() else token
+        if token.isascii() and needle in _SHORT_ASCII_EXACT_ONLY:
+            continue
         hay = lower if token.isascii() else compact
         if needle in hay:
             found.add("博士")
             break
     for token in _MASTER_MULTI:
         needle = token.lower() if token.isascii() else token
+        if token.isascii() and needle in _SHORT_ASCII_EXACT_ONLY:
+            continue
         hay = lower if token.isascii() else compact
         if needle in hay:
             found.add("硕士")
