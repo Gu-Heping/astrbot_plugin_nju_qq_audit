@@ -154,6 +154,9 @@ def _match_to_dict(match) -> dict:
         "matched_student_id": (
             match.matched_student.student_id if match.matched_student else None
         ),
+        "matched_exam_no": (
+            match.matched_student.exam_no if match.matched_student else None
+        ),
         "qq_match": match.qq_match,
     }
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from config import PluginSettings, load_settings
 from data_source.njutable_provider import map_row_to_student
-from data_source.students import Student, sanitize_student_for_cache
+from data_source.students import Student, build_student_key, sanitize_student_for_cache
 
 
 class DummyConfig(dict):
@@ -43,6 +43,20 @@ def test_sanitize_student_for_cache_keeps_exam_no():
     )
     cleaned = sanitize_student_for_cache(student)
     assert cleaned.exam_no == FICTIONAL_EXAM
+
+
+def test_build_student_key_falls_back_to_exam_no():
+    student = Student(
+        name="张三",
+        updated_at="t",
+        exam_no=FICTIONAL_EXAM,
+        major="计算机科学与技术",
+    )
+    assert build_student_key(student) == f"{FICTIONAL_EXAM}:张三"
+    assert build_student_key(
+        {"name": "张三", "exam_no": FICTIONAL_EXAM}
+    ) == f"{FICTIONAL_EXAM}:张三"
+    assert build_student_key({"exam_no": FICTIONAL_EXAM}) == FICTIONAL_EXAM
 
 
 def test_load_settings_supports_custom_exam_no_column():

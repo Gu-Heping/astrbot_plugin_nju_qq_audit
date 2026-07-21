@@ -12,6 +12,10 @@
 - 管理员 lookup 支持考生号查询。
 - 帮助与 release/catchup 文案补充“考生号”。
 
+### 修复
+
+- 学号标签后误填 14 位考生号时，不再截取前缀写入 student_id，避免错误 credential conflict。
+
 ## [v0.4.18] - 2026-07-19
 
 ### 优化

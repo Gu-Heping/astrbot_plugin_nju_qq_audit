@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from core.decision import make_decision
 from core.matcher import match_student
-from core.parser import ParsedApplication
+from core.parser import ParsedApplication, parse_application_comment
 from data_source.students import Student
 
 FICTIONAL_EXAM = "26123456000001"
@@ -102,3 +102,14 @@ def test_non_grade26_exam_no_manual_review():
     decision = make_decision(parsed, match, is_target_group=True)
     assert decision.decision == "manual_review"
     assert "考生号非26级" in decision.reason
+
+
+def test_exam_no_in_student_id_label_still_matches_strong():
+    parsed = parse_application_comment(
+        f"姓名：张三 学号：{FICTIONAL_EXAM} 专业：计算机科学与技术"
+    )
+    match = match_student(parsed, [_student()])
+    assert parsed.student_id is None
+    assert parsed.exam_no == FICTIONAL_EXAM
+    assert match.strength == "strong"
+    assert match.reason == "姓名+考生号强匹配"

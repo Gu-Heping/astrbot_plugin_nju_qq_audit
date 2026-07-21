@@ -69,3 +69,23 @@ def test_legacy_notice_no_still_parses():
     assert parsed.name == "张三"
     assert parsed.notice_no == "20260002"
     assert parsed.exam_no is None
+
+
+def test_exam_no_in_student_id_label_not_parsed_as_student_id():
+    parsed = parse_application_comment(
+        f"姓名：张三 学号：{FICTIONAL_EXAM} 专业：计算机科学与技术"
+    )
+    assert parsed.name == "张三"
+    assert parsed.exam_no == FICTIONAL_EXAM
+    assert parsed.student_id is None
+    assert parsed.major == "计算机科学与技术"
+
+
+def test_student_id_label_still_parses_normal_sid():
+    parsed = parse_application_comment(
+        "姓名：张三 学号：261220001 专业：计算机科学与技术"
+    )
+    assert parsed.name == "张三"
+    assert parsed.student_id == "261220001"
+    assert parsed.exam_no is None
+    assert parsed.major == "计算机科学与技术"

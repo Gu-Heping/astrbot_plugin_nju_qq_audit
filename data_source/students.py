@@ -196,15 +196,21 @@ def build_student_key(student: Student | dict[str, Any]) -> str:
     if isinstance(student, Student):
         sid = student.student_id
         notice_no = student.notice_no
+        exam_no = student.exam_no
         name = student.name
     else:
         sid = student.get("student_id")
         notice_no = student.get("notice_no")
+        exam_no = student.get("exam_no")
         name = student.get("name", "")
     if sid:
         return str(sid)
     if notice_no and name:
         return f"{notice_no}:{name}"
+    if exam_no and name:
+        return f"{exam_no}:{name}"
+    if exam_no:
+        return str(exam_no)
     return str(name)
 
 

@@ -27,7 +27,10 @@ NAME_LABEL_PATTERN = re.compile(
     r"(?=\s|学号|考生号|准考证|报名号|通知书|编号|专业|$|[:：])",
     re.IGNORECASE,
 )
-STUDENT_ID_LABEL_PATTERN = re.compile(r"(?:学号|student\s*id)[:：\s]*(\d{6,12})", re.IGNORECASE)
+STUDENT_ID_LABEL_PATTERN = re.compile(
+    r"(?:学号|student\s*id)[:：\s]*(\d{6,12})(?!\d)",
+    re.IGNORECASE,
+)
 EXAM_NO_LABEL_PATTERN = re.compile(
     r"(?:高考考生号|考生号|准考证号|报名号)[:：\s]*(\d{10,16})",
     re.IGNORECASE,
