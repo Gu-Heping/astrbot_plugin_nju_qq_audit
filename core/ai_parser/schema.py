@@ -13,6 +13,7 @@ KNOWN_FIELD_KEYS = frozenset(
         "profile",
         "name",
         "student_id",
+        "exam_no",
         "notice_no",
         "major",
         "academy",
@@ -82,6 +83,7 @@ def parse_ai_fields_dict(data: dict[str, Any], *, default_profile: str) -> AiPar
         profile=profile,
         name=_opt_str("name"),
         student_id=_opt_str("student_id"),
+        exam_no=_opt_str("exam_no"),
         notice_no=_opt_str("notice_no"),
         major=_opt_str("major"),
         academy=_opt_str("academy"),
@@ -96,8 +98,9 @@ def parse_ai_fields_dict(data: dict[str, Any], *, default_profile: str) -> AiPar
 def ai_fields_json_schema_hint() -> str:
     return (
         '{"profile":"undergraduate|graduate","name":null,"student_id":null,'
-        '"notice_no":null,"major":null,"academy":null,"admission_type":null,'
+        '"exam_no":null,"notice_no":null,"major":null,"academy":null,'
+        '"admission_type":null,'
         '"confidence":0.0,"ambiguous":false,"warnings":[],'
-        '"evidence":{"name":null,"student_id":null,"notice_no":null,'
-        '"major":null,"academy":null,"admission_type":null}}'
+        '"evidence":{"name":null,"student_id":null,"exam_no":null,'
+        '"notice_no":null,"major":null,"academy":null,"admission_type":null}}'
     )

@@ -5,7 +5,11 @@ from typing import Literal
 
 from core.aliases import build_major_index, majors_match_fuzzy
 from core.normalize import (
+    exam_nos_match,
+    is_grade26_exam_no,
+    is_grade26_student_id,
     names_match,
+    normalize_exam_no,
     normalize_notice_no,
     normalize_student_id,
     notice_nos_match,
@@ -18,6 +22,7 @@ from data_source.students import Student
 MatchStrength = Literal["strong", "weak", "none", "auxiliary"]
 MatchedBy = Literal[
     "name_studentId",
+    "name_examNo",
     "name_noticeNo",
     "name_major",
     "name_academy",
@@ -50,12 +55,43 @@ def has_credential_conflict(parsed: ParsedApplication, student: Student) -> bool
     ):
         return True
     if (
+        parsed.exam_no
+        and student.exam_no
+        and not exam_nos_match(parsed.exam_no, student.exam_no)
+    ):
+        return True
+    if (
         parsed.notice_no
         and student.notice_no
         and not notice_nos_match(parsed.notice_no, student.notice_no)
     ):
         return True
     return False
+
+
+def _credential_target_keys(
+    parsed: ParsedApplication, students: list[Student]
+) -> set[str]:
+    """Roster keys pointed to by parsed credentials (when present on roster)."""
+    keys: set[str] = set()
+    if parsed.student_id:
+        for student in students:
+            if student.student_id and student_ids_match(
+                parsed.student_id, student.student_id
+            ):
+                keys.add(student.key)
+    if parsed.exam_no:
+        exam = normalize_exam_no(parsed.exam_no)
+        for student in students:
+            if student.exam_no and exam_nos_match(exam, student.exam_no):
+                keys.add(student.key)
+    if parsed.notice_no:
+        for student in students:
+            if student.notice_no and notice_nos_match(
+                parsed.notice_no, student.notice_no
+            ):
+                keys.add(student.key)
+    return keys
 
 
 def _build_result(
@@ -82,7 +118,7 @@ def _conflict_result() -> MatchResult:
     return MatchResult(
         strength="none",
         confidence=0,
-        reason="申请信息存在冲突（学号与通知书编号不一致），需人工复核",
+        reason="申请信息存在冲突（学号/通知书编号/考生号不一致），需人工复核",
     )
 
 
@@ -134,6 +170,9 @@ def match_student(
 ) -> MatchResult:
     known_majors = build_major_index(students)
 
+    if len(_credential_target_keys(parsed, students)) > 1:
+        return _conflict_result()
+
     if parsed.name and parsed.student_id:
         sid_norm = normalize_student_id(parsed.student_id)
         candidates: list[Student] = []
@@ -155,9 +194,16 @@ def match_student(
             if exact_sid and has_credential_conflict(parsed, student):
                 return _conflict_result()
             if not exact_sid and (
-                parsed.notice_no
-                and student.notice_no
-                and not notice_nos_match(parsed.notice_no, student.notice_no)
+                (
+                    parsed.notice_no
+                    and student.notice_no
+                    and not notice_nos_match(parsed.notice_no, student.notice_no)
+                )
+                or (
+                    parsed.exam_no
+                    and student.exam_no
+                    and not exam_nos_match(parsed.exam_no, student.exam_no)
+                )
             ):
                 return _conflict_result()
             qq_match = student_qq_matches(applicant_user_id, student.qq)
@@ -179,6 +225,34 @@ def match_student(
                 strength="none",
                 confidence=0,
                 reason="姓名+学号前缀匹配多条记录，需人工复核",
+            )
+
+    if parsed.name and parsed.exam_no:
+        candidates = [
+            s
+            for s in students
+            if s.exam_no
+            and names_match(parsed.name, s.name)
+            and exam_nos_match(parsed.exam_no, s.exam_no)
+        ]
+        if len(candidates) == 1:
+            student = candidates[0]
+            if has_credential_conflict(parsed, student):
+                return _conflict_result()
+            qq_match = student_qq_matches(applicant_user_id, student.qq)
+            return _build_result(
+                "strong",
+                student,
+                ["name_examNo"],
+                0.95,
+                "姓名+考生号强匹配",
+                qq_match=qq_match,
+            )
+        if len(candidates) > 1:
+            return MatchResult(
+                strength="none",
+                confidence=0,
+                reason="姓名+考生号匹配多条记录，需人工复核",
             )
 
     if parsed.name and parsed.notice_no:
@@ -282,11 +356,34 @@ def match_student(
             return MatchResult(
                 strength="none",
                 matched_student_key=by_sid[0].key,
+                matched_student=by_sid[0],
                 confidence=0.3,
                 reason="仅学号匹配，缺少姓名，需人工复核",
             )
 
-    if parsed.name and not parsed.student_id and not parsed.notice_no and not parsed.major and not parsed.academy:
+    if parsed.exam_no and not parsed.name:
+        by_exam = [
+            s
+            for s in students
+            if s.exam_no and exam_nos_match(parsed.exam_no, s.exam_no)
+        ]
+        if len(by_exam) == 1:
+            return MatchResult(
+                strength="none",
+                matched_student_key=by_exam[0].key,
+                matched_student=by_exam[0],
+                confidence=0.3,
+                reason="仅考生号匹配，缺少姓名，需人工复核",
+            )
+
+    if (
+        parsed.name
+        and not parsed.student_id
+        and not parsed.exam_no
+        and not parsed.notice_no
+        and not parsed.major
+        and not parsed.academy
+    ):
         by_name = [s for s in students if names_match(parsed.name, s.name)]
         if len(by_name) == 1:
             return MatchResult(
@@ -313,11 +410,15 @@ def match_student(
 
 
 def is_non_grade26(match: MatchResult, parsed: ParsedApplication) -> bool:
-    from core.normalize import is_grade26_student_id
-
     if parsed.student_id and not is_grade26_student_id(parsed.student_id):
         return True
-    if match.matched_student and match.matched_student.student_id:
-        if not is_grade26_student_id(match.matched_student.student_id):
-            return True
+    if parsed.exam_no and not is_grade26_exam_no(parsed.exam_no):
+        return True
+    if match.matched_student:
+        if match.matched_student.student_id:
+            if not is_grade26_student_id(match.matched_student.student_id):
+                return True
+        elif match.matched_student.exam_no:
+            if not is_grade26_exam_no(match.matched_student.exam_no):
+                return True
     return False

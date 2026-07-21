@@ -5,7 +5,9 @@ from dataclasses import dataclass, field
 
 from core.aliases import is_known_major_token
 from core.normalize import (
+    is_exam_no_shape,
     looks_like_qq_token,
+    normalize_exam_no,
     normalize_name,
     normalize_notice_no,
     normalize_student_id,
@@ -16,14 +18,23 @@ STUDENT_ID_PATTERN = re.compile(r"\b(261\d{6})\b")
 STUDENT_ID_SHORT_PATTERN = re.compile(r"\b(261\d{5})\b")
 STUDENT_ID_LEGACY_PATTERN = re.compile(r"\b(2[0-9]1\d{6})\b")
 NOTICE_NO_PATTERN = re.compile(r"\b(202[56]\d{4})\b")
+EXAM_NO_PATTERN = re.compile(r"\b(2[0-9]\d{12})\b")
 LOOSE_TOKEN_PATTERN = re.compile(r"\b([A-Za-z0-9][A-Za-z0-9\-_/]{3,31})\b")
 # QQ 答案常见分隔：空白、中英文标点，以及 + / ＋ ／
 FIELD_SEPARATOR_PATTERN = re.compile(r"[\s,，、；;|+＋/／]+")
 NAME_LABEL_PATTERN = re.compile(
-    r"(?:姓名|名字|真实姓名)[:：\s]+([\u4e00-\u9fa5·]{2,4})(?=\s|学号|通知书|编号|专业|$|[:：])",
+    r"(?:姓名|名字|真实姓名)[:：\s]+([\u4e00-\u9fa5·]{2,4})"
+    r"(?=\s|学号|考生号|准考证|报名号|通知书|编号|专业|$|[:：])",
     re.IGNORECASE,
 )
-STUDENT_ID_LABEL_PATTERN = re.compile(r"(?:学号|student\s*id)[:：\s]*(\d{6,12})", re.IGNORECASE)
+STUDENT_ID_LABEL_PATTERN = re.compile(
+    r"(?:学号|student\s*id)[:：\s]*(\d{6,12})(?!\d)",
+    re.IGNORECASE,
+)
+EXAM_NO_LABEL_PATTERN = re.compile(
+    r"(?:高考考生号|考生号|准考证号|报名号)[:：\s]*(\d{10,16})",
+    re.IGNORECASE,
+)
 NOTICE_LABEL_PATTERN = re.compile(
     r"(?:录取通知书编号|通知书编号|通知书号|录取通知书|录取编号)"
     r"[:：\s]*([A-Za-z0-9][A-Za-z0-9\-_/]{3,31})",
@@ -60,6 +71,9 @@ _TEMPLATE_TOKENS = frozenset(
         "学号",
         "录取号",
         "学号/录取号",
+        "考生号",
+        "准考证号",
+        "报名号",
         "专业",
         "答案",
         "答",
@@ -82,6 +96,9 @@ _NON_PERSON_NAME_TOKENS = frozenset(
         "通知书",
         "录取号",
         "录取",
+        "考生号",
+        "准考证号",
+        "报名号",
         "答案",
         "回答",
         "问题",
@@ -89,7 +106,8 @@ _NON_PERSON_NAME_TOKENS = frozenset(
 )
 
 SELF_INTRO_NAME_PATTERN = re.compile(
-    r"(?:我是|我叫|本人是|名叫)([\u4e00-\u9fa5·]{2,4})(?=$|[，,。.\s；;、]|学号|专业|书院)"
+    r"(?:我是|我叫|本人是|名叫)([\u4e00-\u9fa5·]{2,4})"
+    r"(?=$|[，,。.\s；;、]|学号|考生号|专业|书院)"
 )
 
 
@@ -98,6 +116,7 @@ class ParsedApplication:
     raw: str
     name: str | None = None
     student_id: str | None = None
+    exam_no: str | None = None
     notice_no: str | None = None
     major: str | None = None
     academy: str | None = None
@@ -143,10 +162,16 @@ def _is_template_token(token: str) -> bool:
 
 
 def _add_notice_candidate(result: ParsedApplication, value: str) -> None:
+    if is_exam_no_shape(value):
+        return
     norm = normalize_notice_no(value)
     if not norm:
         return
+    if is_exam_no_shape(norm):
+        return
     if result.student_id and normalize_student_id(result.student_id) == normalize_student_id(norm):
+        return
+    if result.exam_no and normalize_exam_no(result.exam_no) == normalize_exam_no(norm):
         return
     if looks_like_qq_token(value):
         return
@@ -162,30 +187,64 @@ def _finalize_notice_candidates(result: ParsedApplication) -> None:
     unique = []
     seen: set[str] = set()
     for item in result.notice_no_candidates:
+        if is_exam_no_shape(item):
+            continue
         if item not in seen:
             seen.add(item)
             unique.append(item)
     result.notice_no_candidates = unique
+    if result.notice_no and is_exam_no_shape(result.notice_no):
+        result.notice_no = unique[0] if unique else None
     if len(unique) > 1:
         norms = set(unique)
         if len(norms) > 1:
             result.parse_errors.append("multiple notice_no candidates")
 
 
+def _assign_exam_no(result: ParsedApplication, value: str) -> None:
+    normalized = normalize_exam_no(value)
+    if not is_exam_no_shape(normalized):
+        return
+    if result.exam_no:
+        return
+    result.exam_no = normalized
+
+
 def _assign_student_id(result: ParsedApplication, value: str) -> None:
     normalized = normalize_student_id(value)
     if not normalized:
+        return
+    # Never put 14-digit exam numbers into student_id.
+    if is_exam_no_shape(normalized):
+        _assign_exam_no(result, normalized)
         return
     if result.student_id:
         return
     result.student_id = normalized
 
 
+def _find_exam_no_in_text(text: str) -> str | None:
+    match = EXAM_NO_PATTERN.search(text)
+    if match:
+        return match.group(1)
+    return None
+
+
 def _find_student_id_in_text(text: str) -> str | None:
     for pattern in (STUDENT_ID_PATTERN, STUDENT_ID_SHORT_PATTERN, STUDENT_ID_LEGACY_PATTERN):
         match = pattern.search(text)
-        if match:
-            return match.group(1)
+        if not match:
+            continue
+        candidate = match.group(1)
+        start, end = match.span(1)
+        # Reject prefix of a longer 14-digit exam number.
+        if end < len(text) and text[end].isdigit():
+            window = re.sub(r"\D", "", text[start : start + 20])
+            if is_exam_no_shape(window[:14]):
+                continue
+        if is_exam_no_shape(candidate):
+            continue
+        return candidate
     return None
 
 
@@ -230,7 +289,11 @@ def parse_application_comment(raw: str) -> ParsedApplication:
 
     sid_label = STUDENT_ID_LABEL_PATTERN.search(text)
     if sid_label:
-        result.student_id = normalize_student_id(sid_label.group(1))
+        _assign_student_id(result, sid_label.group(1))
+
+    exam_label = EXAM_NO_LABEL_PATTERN.search(text)
+    if exam_label:
+        _assign_exam_no(result, exam_label.group(1))
 
     notice_label = NOTICE_LABEL_PATTERN.search(text)
     if notice_label:
@@ -251,6 +314,11 @@ def parse_application_comment(raw: str) -> ParsedApplication:
     if academy_label:
         result.academy = academy_label.group(1).strip()
 
+    if not result.exam_no:
+        exam = _find_exam_no_in_text(text)
+        if exam:
+            _assign_exam_no(result, exam)
+
     if not result.student_id:
         sid = _find_student_id_in_text(text)
         if sid:
@@ -263,6 +331,8 @@ def parse_application_comment(raw: str) -> ParsedApplication:
 
     if not result.student_id:
         for loose in LOOSE_TOKEN_PATTERN.findall(text):
+            if is_exam_no_shape(loose):
+                continue
             if STUDENT_ID_PATTERN.fullmatch(loose):
                 continue
             if looks_like_qq_token(loose):
@@ -282,7 +352,13 @@ def parse_application_comment(raw: str) -> ParsedApplication:
         result.name = None
         _parse_by_tokens(text, result)
 
-    if not result.name and not result.student_id and not result.notice_no and not result.major:
+    if (
+        not result.name
+        and not result.student_id
+        and not result.exam_no
+        and not result.notice_no
+        and not result.major
+    ):
         result.parse_errors.append("unable to parse any field")
 
     _finalize_notice_candidates(result)
@@ -290,16 +366,28 @@ def parse_application_comment(raw: str) -> ParsedApplication:
 
 
 def _extract_compact_credentials(text: str, result: ParsedApplication) -> None:
+    if not result.exam_no:
+        exam_compact = re.search(
+            r"([\u4e00-\u9fa5·]{2,4})(2[0-9]\d{12})",
+            text,
+        )
+        if exam_compact:
+            candidate_name = exam_compact.group(1)
+            if _looks_like_person_name(candidate_name):
+                _assign_name_if_better(result, candidate_name)
+            _assign_exam_no(result, exam_compact.group(2))
+
     if not result.student_id:
-        sid_compact = re.search(r"([\u4e00-\u9fa5·]{2,4})(2[0-9]1\d{5,6})", text)
+        # (?!\d) avoids taking a 9-digit prefix of a 14-digit exam number.
+        sid_compact = re.search(r"([\u4e00-\u9fa5·]{2,4})(2[0-9]1\d{5,6})(?!\d)", text)
         if sid_compact:
             candidate_name = sid_compact.group(1)
             if _looks_like_person_name(candidate_name):
                 _assign_name_if_better(result, candidate_name)
-            result.student_id = sid_compact.group(2)
+            _assign_student_id(result, sid_compact.group(2))
 
     if not result.notice_no:
-        notice_compact = re.search(r"([\u4e00-\u9fa5·]{2,4})(202[56]\d{4})", text)
+        notice_compact = re.search(r"([\u4e00-\u9fa5·]{2,4})(202[56]\d{4})(?!\d)", text)
         if notice_compact:
             candidate_name = notice_compact.group(1)
             if _looks_like_person_name(candidate_name):
@@ -309,6 +397,26 @@ def _extract_compact_credentials(text: str, result: ParsedApplication) -> None:
 
 
 def _split_mixed_token(token: str) -> dict[str, str]:
+    glued_exam_major = re.match(
+        r"^([\u4e00-\u9fa5·]{2,4})(2[0-9]\d{12})([\u4e00-\u9fa5a-zA-Z（）()·\-]{2,30})$",
+        token,
+    )
+    if glued_exam_major:
+        out = {
+            "exam_no": normalize_exam_no(glued_exam_major.group(2)),
+            "major": glued_exam_major.group(3).strip(),
+        }
+        if _looks_like_person_name(glued_exam_major.group(1)):
+            out["name"] = normalize_name(glued_exam_major.group(1))
+        return out
+
+    exam_match = re.match(r"^([\u4e00-\u9fa5·]{2,4})(2[0-9]\d{12})$", token)
+    if exam_match:
+        out = {"exam_no": normalize_exam_no(exam_match.group(2))}
+        if _looks_like_person_name(exam_match.group(1)):
+            out["name"] = normalize_name(exam_match.group(1))
+        return out
+
     glued_major = re.match(
         r"^([\u4e00-\u9fa5·]{2,4})(2[0-9]1\d{5,6})([\u4e00-\u9fa5a-zA-Z（）()·\-]{2,30})$",
         token,
@@ -354,7 +462,9 @@ def _parse_by_tokens(text: str, result: ParsedApplication) -> None:
 
         split = _split_mixed_token(token)
         if split.get("student_id") and not result.student_id:
-            result.student_id = split["student_id"]
+            _assign_student_id(result, split["student_id"])
+        if split.get("exam_no") and not result.exam_no:
+            _assign_exam_no(result, split["exam_no"])
         if split.get("notice_no") and not result.notice_no:
             _add_notice_candidate(result, split["notice_no"])
         if split.get("major") and not result.major:
@@ -363,11 +473,20 @@ def _parse_by_tokens(text: str, result: ParsedApplication) -> None:
             names.append(split["name"])
             continue
 
-        # Prefer credential tokens before name/major heuristics.
+        # Credential priority: student_id → exam_no → notice_no → name → major
         sid = _find_student_id_in_text(token)
         if sid:
             if not result.student_id:
                 _assign_student_id(result, sid)
+            continue
+        exam = _find_exam_no_in_text(token)
+        if exam:
+            if not result.exam_no:
+                _assign_exam_no(result, exam)
+            continue
+        if is_exam_no_shape(token):
+            if not result.exam_no:
+                _assign_exam_no(result, token)
             continue
         notice_match = NOTICE_NO_PATTERN.fullmatch(token) or NOTICE_NO_PATTERN.search(token)
         if notice_match and notice_match.group(1) != result.student_id:

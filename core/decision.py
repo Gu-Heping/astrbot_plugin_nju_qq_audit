@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from core.matcher import MatchResult, is_non_grade26
-from core.normalize import has_non_grade26_keyword
+from core.normalize import has_non_grade26_keyword, is_grade26_exam_no
 from core.parser import ParsedApplication
 
 Decision = Literal["approve", "manual_review", "reject", "ignored"]
@@ -38,6 +38,16 @@ def make_decision(
             suggestion="请确认是否为26级新生",
         )
 
+    if parsed.exam_no and not is_grade26_exam_no(parsed.exam_no):
+        return DecisionResult(
+            decision="manual_review",
+            confidence=match.confidence,
+            reason="考生号非26级（前两位非26），需人工复核",
+            suggestion="可能是往届考生，请勿自动通过",
+            matched_student_key=match.matched_student_key,
+            match_type=match.strength,
+        )
+
     if is_non_grade26(match, parsed):
         return DecisionResult(
             decision="manual_review",
@@ -63,7 +73,7 @@ def make_decision(
             decision="manual_review",
             confidence=match.confidence,
             reason=match.reason,
-            suggestion="姓名+专业/书院弱匹配，请人工核实学号或通知书编号",
+            suggestion="姓名+专业/书院弱匹配，请人工核实学号/通知书编号/考生号",
             matched_student_key=match.matched_student_key,
             match_type="weak",
         )
@@ -78,20 +88,32 @@ def make_decision(
             match_type="auxiliary",
         )
 
-    if not parsed.name and not parsed.student_id and not parsed.notice_no and not parsed.major:
+    if (
+        not parsed.name
+        and not parsed.student_id
+        and not parsed.exam_no
+        and not parsed.notice_no
+        and not parsed.major
+    ):
         return DecisionResult(
             decision="manual_review",
             confidence=0,
             reason="无法解析申请信息",
-            suggestion="请联系申请人补充姓名+学号或姓名+通知书编号",
+            suggestion="请联系申请人补充姓名+学号/通知书编号/考生号",
         )
 
-    if parsed.name and not parsed.student_id and not parsed.notice_no and not parsed.major:
+    if (
+        parsed.name
+        and not parsed.student_id
+        and not parsed.exam_no
+        and not parsed.notice_no
+        and not parsed.major
+    ):
         return DecisionResult(
             decision="manual_review",
             confidence=match.confidence,
             reason="仅姓名，信息不足",
-            suggestion="请核实学号或通知书编号",
+            suggestion="请核实学号/通知书编号/考生号",
             matched_student_key=match.matched_student_key,
         )
 
@@ -100,7 +122,7 @@ def make_decision(
             decision="manual_review",
             confidence=0,
             reason="仅专业，无法确认身份",
-            suggestion="请核实姓名+学号",
+            suggestion="请核实姓名+学号/通知书编号/考生号",
         )
 
     return DecisionResult(

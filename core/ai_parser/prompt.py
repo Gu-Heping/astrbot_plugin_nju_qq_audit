@@ -47,6 +47,9 @@ def build_ai_parse_messages(
         f"Schema 示例：{ai_fields_json_schema_hint()}。"
         "admission_type 只能是 硕士、博士 或 null；"
         "若答案是「硕/博」「硕士/博士」等占位，admission_type=null 且 ambiguous=true。"
+        "本科考生号是 14 位数字，通常以 26 开头；它不是学号。"
+        "不要把考生号填到 student_id。"
+        "如果答案中出现 14 位考生号，填 exam_no。"
         "evidence 中每个非空值必须是原文中可找到的子串。"
         "不要编造学号、姓名或专业。"
     )

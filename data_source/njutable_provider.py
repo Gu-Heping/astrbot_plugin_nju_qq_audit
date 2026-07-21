@@ -9,7 +9,7 @@ from data_source.mock_provider import generate_mock_students
 from data_source.njutable_client import NjuTableClient
 from data_source.student_cache import StudentCache, SyncState, utc_now_iso
 from data_source.students import Student, build_student_key, sanitize_student_for_cache
-from core.normalize import parse_qq_field
+from core.normalize import normalize_exam_no, parse_qq_field
 
 HARD_EXCLUDED_STATUSES = frozenset({"有问题"})
 
@@ -43,11 +43,13 @@ def map_row_to_student(row: dict[str, Any], settings: PluginSettings) -> Student
     name = _cell_value(row, cols.name)
     if not name:
         return None
+    raw_exam = _cell_value(row, cols.exam_no)
+    exam_no = normalize_exam_no(raw_exam) if raw_exam else None
     student = Student(
         name=name,
         updated_at=utc_now_iso(),
         notice_no=_cell_value(row, cols.notice_no),
-        exam_no=_cell_value(row, cols.exam_no),
+        exam_no=exam_no or None,
         gender=_cell_value(row, cols.gender),
         origin=_cell_value(row, cols.origin),
         subject=_cell_value(row, cols.subject),

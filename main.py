@@ -52,6 +52,7 @@ from admin.pending import fetch_pending_for_admin
 from admin.lookup import (
     format_lookup_help,
     format_lookup_result,
+    lookup_query_has_fields,
     parse_lookup_args,
     run_lookup,
 )
@@ -565,17 +566,11 @@ class NjuQqAuditPlugin(Star):
         if not payload:
             yield event.plain_result(format_lookup_help())
             return
-        name, student_id, major = parse_lookup_args(payload)
-        if not name and not student_id and not major:
+        query = parse_lookup_args(payload)
+        if not lookup_query_has_fields(query):
             yield event.plain_result(format_lookup_help())
             return
-        result = run_lookup(
-            self._settings(),
-            self.ctx.cache,
-            name=name,
-            student_id=student_id,
-            major=major,
-        )
+        result = run_lookup(self._settings(), self.ctx.cache, query=query)
         yield event.plain_result(format_lookup_result(result))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
