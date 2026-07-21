@@ -113,6 +113,7 @@ def _parsed_to_dict(parsed, *, comment: str | None = None, profile: str | None =
             "raw": getattr(parsed, "raw", None),
             "name": parsed.name,
             "student_id": parsed.student_id,
+            "exam_no": getattr(parsed, "exam_no", None),
             "notice_no": parsed.notice_no,
             "major": parsed.major,
             "academy": parsed.academy,

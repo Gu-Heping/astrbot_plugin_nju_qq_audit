@@ -9,6 +9,7 @@ class AiParsedFields:
     profile: str
     name: str | None = None
     student_id: str | None = None
+    exam_no: str | None = None
     notice_no: str | None = None
     major: str | None = None
     academy: str | None = None
@@ -25,6 +26,7 @@ class AiParsedFields:
             for key in (
                 "name",
                 "student_id",
+                "exam_no",
                 "notice_no",
                 "major",
                 "academy",

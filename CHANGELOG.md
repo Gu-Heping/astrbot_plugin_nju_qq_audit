@@ -2,6 +2,16 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.19] - 2026-07-21
+
+### 新增
+
+- 本科审核新增考生号识别与强匹配：支持“姓名+考生号”作为强凭证。
+- NJUTable 本科同步确认支持“考生号”列。
+- AI JSON parser schema 新增 exam_no，且保持 answer-only evidence 与默认不允许 AI 自动通过。
+- 管理员 lookup 支持考生号查询。
+- 帮助与 release/catchup 文案补充“考生号”。
+
 ## [v0.4.18] - 2026-07-19
 
 ### 优化

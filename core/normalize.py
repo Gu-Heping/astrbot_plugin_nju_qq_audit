@@ -121,9 +121,44 @@ def notice_nos_match(a: str, b: str) -> bool:
 
 
 def looks_like_qq_token(token: str) -> bool:
-    digits = re.sub(r"\D", "", token)
-    if not digits or not token.isdigit():
+    digits = re.sub(r"\D", "", to_halfwidth(token))
+    if not digits or not re.fullmatch(r"\d+", to_halfwidth(token).strip()):
+        return False
+    # 14-digit exam numbers must never be treated as QQ.
+    if is_exam_no_shape(digits):
         return False
     if len(digits) >= 8 and digits.startswith(("2025", "2026")):
         return False
     return 5 <= len(digits) <= 11
+
+
+def normalize_exam_no(value: str) -> str:
+    """Halfwidth digits only; undergraduate exam numbers are 14 digits."""
+    return re.sub(r"\D", "", to_halfwidth(value or ""))
+
+
+def is_exam_no_shape(value: str) -> bool:
+    """True for 14-digit credentials starting with 2[0-9] (not QQ / student_id)."""
+    normalized = normalize_exam_no(value)
+    return bool(re.fullmatch(r"2[0-9]\d{12}", normalized))
+
+
+def exam_nos_match(a: str, b: str) -> bool:
+    na = normalize_exam_no(a)
+    nb = normalize_exam_no(b)
+    if not na or not nb:
+        return False
+    return na == nb
+
+
+def is_grade26_exam_no(value: str) -> bool:
+    normalized = normalize_exam_no(value)
+    return bool(re.fullmatch(r"26\d{12}", normalized))
+
+
+def mask_exam_no(value: str) -> str:
+    """Mask for debug logs: 26123456****01."""
+    normalized = normalize_exam_no(value)
+    if len(normalized) < 10:
+        return "****"
+    return f"{normalized[:8]}****{normalized[-2:]}"

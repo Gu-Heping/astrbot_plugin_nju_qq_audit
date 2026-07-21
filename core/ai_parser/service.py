@@ -93,7 +93,7 @@ def undergrad_parse_incomplete(parsed: ParsedApplication) -> bool:
         return True
     if not parsed.name:
         return True
-    if not parsed.student_id and not parsed.notice_no:
+    if not parsed.student_id and not parsed.notice_no and not parsed.exam_no:
         return True
     return False
 
@@ -114,12 +114,14 @@ def merge_ai_fields_into_undergrad_parsed(
     parsed: ParsedApplication,
     ai_fields: AiParsedFields,
 ) -> ParsedApplication:
-    """Fill missing undergrad fields only; never overwrite student_id/notice_no."""
+    """Fill missing undergrad fields only; never overwrite student_id/notice_no/exam_no."""
     if ai_fields.name:
         if not parsed.name or is_template_misparsed_name(parsed.name):
             parsed.name = ai_fields.name
     if ai_fields.student_id and not parsed.student_id:
         parsed.student_id = ai_fields.student_id
+    if ai_fields.exam_no and not parsed.exam_no:
+        parsed.exam_no = ai_fields.exam_no
     if ai_fields.notice_no and not parsed.notice_no:
         parsed.notice_no = ai_fields.notice_no
         if ai_fields.notice_no not in parsed.notice_no_candidates:

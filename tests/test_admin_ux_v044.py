@@ -208,7 +208,7 @@ def test_sweep_release_copy_no_english_jargon():
     assert "strong match" not in release
     assert "本科申请" in release
     assert "系统强匹配" in release
-    assert "学号判断为 26 级" in release
+    assert "学号/考生号判断为 26 级" in release
     assert "仍在待处理队列中" in release
 
     catchup = format_catchup_help(settings)

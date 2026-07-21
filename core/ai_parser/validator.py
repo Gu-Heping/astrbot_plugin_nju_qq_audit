@@ -3,7 +3,13 @@ from __future__ import annotations
 import re
 
 from core.ai_parser.models import AiParsedFields
-from core.normalize import normalize_name, normalize_notice_no, normalize_student_id
+from core.normalize import (
+    is_exam_no_shape,
+    normalize_exam_no,
+    normalize_name,
+    normalize_notice_no,
+    normalize_student_id,
+)
 from graduate.parser import normalize_admission_type
 
 _CHINESE_NAME = re.compile(r"^[\u4e00-\u9fa5·]{2,4}$")
@@ -201,17 +207,31 @@ def validate_ai_fields(
     # student_id
     if fields.student_id:
         sid = normalize_student_id(fields.student_id)
-        if not _STUDENT_ID_OK.fullmatch(sid):
+        if is_exam_no_shape(sid):
+            _drop("student_id", "invalid_student_id")
+        elif not _STUDENT_ID_OK.fullmatch(sid):
             _drop("student_id", "invalid_student_id")
         elif not _evidence_ok("student_id", sid, evidence, answer_haystack):
             _drop("student_id", "evidence_missing")
         else:
             fields.student_id = sid
 
+    # exam_no
+    if fields.exam_no:
+        exam = normalize_exam_no(fields.exam_no)
+        if not is_exam_no_shape(exam):
+            _drop("exam_no", "invalid_exam_no")
+        elif not _evidence_ok("exam_no", fields.exam_no, evidence, answer_haystack):
+            _drop("exam_no", "evidence_missing")
+        else:
+            fields.exam_no = exam
+
     # notice_no
     if fields.notice_no:
         notice = normalize_notice_no(fields.notice_no)
         if not notice or len(notice) < 4:
+            _drop("notice_no", "invalid_notice_no")
+        elif is_exam_no_shape(notice):
             _drop("notice_no", "invalid_notice_no")
         elif notice.isdigit() and not _NOTICE_NO_DIGIT.fullmatch(notice):
             _drop("notice_no", "invalid_notice_no")

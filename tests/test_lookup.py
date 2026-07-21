@@ -25,11 +25,14 @@ def _cache_with(tmp_path: Path, students: list[Student]) -> tuple:
 
 
 def test_parse_lookup_args():
-    assert parse_lookup_args("张三 261220001") == ("张三", "261220001", None)
-    name, sid, major = parse_lookup_args("张三 261220001 计算机科学与技术")
-    assert name == "张三"
-    assert sid == "261220001"
-    assert major == "计算机科学与技术"
+    parsed = parse_lookup_args("张三 261220001")
+    assert parsed.name == "张三"
+    assert parsed.student_id == "261220001"
+    assert parsed.exam_no is None
+    parsed = parse_lookup_args("张三 261220001 计算机科学与技术")
+    assert parsed.name == "张三"
+    assert parsed.student_id == "261220001"
+    assert parsed.major == "计算机科学与技术"
 
 
 def test_lookup_strong_hit(tmp_path):
@@ -76,4 +79,4 @@ def test_lookup_no_hits(tmp_path):
     settings, cache = _cache_with(tmp_path, [])
     result = run_lookup(settings, cache, name="不存在", student_id="261299999")
     assert result.match.strength == "none"
-    assert "无同名或同学号" in format_lookup_result(result)
+    assert "无同名" in format_lookup_result(result)

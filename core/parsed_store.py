@@ -10,7 +10,7 @@ from core.normalize import normalize_whitespace
 from core.parser import ParsedApplication
 from graduate.models import GraduateParsedApplication
 
-PARSER_VERSION = "v0.4.17"
+PARSER_VERSION = "v0.4.19"
 
 # Strip spaces around separators so「何聿璿+261」and「何聿璿 + 261」hash equal.
 _HASH_SEP = re.compile(r"\s*([+＋/／,，、|;；：:（）()])\s*")
@@ -36,6 +36,7 @@ def undergrad_parsed_from_dict(
         raw=str(payload.get("raw") or raw_comment or ""),
         name=payload.get("name"),
         student_id=payload.get("student_id"),
+        exam_no=payload.get("exam_no"),
         notice_no=payload.get("notice_no"),
         major=payload.get("major"),
         academy=payload.get("academy"),
@@ -101,6 +102,7 @@ def stored_parsed_has_fields(stored: dict[str, Any] | None) -> bool:
         for key in (
             "name",
             "student_id",
+            "exam_no",
             "notice_no",
             "major",
             "academy",
@@ -202,6 +204,9 @@ def fill_undergrad_gaps_from_stored(
         filled_from_stored = True
     if not fresh.student_id and stored.student_id:
         fresh.student_id = stored.student_id
+        filled_from_stored = True
+    if not fresh.exam_no and stored.exam_no:
+        fresh.exam_no = stored.exam_no
         filled_from_stored = True
     if not fresh.notice_no and stored.notice_no:
         fresh.notice_no = stored.notice_no

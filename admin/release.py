@@ -6,7 +6,11 @@ from typing import Awaitable, Callable
 
 from admin.labels import applicant_summary
 from config import PluginSettings
-from core.normalize import has_non_grade26_keyword, is_grade26_student_id
+from core.normalize import (
+    has_non_grade26_keyword,
+    is_grade26_exam_no,
+    is_grade26_student_id,
+)
 from core.pending_reconcile import build_group_snapshot_fetch
 from core.pipeline import RematchSummary
 from data_source.student_cache import SyncState
@@ -91,12 +95,25 @@ def _effective_student_id(req: PendingRequest) -> str | None:
     return None
 
 
+def _effective_exam_no(req: PendingRequest) -> str | None:
+    parsed = req.parsed or {}
+    exam = parsed.get("exam_no")
+    if exam:
+        return str(exam)
+    match = req.match or {}
+    matched_exam = match.get("matched_exam_no")
+    if matched_exam:
+        return str(matched_exam)
+    return None
+
 def _is_grade26_releasable(req: PendingRequest) -> bool:
     sid = _effective_student_id(req)
-    if not sid:
-        return False
-    return is_grade26_student_id(sid)
-
+    if sid:
+        return is_grade26_student_id(sid)
+    exam = _effective_exam_no(req)
+    if exam:
+        return is_grade26_exam_no(exam)
+    return False
 
 def is_releasable(req: PendingRequest, settings: PluginSettings) -> bool:
     if getattr(req, "profile", "undergraduate") == "graduate":
@@ -355,7 +372,7 @@ def format_release_help(count: int, settings: PluginSettings) -> str:
             "筛选条件（须同时满足）：",
             "- 本科申请",
             "- 系统强匹配",
-            "- 学号判断为 26 级",
+            "- 学号/考生号判断为 26 级",
             "- 仍在待处理队列中",
             "",
             "说明：",
@@ -383,7 +400,7 @@ def format_catchup_help(settings: PluginSettings) -> str:
             "筛选条件（须同时满足）：",
             "- 本科申请",
             "- 系统强匹配",
-            "- 学号判断为 26 级",
+            "- 学号/考生号判断为 26 级",
             "- 仍在待处理队列中",
             "",
             "说明：",
@@ -404,7 +421,7 @@ def format_release_preview(preview: ReleasePreview, settings: PluginSettings) ->
     lines.extend(
         [
             f"可分批通过：{preview.total_releasable} 条（预览）",
-            "筛选条件：本科申请 · 系统强匹配 · 学号判断为 26 级 · 仍在待处理队列中",
+            "筛选条件：本科申请 · 系统强匹配 · 学号/考生号判断为 26 级 · 仍在待处理队列中",
             f"间隔：{settings.batch_approve_interval_ms / 1000:g} 秒",
             "",
         ]
@@ -443,7 +460,7 @@ def format_release_result(result: ReleaseResult, settings: PluginSettings) -> st
         [
             prefix,
             f"间隔：{settings.batch_approve_interval_ms / 1000:g} 秒",
-            "筛选条件：本科申请 · 系统强匹配 · 学号判断为 26 级 · 仍在待处理队列中",
+            "筛选条件：本科申请 · 系统强匹配 · 学号/考生号判断为 26 级 · 仍在待处理队列中",
             "",
         ]
     )
