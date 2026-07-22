@@ -12,8 +12,10 @@ def test_ensure_ctx_compat_adds_release_and_sync(tmp_path):
     ctx = LegacyCtx(tmp_path)
     ensure_ctx_compat(ctx)
     assert hasattr(ctx, "release_service")
+    assert hasattr(ctx, "grad_release_service")
     assert hasattr(ctx, "sync_scheduler")
     assert ctx.release_service.is_running is False
+    assert ctx.grad_release_service.is_running is False
 
 
 def test_ensure_ctx_compat_backfills_graduate_sync(tmp_path):

@@ -31,7 +31,9 @@ def test_help_grad_shows_graduate_rules():
     assert "李四 010101 博" in text
     assert "硕或博 唯一匹配" in text
     assert "不会自动拒绝" in text
-    assert "release/catchup 只处理本科" in text
+    assert "release grad" in text
+    assert "catchup grad" in text
+    assert "本科 release/catchup 只处理本科" in text
     assert "不要照抄" not in text
     assert "填写顺序不限" not in text
     assert "硕士/博士" not in text

@@ -2,6 +2,19 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.20] - 2026-07-22
+
+### 新增
+
+- 新增研究生强匹配批量放行：`/audit release grad preview/confirm`。
+- 新增研究生同步后补放：`/audit catchup grad preview/confirm`。
+- 别名：`/audit grad-release`、`/audit grad-catchup`。
+
+### 说明
+
+- 本科 `release` / `catchup` 默认行为不变，仍只处理本科。
+- 研究生批量放行需显式 `grad`，不降低强匹配门槛，不自动 reject，不改变 mode。
+
 ## [v0.4.19] - 2026-07-21
 
 ### 新增

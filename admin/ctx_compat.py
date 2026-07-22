@@ -33,6 +33,14 @@ def ensure_ctx_compat(ctx) -> None:
         from admin.release import ReleaseService
 
         ctx.release_service = ReleaseService()
+    if not hasattr(ctx, "grad_release_service"):
+        from admin.grad_release import GradReleaseService
+        from admin.release import ReleaseService
+
+        share = getattr(ctx, "release_service", None)
+        if not isinstance(share, ReleaseService):
+            share = None
+        ctx.grad_release_service = GradReleaseService(share_with=share)
     if not hasattr(ctx, "sync_scheduler"):
         from data_source.sync_scheduler import SyncScheduler
 

@@ -8,6 +8,7 @@ import aiohttp
 
 from admin.notify import AdminNotifier
 from admin.display_context import DisplayContext
+from admin.grad_release import GradReleaseService
 from admin.release import ReleaseService
 from config import PluginSettings, load_settings, validate_settings
 from core.pipeline import AuditPipeline
@@ -68,6 +69,7 @@ class PluginContext:
         self._platform_id: str | None = None
         self._event_bot: Any | None = None
         self.release_service = ReleaseService()
+        self.grad_release_service = GradReleaseService(share_with=self.release_service)
         self.sync_scheduler = SyncScheduler()
         self._grad_sync_lock = asyncio.Lock()
 
@@ -124,6 +126,7 @@ class PluginContext:
 
     async def stop(self) -> None:
         self.release_service.request_cancel()
+        self.grad_release_service.request_cancel()
         await self.sync_scheduler.stop()
         await self.actions.close()
         if self._http_notify_client is not None:
