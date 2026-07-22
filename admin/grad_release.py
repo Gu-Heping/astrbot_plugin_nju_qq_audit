@@ -33,6 +33,8 @@ def _format_rematch_lines(rematch: RematchSummary | None) -> list[str]:
 
 
 def is_grad_releasable(req: PendingRequest, settings: PluginSettings) -> bool:
+    if not settings.grad_enabled:
+        return False
     if getattr(req, "profile", "undergraduate") != "graduate":
         return False
     if req.status != "pending" or req.processed_at:

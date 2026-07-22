@@ -98,6 +98,11 @@ def test_is_grad_releasable_strong_approve():
     assert not is_releasable(_grad_strong(), settings)
 
 
+def test_grad_disabled_not_releasable():
+    settings = _settings(grad_enabled=False)
+    assert not is_grad_releasable(_grad_strong(), settings)
+
+
 def test_undergrad_strong_not_grad_releasable():
     settings = _settings()
     req = _under_strong()
