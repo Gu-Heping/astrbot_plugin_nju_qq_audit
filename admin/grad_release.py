@@ -20,6 +20,7 @@ from core.pipeline import RematchSummary
 from data_source.student_cache import SyncState
 from data_source.students import PendingRequest
 from graduate.cache import GraduateStudentCache
+from storage.blacklist_store import safe_match_request
 
 
 def _format_rematch_lines(rematch: RematchSummary | None) -> list[str]:
@@ -32,7 +33,12 @@ def _format_rematch_lines(rematch: RematchSummary | None) -> list[str]:
     ]
 
 
-def is_grad_releasable(req: PendingRequest, settings: PluginSettings) -> bool:
+def is_grad_releasable(
+    req: PendingRequest,
+    settings: PluginSettings,
+    *,
+    blacklist_store=None,
+) -> bool:
     if not settings.grad_enabled:
         return False
     if getattr(req, "profile", "undergraduate") != "graduate":
@@ -71,6 +77,18 @@ def is_grad_releasable(req: PendingRequest, settings: PluginSettings) -> bool:
     if "ai_parse_merged" in errors and not settings.ai_parse_allow_auto_approve:
         return False
 
+    if settings.blacklist_enabled and blacklist_store is not None:
+        hit = safe_match_request(
+            blacklist_store,
+            group_id=req.group_id,
+            user_id=req.user_id,
+            profile="graduate",
+            parsed=parsed,
+            match=match,
+        )
+        if hit is not None:
+            return False
+
     return True
 
 
@@ -79,9 +97,14 @@ async def list_grad_releasable(
     settings: PluginSettings,
     *,
     limit: int | None = None,
+    blacklist_store=None,
 ) -> list[PendingRequest]:
     pending = await requests_store.list_pending(limit=1000)
-    releasable = [r for r in pending if is_grad_releasable(r, settings)]
+    releasable = [
+        r
+        for r in pending
+        if is_grad_releasable(r, settings, blacklist_store=blacklist_store)
+    ]
     releasable.sort(key=lambda r: r.created_at)
     if limit is not None:
         return releasable[:limit]
@@ -96,12 +119,22 @@ async def rematch_and_list_grad_releasable(
     source: str,
     limit: int | None = None,
 ) -> tuple[RematchSummary, list[PendingRequest]]:
+    blacklist_store = getattr(pipeline, "blacklist", None)
     pending_before = await requests_store.list_pending(limit=1000)
-    before_ids = {r.id for r in pending_before if is_grad_releasable(r, settings)}
+    before_ids = {
+        r.id
+        for r in pending_before
+        if is_grad_releasable(r, settings, blacklist_store=blacklist_store)
+    }
     summary = await pipeline.rematch_active_pending(
         source=source, profiles=frozenset({"graduate"})
     )
-    items = await list_grad_releasable(requests_store, settings, limit=limit)
+    items = await list_grad_releasable(
+        requests_store,
+        settings,
+        limit=limit,
+        blacklist_store=blacklist_store,
+    )
     summary.newly_releasable = sum(1 for r in items if r.id not in before_ids)
     return summary, items
 
@@ -262,6 +295,12 @@ def format_grad_release_result(result: ReleaseResult, settings: PluginSettings) 
                 status = "QQ 侧已无此申请，已移出队列"
             elif line.final_status == "external":
                 status = "用户已在群内，已标记外部通过"
+            elif line.final_status == "dismissed":
+                status = "QQ 侧已拒绝，已移出队列"
+            elif line.final_status == "already_approved":
+                status = "QQ 侧已同意，已移出队列"
+            elif line.final_status == "blacklist":
+                status = f"命中黑名单，已关闭：{line.message}"
             elif line.final_status == "skipped":
                 status = f"已跳过：{line.message}"
             lines.append(f"[{line.index}] {line.summary} ... {status}")
@@ -270,6 +309,8 @@ def format_grad_release_result(result: ReleaseResult, settings: PluginSettings) 
         [
             "完成：",
             f"成功：{result.success}",
+            f"已同意：{result.already_approved_count}",
+            f"已拒绝/已关闭：{result.dismissed_count}",
             f"已失效：{result.stale_count}",
             f"外部已入群：{result.external_count}",
             f"失败：{result.failed}",
@@ -337,9 +378,12 @@ def format_grad_catchup_result(result: CatchupResult, settings: PluginSettings) 
         stale_count=result.release.stale_count,
         external_count=result.release.external_count,
         skipped_count=result.release.skipped_count,
+        dismissed_count=result.release.dismissed_count,
+        already_approved_count=result.release.already_approved_count,
         lines=result.release.lines,
         cancelled=result.release.cancelled,
         rematch=None,
+        blacklist_blocked=result.release.blacklist_blocked,
     )
     lines.append(format_grad_release_result(release_copy, settings))
     return "\n".join(lines)
@@ -537,7 +581,11 @@ class GradReleaseService:
         count: int | None,
         audit_log,
     ) -> ReleaseResult:
-        all_releasable = await list_grad_releasable(requests_store, settings)
+        all_releasable = await list_grad_releasable(
+            requests_store,
+            settings,
+            blacklist_store=getattr(pipeline, "blacklist", None),
+        )
         if count is None:
             limit = settings.batch_approve_max_count
         else:
@@ -591,6 +639,32 @@ class GradReleaseService:
                         final_status="external",
                     )
                 )
+            elif latest.status == "dismissed":
+                result.processed += 1
+                result.dismissed_count += 1
+                result.lines.append(
+                    ReleaseLineResult(
+                        index=index_by_id[req.id],
+                        request_id=req.id,
+                        summary=summary_by_id[req.id],
+                        ok=True,
+                        message="QQ 侧已拒绝，已移出队列",
+                        final_status="dismissed",
+                    )
+                )
+            elif latest.status == "processed":
+                result.processed += 1
+                result.already_approved_count += 1
+                result.lines.append(
+                    ReleaseLineResult(
+                        index=index_by_id[req.id],
+                        request_id=req.id,
+                        summary=summary_by_id[req.id],
+                        ok=True,
+                        message="QQ 侧已同意，已移出队列",
+                        final_status="already_approved",
+                    )
+                )
             elif latest.status == "pending":
                 result.processed += 1
                 result.skipped_count += 1
@@ -606,12 +680,50 @@ class GradReleaseService:
                 )
 
         interval = settings.batch_approve_interval_ms / 1000.0
+        blacklist_store = getattr(pipeline, "blacklist", None)
         for position, req in enumerate(preflight_batch, start=1):
             idx = index_by_id.get(req.id, position)
             if self._cancel_requested():
                 result.cancelled = True
                 break
-            if not is_grad_releasable(req, settings):
+            if not is_grad_releasable(req, settings, blacklist_store=blacklist_store):
+                hit = None
+                if settings.blacklist_enabled and blacklist_store is not None:
+                    hit = safe_match_request(
+                        blacklist_store,
+                        group_id=req.group_id,
+                        user_id=req.user_id,
+                        profile="graduate",
+                        parsed=req.parsed or {},
+                        match=req.match or {},
+                    )
+                if hit is not None:
+                    dismiss_reason = f"命中黑名单：{hit.reason}"
+                    await pipeline.dismiss_pending(
+                        req, admin_user_id or "system", dismiss_reason
+                    )
+                    result.processed += 1
+                    result.dismissed_count += 1
+                    result.blacklist_blocked += 1
+                    result.lines.append(
+                        ReleaseLineResult(
+                            index=idx,
+                            request_id=req.id,
+                            summary=summary_by_id.get(req.id, applicant_summary(req)),
+                            ok=True,
+                            message=dismiss_reason,
+                            final_status="blacklist",
+                        )
+                    )
+                    if audit_log is not None:
+                        await audit_log.append(
+                            {
+                                "type": "blacklist_release_blocked",
+                                "request_id": req.id,
+                                "admin_user_id": admin_user_id,
+                                "reason": dismiss_reason,
+                            }
+                        )
                 continue
 
             action = await pipeline.admin_approve(req, admin_user_id)
@@ -619,14 +731,26 @@ class GradReleaseService:
             final_status = "success"
             line_ok = action.ok
             message = "" if action.ok else (action.message or "未知错误")
-            if not action.ok and latest is not None and latest.status == "stale":
+            if latest is not None and latest.status == "stale":
                 final_status = "stale"
                 line_ok = True
                 message = "QQ 侧已无此申请，已移出队列"
-            elif not action.ok and latest is not None and latest.status == "external":
+            elif latest is not None and latest.status == "external":
                 final_status = "external"
                 line_ok = True
                 message = "用户已在群内，已标记外部通过"
+            elif latest is not None and latest.status == "dismissed":
+                final_status = "dismissed"
+                line_ok = True
+                message = "QQ 侧已拒绝，已移出队列"
+            elif (
+                not action.ok
+                and latest is not None
+                and latest.status == "processed"
+            ):
+                final_status = "already_approved"
+                line_ok = True
+                message = "QQ 侧已同意，已移出队列"
             result.processed += 1
             line = ReleaseLineResult(
                 index=idx,
@@ -634,7 +758,7 @@ class GradReleaseService:
                 summary=summary_by_id.get(req.id, applicant_summary(req)),
                 ok=line_ok,
                 final_status=final_status,
-                message="" if action.ok else (action.message or "未知错误"),
+                message="" if action.ok and final_status == "success" else message,
             )
             if final_status != "success":
                 line.message = message
@@ -643,6 +767,10 @@ class GradReleaseService:
                 result.stale_count += 1
             elif final_status == "external":
                 result.external_count += 1
+            elif final_status == "dismissed":
+                result.dismissed_count += 1
+            elif final_status == "already_approved":
+                result.already_approved_count += 1
             elif action.ok:
                 result.success += 1
             else:
@@ -662,10 +790,11 @@ class GradReleaseService:
             if position < len(preflight_batch) and not self._cancel_requested():
                 await asyncio.sleep(interval)
 
-        remaining_all = await list_grad_releasable(requests_store, settings)
+        remaining_all = await list_grad_releasable(
+            requests_store, settings, blacklist_store=blacklist_store
+        )
         result.remaining = len(remaining_all)
         return result
-
 
 # Re-export preview item type for typing convenience in tests.
 __all__ = [

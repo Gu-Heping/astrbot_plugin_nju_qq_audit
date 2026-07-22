@@ -21,6 +21,7 @@ from onebot.compat import invoke_probe_api
 from onebot.platform_cache import cache_event_platform
 from storage.admin_session_store import AdminSessionStore
 from storage.audit_log import AuditLog
+from storage.blacklist_store import BlacklistStore
 from storage.group_display_cache import GroupDisplayCache
 from storage.list_cache import AdminListCacheStore
 from storage.requests_store import RequestsStore
@@ -38,6 +39,7 @@ class PluginContext:
         self.requests = RequestsStore(data_dir / "requests.json")
         self.audit = AuditLog(data_dir / "audit.jsonl", self.settings)
         self.runtime = RuntimeStore(data_dir / "runtime.json")
+        self.blacklist = BlacklistStore(data_dir / "blacklist.json")
         self.admin_sessions = AdminSessionStore(data_dir / "admin_sessions.json")
         self.list_cache = AdminListCacheStore(data_dir / "list_cache.json")
         self.group_display_cache = GroupDisplayCache(data_dir / "group_display_cache.json")
@@ -64,6 +66,7 @@ class PluginContext:
             self.notifier,
             grad_cache=self.grad_cache,
             astrbot_context=astrbot_context,
+            blacklist_store=self.blacklist,
         )
         self._http_session: aiohttp.ClientSession | None = None
         self._platform_id: str | None = None
