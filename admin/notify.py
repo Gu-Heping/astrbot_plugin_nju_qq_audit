@@ -11,6 +11,7 @@ except ImportError:  # pragma: no cover - unit tests without astrbot
 
 from admin.ux_formatter import (
     format_auto_result_notice,
+    format_blacklist_reject_notice,
     extract_external_applicant_and_verification,
     format_manual_review_notice,
     format_external_handled_notice,
@@ -263,6 +264,48 @@ class AdminNotifier:
             action_message=action_message,
             group_label=group_label,
             user_label=user_label,
+        )
+        await self._notify_admins(message, exclude_user_id=user_id)
+
+    async def notify_blacklist_reject_result(
+        self,
+        *,
+        request_id: str,
+        group_id: str,
+        user_id: str,
+        ok: bool,
+        reason: str,
+        reject_reason: str,
+        summary: str | None = None,
+        comment: str | None = None,
+        action_message: str | None = None,
+        group_label: str | None = None,
+        user_label: str | None = None,
+        parsed: dict | None = None,
+        final_status: str | None = None,
+    ) -> None:
+        if not self.settings.admin_notify:
+            return
+        group_label, user_label = await self._resolve_labels(
+            group_id=group_id,
+            user_id=user_id,
+            parsed=parsed,
+            group_label=group_label,
+            user_label=user_label,
+        )
+        message = format_blacklist_reject_notice(
+            request_id=request_id,
+            group_id=group_id,
+            user_id=user_id,
+            ok=ok,
+            reason=reason,
+            reject_reason=reject_reason,
+            summary=summary,
+            comment=comment,
+            action_message=action_message,
+            group_label=group_label,
+            user_label=user_label,
+            final_status=final_status,
         )
         await self._notify_admins(message, exclude_user_id=user_id)
 

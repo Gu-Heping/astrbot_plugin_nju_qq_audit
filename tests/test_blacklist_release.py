@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from unittest.mock import AsyncMock, MagicMock
 
@@ -50,7 +51,7 @@ def _under(**kwargs) -> PendingRequest:
     defaults = dict(
         id="REQ-u1",
         group_id=GROUP,
-        user_id="111",
+        user_id="11111",
         comment="张三 261220001",
         flag="flag-u1",
         sub_type="add",
@@ -73,7 +74,7 @@ def _grad(**kwargs) -> PendingRequest:
     defaults = dict(
         id="REQ-g1",
         group_id=GRAD_GROUP,
-        user_id="222",
+        user_id="22222",
         comment="李四 生物学 博士",
         flag="flag-g1",
         sub_type="add",
@@ -100,7 +101,7 @@ def _grad(**kwargs) -> PendingRequest:
 async def test_undergrad_blacklist_not_releasable(tmp_path):
     settings = _settings()
     store = BlacklistStore(tmp_path / "blacklist.json")
-    await store.add(kind="user_id", value="111", reason="家长号")
+    await store.add(kind="user_id", value="11111", reason="家长号")
     req = _under()
     assert is_releasable(req, settings)
     assert not is_releasable(req, settings, blacklist_store=store)
@@ -114,7 +115,7 @@ async def test_undergrad_blacklist_not_releasable(tmp_path):
 async def test_grad_blacklist_not_releasable(tmp_path):
     settings = _settings()
     store = BlacklistStore(tmp_path / "blacklist.json")
-    await store.add(kind="user_id", value="222", reason="异常号")
+    await store.add(kind="user_id", value="22222", reason="异常号")
     req = _grad()
     assert is_grad_releasable(req, settings)
     assert not is_grad_releasable(req, settings, blacklist_store=store)
@@ -130,7 +131,7 @@ async def test_release_batch_blocks_blacklisted_without_approve(tmp_path):
     requests = RequestsStore(tmp_path / "requests.json")
     await requests.upsert(_under())
     blacklist = BlacklistStore(tmp_path / "blacklist.json")
-    await blacklist.add(kind="user_id", value="111", reason="家长号")
+    await blacklist.add(kind="user_id", value="11111", reason="家长号")
     actions = MagicMock()
     actions.set_group_add_request = AsyncMock(
         return_value=ActionResult(ok=True, retcode=0, message="ok")
@@ -173,7 +174,7 @@ async def test_release_batch_blocks_blacklisted_without_approve(tmp_path):
 async def test_blacklist_removed_restores_releasable(tmp_path):
     settings = _settings()
     store = BlacklistStore(tmp_path / "blacklist.json")
-    entry = await store.add(kind="user_id", value="111", reason="临时")
+    entry = await store.add(kind="user_id", value="11111", reason="临时")
     req = _under()
     assert not is_releasable(req, settings, blacklist_store=store)
     await store.remove(entry.id)
@@ -186,10 +187,10 @@ async def test_release_help_count_excludes_blacklist(tmp_path):
 
     settings = _settings()
     store = BlacklistStore(tmp_path / "blacklist.json")
-    await store.add(kind="user_id", value="111", reason="家长号")
+    await store.add(kind="user_id", value="11111", reason="家长号")
     requests = RequestsStore(tmp_path / "requests.json")
     await requests.upsert(_under())
-    await requests.upsert(_under(id="REQ-u2", user_id="999", flag="flag-u2"))
+    await requests.upsert(_under(id="REQ-u2", user_id="99999", flag="flag-u2"))
 
     raw = await list_releasable(requests, settings)
     filtered = await list_releasable(requests, settings, blacklist_store=store)
@@ -205,10 +206,10 @@ async def test_grad_release_help_count_excludes_blacklist(tmp_path):
 
     settings = _settings()
     store = BlacklistStore(tmp_path / "blacklist.json")
-    await store.add(kind="user_id", value="222", reason="广告号")
+    await store.add(kind="user_id", value="22222", reason="广告号")
     requests = RequestsStore(tmp_path / "requests.json")
     await requests.upsert(_grad())
-    await requests.upsert(_grad(id="REQ-g2", user_id="888", flag="flag-g2"))
+    await requests.upsert(_grad(id="REQ-g2", user_id="88888", flag="flag-g2"))
 
     raw = await list_grad_releasable(requests, settings)
     filtered = await list_grad_releasable(requests, settings, blacklist_store=store)
@@ -225,10 +226,10 @@ async def test_home_releasable_count_excludes_blacklist(tmp_path):
 
     settings = _settings()
     store = BlacklistStore(tmp_path / "blacklist.json")
-    await store.add(kind="user_id", value="111", reason="家长号")
+    await store.add(kind="user_id", value="11111", reason="家长号")
     requests = RequestsStore(tmp_path / "requests.json")
     await requests.upsert(_under())
-    await requests.upsert(_under(id="REQ-u2", user_id="999", flag="flag-u2"))
+    await requests.upsert(_under(id="REQ-u2", user_id="99999", flag="flag-u2"))
 
     releasable = await list_releasable(requests, settings, blacklist_store=store)
     text = format_home(
@@ -246,7 +247,7 @@ async def test_home_releasable_count_excludes_blacklist(tmp_path):
 async def test_blacklist_add_from_list_ref_rejects(tmp_path):
     settings = _settings(blacklist_reject_reason="请使用本人账号并按要求填写验证信息")
     requests = RequestsStore(tmp_path / "requests.json")
-    req = _under(id="REQ-list-1", user_id="333", flag="flag-list")
+    req = _under(id="REQ-list-1", user_id="33333", flag="flag-list")
     await requests.upsert(req)
     list_cache = AdminListCacheStore(tmp_path / "list_cache.json")
     await list_cache.refresh("admin", [req.id])
@@ -265,12 +266,16 @@ async def test_blacklist_add_from_list_ref_rejects(tmp_path):
         MagicMock(),
         blacklist_store=blacklist,
     )
+    # list-ref 拉黑：全局 QQ，不写 profile
     entry = await blacklist.add(
         kind="user_id",
         value=req.user_id,
         reason="家长申请",
         created_by="admin",
+        group_id=None,
+        profile=None,
     )
+    assert entry.profile is None
     result = await pipe.admin_reject(
         req, "admin", settings.blacklist_reject_reason, list_cache=list_cache
     )
@@ -282,3 +287,73 @@ async def test_blacklist_add_from_list_ref_rejects(tmp_path):
     call = actions.set_group_add_request.await_args
     assert call.args[3] == settings.blacklist_reject_reason
     assert "黑名单" not in call.args[3]
+
+
+@pytest.mark.asyncio
+async def test_list_ref_blacklist_entry_is_global(tmp_path):
+    store = BlacklistStore(tmp_path / "blacklist.json")
+    req = _under(profile="undergraduate", user_id="12345")
+    entry = await store.add(
+        kind="user_id",
+        value=req.user_id,
+        reason="家长申请",
+        created_by="admin",
+        group_id=None,
+        profile=None,
+    )
+    assert entry.profile is None
+    assert (
+        store.match_request(
+            group_id=GRAD_GROUP,
+            user_id="12345",
+            profile="graduate",
+            parsed={},
+            match={},
+        )
+        is not None
+    )
+
+
+@pytest.mark.asyncio
+async def test_global_userid_blocks_grad_releasable(tmp_path):
+    settings = _settings()
+    store = BlacklistStore(tmp_path / "blacklist.json")
+    await store.add(kind="user_id", value="12345", reason="家长号", profile=None)
+    requests = RequestsStore(tmp_path / "requests.json")
+    await requests.upsert(_grad(user_id="12345"))
+    items = await list_grad_releasable(requests, settings, blacklist_store=store)
+    assert items == []
+
+
+@pytest.mark.asyncio
+async def test_check_finds_historical_profile_scoped_entry(tmp_path):
+    from admin.blacklist import check_blacklist_query
+
+    path = tmp_path / "blacklist.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    "BL-scoped": {
+                        "id": "BL-scoped",
+                        "kind": "user_id",
+                        "value": "12345",
+                        "reason": "历史本科拉黑",
+                        "profile": "undergraduate",
+                        "enabled": True,
+                        "created_at": "2026-07-22T00:00:00+00:00",
+                    }
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    store = BlacklistStore(path)
+    # match_user_id(profile=None) 仍可能查不到 scoped entry
+    assert store.match_user_id("12345") is None
+    text = await check_blacklist_query(store, "12345")
+    assert "命中黑名单" in text
+    assert "12345" in text
+    assert "历史本科拉黑" in text

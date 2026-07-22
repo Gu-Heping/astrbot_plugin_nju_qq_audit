@@ -1205,7 +1205,7 @@ class AuditPipeline:
                     False,
                     self.settings.blacklist_reject_reason,
                 )
-                await self._record_action_outcome(
+                final_status = await self._record_action_outcome(
                     pending,
                     action_result,
                     admin_user_id=None,
@@ -1219,26 +1219,24 @@ class AuditPipeline:
                         "group_id": event.group_id,
                         "user_id": event.user_id,
                         "ok": action_result.ok,
+                        "final_status": final_status,
                         "reason": decision.reason,
                     }
                 )
                 if self.settings.admin_notify:
                     try:
-                        await self.notifier.notify_auto_result(
+                        await self.notifier.notify_blacklist_reject_result(
                             request_id=req_id,
                             group_id=event.group_id,
                             user_id=event.user_id,
                             ok=action_result.ok,
                             reason=decision.reason,
+                            reject_reason=self.settings.blacklist_reject_reason,
                             summary=applicant_summary(pending),
                             comment=pending.comment or event.comment or "",
-                            match_strength=(
-                                getattr(match, "strength", None)
-                                or pending.match_strength
-                                or (pending.match or {}).get("strength")
-                            ),
                             action_message=action_result.message,
                             parsed=strip_internal_parsed_keys(pending.parsed or {}),
+                            final_status=final_status,
                         )
                     except Exception:
                         logger.exception(

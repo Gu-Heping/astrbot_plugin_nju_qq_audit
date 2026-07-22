@@ -1,52 +1,43 @@
 from __future__ import annotations
 
-from core.normalize import mask_exam_no
 from storage.blacklist_store import (
-    KIND_ALIASES,
-    SUPPORTED_KINDS,
+    UNSUPPORTED_KIND_HINT,
     BlacklistEntry,
     BlacklistStore,
+    is_unsupported_kind_alias,
     normalize_kind,
 )
 
 
 KIND_LABELS = {
     "user_id": "QQ",
-    "student_id": "学号",
-    "exam_no": "考生号",
-    "notice_no": "通知书编号",
-    "graduate_key": "研究生匹配键",
 }
 
 
 def format_blacklist_help() -> str:
     return "\n".join(
         [
-            "黑名单管理",
+            "黑名单管理（按 QQ 号拦截）",
             "",
             "命令：",
             "/audit blacklist list",
             "/audit blacklist add 3 confirm 家长申请",
             "/audit blacklist add qq 123456789 confirm 家长号",
-            "/audit blacklist add student <学号> confirm <原因>",
-            "/audit blacklist add exam <考生号> confirm <原因>",
-            "/audit blacklist add notice <通知书编号> confirm <原因>",
-            "/audit blacklist add grad <匹配键> confirm <原因>",
             "/audit blacklist remove BL-xxxx confirm",
             "/audit blacklist check <QQ号或编号>",
             "",
             "说明：",
-            "- 黑名单优先级高于 strong 匹配",
+            "- add 3 会拉黑第 3 条申请的 QQ 号",
+            "- 黑名单只按 QQ 号拦截，不按学号/考生号拦截，避免误伤学生本人",
             "- 命中黑名单会阻止 release/catchup 放行",
-            "- 申请时命中黑名单会按配置自动拒绝（对申请人使用中性理由）",
-            "- 不支持仅按姓名自动拒绝，避免同名误伤",
+            "- 申请时命中黑名单会按配置自动拒绝",
+            "- 对申请人使用中性拒绝理由",
+            "- 黑名单优先级高于 strong 匹配",
         ]
     )
 
 
 def _display_value(entry: BlacklistEntry) -> str:
-    if entry.kind == "exam_no":
-        return mask_exam_no(entry.value)
     return entry.value
 
 
@@ -92,7 +83,7 @@ def parse_blacklist_add_args(arg1: str, arg2: str, arg3: str, rest: str = "") ->
 
     Forms:
       add <list_index> confirm <reason>
-      add <kind> <value> confirm <reason>
+      add qq|user <QQ号> confirm <reason>
     """
     a1 = (arg1 or "").strip()
     a2 = (arg2 or "").strip()
@@ -105,6 +96,8 @@ def parse_blacklist_add_args(arg1: str, arg2: str, arg3: str, rest: str = "") ->
         if not reason:
             return None
         return {"mode": "list_ref", "ref": a1, "reason": reason}
+    if is_unsupported_kind_alias(a1):
+        return {"mode": "error", "message": UNSUPPORTED_KIND_HINT}
     kind = normalize_kind(a1)
     if kind and a3.lower() == "confirm":
         reason = trailing.strip()
@@ -123,10 +116,11 @@ async def check_blacklist_query(store: BlacklistStore, query: str) -> str:
         if entry is None:
             return f"未找到黑名单条目：{q}"
         return format_blacklist_entry(entry, title="黑名单条目")
-    hit = store.match_user_id(q)
-    if hit is None:
+    hits = store.find_user_entries(q)
+    if not hits:
         return f"未命中黑名单：{q}"
-    entry = await store.get(hit.entry_id)
-    if entry is None:
-        return f"命中黑名单 {hit.entry_id}（原因：{hit.reason}）"
-    return format_blacklist_entry(entry, title="命中黑名单")
+    entry = hits[0]
+    text = format_blacklist_entry(entry, title="命中黑名单")
+    if len(hits) > 1:
+        text = f"{text}\n（同 QQ 另有 {len(hits) - 1} 条历史条目）"
+    return text

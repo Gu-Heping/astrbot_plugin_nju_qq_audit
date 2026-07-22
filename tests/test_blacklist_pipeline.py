@@ -68,6 +68,7 @@ def _pipeline(tmp_path, *, settings=None, actions=None):
         )
     notifier = MagicMock()
     notifier.notify_auto_result = AsyncMock()
+    notifier.notify_blacklist_reject_result = AsyncMock()
     notifier.notify_manual_review = AsyncMock()
     pipe = AuditPipeline(
         settings,
