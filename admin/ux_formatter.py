@@ -705,6 +705,72 @@ def format_auto_result_notice(
     return "\n".join(lines)
 
 
+def format_blacklist_reject_notice(
+    *,
+    request_id: str,
+    group_id: str,
+    user_id: str,
+    ok: bool,
+    reason: str,
+    reject_reason: str,
+    summary: str | None = None,
+    comment: str | None = None,
+    action_message: str | None = None,
+    group_label: str | None = None,
+    user_label: str | None = None,
+) -> str:
+    """Admin notice for blacklist auto-reject success/failure."""
+    applicant = (summary or "").strip() or str(user_id or "")
+    comment_line = (comment or "").strip()[:120]
+    group_text = (group_label or "").strip() or f"群 {group_id}"
+    qq_text = (user_label or "").strip() or str(user_id or "")
+    reason_text = (reason or "").strip() or "（无）"
+    reject_text = (reject_reason or "").strip() or "（无）"
+
+    if ok:
+        title = "[入群审核] 已自动拒绝 🚫"
+    else:
+        title = "[入群审核] 黑名单自动拒绝失败 ⚠️"
+
+    lines = [
+        title,
+        "",
+        f"申请人：{applicant}",
+        f"QQ：{qq_text}",
+        f"群：{group_text}",
+    ]
+    if comment_line:
+        lines.append(f"验证：{comment_line}")
+    lines.extend(
+        [
+            "",
+            f"原因：{reason_text}",
+        ]
+    )
+    if ok:
+        lines.extend(
+            [
+                "处理：已向 QQ 发送拒绝",
+                f"发给申请人的理由：{reject_text}",
+                "",
+                "查看记录：",
+                f"/audit view {request_id}",
+            ]
+        )
+    else:
+        lines.append(f"错误：{(action_message or '').strip() or '未知错误'}")
+        lines.extend(
+            [
+                "处理：已保留记录，请管理员手动确认",
+                "",
+                "建议：",
+                "/audit list",
+                f"/audit view {request_id}",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def format_auto_warning() -> str:
     return "\n".join(
         [
