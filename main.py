@@ -237,7 +237,11 @@ class NjuQqAuditPlugin(Star):
         )
         under_pending = len(pending) - grad_pending
         adapter_probe = await self.ctx.get_adapter_probe()
-        releasable = await list_releasable(self.ctx.requests, self._settings())
+        releasable = await list_releasable(
+            self.ctx.requests,
+            self._settings(),
+            blacklist_store=self.ctx.blacklist,
+        )
         return format_home(
             self._settings(),
             effective_mode=mode,
@@ -431,7 +435,11 @@ class NjuQqAuditPlugin(Star):
         pending = await self.ctx.requests.list_pending(limit=1000)
         releasable_count = 0
         try:
-            releasable = await list_releasable(self.ctx.requests, self._settings())
+            releasable = await list_releasable(
+                self.ctx.requests,
+                self._settings(),
+                blacklist_store=self.ctx.blacklist,
+            )
             releasable_count = len(releasable)
         except Exception:
             logger.debug("[audit] help: releasable count unavailable", exc_info=True)
@@ -1161,7 +1169,11 @@ class NjuQqAuditPlugin(Star):
         await self._record_admin_session(event)
         settings = self._settings()
         if _is_grad_cmd_token(arg1):
-            releasable = await list_grad_releasable(self.ctx.requests, settings)
+            releasable = await list_grad_releasable(
+                self.ctx.requests,
+                settings,
+                blacklist_store=self.ctx.blacklist,
+            )
             if not arg2:
                 yield event.plain_result(
                     format_grad_release_help(len(releasable), settings)
@@ -1190,7 +1202,11 @@ class NjuQqAuditPlugin(Star):
                     return
             yield event.plain_result(await self._run_grad_release_batch(event, count))
             return
-        releasable = await list_releasable(self.ctx.requests, settings)
+        releasable = await list_releasable(
+            self.ctx.requests,
+            settings,
+            blacklist_store=self.ctx.blacklist,
+        )
         if not arg1:
             yield event.plain_result(format_release_help(len(releasable), settings))
             return

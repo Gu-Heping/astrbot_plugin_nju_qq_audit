@@ -14,8 +14,28 @@ def test_ensure_ctx_compat_adds_release_and_sync(tmp_path):
     assert hasattr(ctx, "release_service")
     assert hasattr(ctx, "grad_release_service")
     assert hasattr(ctx, "sync_scheduler")
+    assert hasattr(ctx, "blacklist")
     assert ctx.release_service.is_running is False
     assert ctx.grad_release_service.is_running is False
+
+
+def test_ensure_ctx_compat_binds_pipeline_blacklist_from_null(tmp_path):
+    from storage.blacklist_store import BlacklistStore, NullBlacklistStore
+
+    class Pipe:
+        def __init__(self):
+            self.blacklist = NullBlacklistStore()
+
+    class Ctx:
+        def __init__(self, data_dir):
+            self.data_dir = data_dir
+            self.blacklist = BlacklistStore(data_dir / "blacklist.json")
+            self.pipeline = Pipe()
+
+    ctx = Ctx(tmp_path)
+    ensure_ctx_compat(ctx)
+    assert ctx.pipeline.blacklist is ctx.blacklist
+    assert not isinstance(ctx.pipeline.blacklist, NullBlacklistStore)
 
 
 def test_ensure_ctx_compat_backfills_graduate_sync(tmp_path):

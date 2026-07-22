@@ -181,6 +181,68 @@ async def test_blacklist_removed_restores_releasable(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_release_help_count_excludes_blacklist(tmp_path):
+    from admin.release import format_release_help
+
+    settings = _settings()
+    store = BlacklistStore(tmp_path / "blacklist.json")
+    await store.add(kind="user_id", value="111", reason="家长号")
+    requests = RequestsStore(tmp_path / "requests.json")
+    await requests.upsert(_under())
+    await requests.upsert(_under(id="REQ-u2", user_id="999", flag="flag-u2"))
+
+    raw = await list_releasable(requests, settings)
+    filtered = await list_releasable(requests, settings, blacklist_store=store)
+    assert len(raw) == 2
+    assert len(filtered) == 1
+    help_text = format_release_help(len(filtered), settings)
+    assert "当前可通过：1 条" in help_text
+
+
+@pytest.mark.asyncio
+async def test_grad_release_help_count_excludes_blacklist(tmp_path):
+    from admin.grad_release import format_grad_release_help
+
+    settings = _settings()
+    store = BlacklistStore(tmp_path / "blacklist.json")
+    await store.add(kind="user_id", value="222", reason="广告号")
+    requests = RequestsStore(tmp_path / "requests.json")
+    await requests.upsert(_grad())
+    await requests.upsert(_grad(id="REQ-g2", user_id="888", flag="flag-g2"))
+
+    raw = await list_grad_releasable(requests, settings)
+    filtered = await list_grad_releasable(requests, settings, blacklist_store=store)
+    assert len(raw) == 2
+    assert len(filtered) == 1
+    help_text = format_grad_release_help(len(filtered), settings)
+    assert "当前可通过：1 条" in help_text
+
+
+@pytest.mark.asyncio
+async def test_home_releasable_count_excludes_blacklist(tmp_path):
+    from admin.ux_formatter import format_home
+    from data_source.student_cache import SyncState
+
+    settings = _settings()
+    store = BlacklistStore(tmp_path / "blacklist.json")
+    await store.add(kind="user_id", value="111", reason="家长号")
+    requests = RequestsStore(tmp_path / "requests.json")
+    await requests.upsert(_under())
+    await requests.upsert(_under(id="REQ-u2", user_id="999", flag="flag-u2"))
+
+    releasable = await list_releasable(requests, settings, blacklist_store=store)
+    text = format_home(
+        settings,
+        effective_mode="record-only",
+        student_count=0,
+        pending_count=2,
+        sync_state=SyncState(),
+        releasable_count=len(releasable),
+    )
+    assert "可分批通过：1 条" in text
+
+
+@pytest.mark.asyncio
 async def test_blacklist_add_from_list_ref_rejects(tmp_path):
     settings = _settings(blacklist_reject_reason="请使用本人账号并按要求填写验证信息")
     requests = RequestsStore(tmp_path / "requests.json")
