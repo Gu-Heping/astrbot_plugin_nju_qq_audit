@@ -282,6 +282,7 @@ class AdminNotifier:
         group_label: str | None = None,
         user_label: str | None = None,
         parsed: dict | None = None,
+        final_status: str | None = None,
     ) -> None:
         if not self.settings.admin_notify:
             return
@@ -304,6 +305,7 @@ class AdminNotifier:
             action_message=action_message,
             group_label=group_label,
             user_label=user_label,
+            final_status=final_status,
         )
         await self._notify_admins(message, exclude_user_id=user_id)
 

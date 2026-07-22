@@ -48,9 +48,45 @@ def test_format_blacklist_reject_notice_ok():
     assert "/audit view REQ-1" in text
     assert "已自动通过" not in text
     assert "已同意入群" not in text
+    assert "失败" not in text
 
 
-def test_format_blacklist_reject_notice_fail():
+def test_format_blacklist_reject_notice_dismissed():
+    text = format_blacklist_reject_notice(
+        request_id="REQ-d",
+        group_id=GROUP,
+        user_id="2492835361",
+        ok=False,
+        reason="命中黑名单：家长申请",
+        reject_reason="请使用本人账号并按要求填写验证信息",
+        final_status="dismissed",
+        action_message="already refuse msg",
+    )
+    assert "QQ 侧已拒绝" in text
+    assert "已移出队列" in text
+    assert "无需重复拒绝" in text
+    assert "失败" not in text
+    assert "已自动通过" not in text
+
+
+def test_format_blacklist_reject_notice_processed():
+    text = format_blacklist_reject_notice(
+        request_id="REQ-p",
+        group_id=GROUP,
+        user_id="2492835361",
+        ok=False,
+        reason="命中黑名单：家长申请",
+        reject_reason="请使用本人账号并按要求填写验证信息",
+        final_status="processed",
+        action_message="already agree msg by self",
+    )
+    assert "QQ 侧已处理" in text
+    assert "已移出队列" in text
+    assert "无需重复审批" in text
+    assert "失败" not in text
+
+
+def test_format_blacklist_reject_notice_pending_failure():
     text = format_blacklist_reject_notice(
         request_id="REQ-2",
         group_id=GROUP,
@@ -58,6 +94,7 @@ def test_format_blacklist_reject_notice_fail():
         ok=False,
         reason="命中黑名单：广告号",
         reject_reason="请使用本人账号并按要求填写验证信息",
+        final_status="pending",
         action_message="adapter unavailable",
     )
     assert "黑名单自动拒绝失败" in text
@@ -67,7 +104,7 @@ def test_format_blacklist_reject_notice_fail():
     assert "已保留记录" in text
 
 
-def _pipeline(tmp_path, *, admin_notify: bool):
+def _pipeline(tmp_path, *, admin_notify: bool, action_result: ActionResult | None = None):
     settings = load_settings(
         DummyConfig(
             {
@@ -101,7 +138,8 @@ def _pipeline(tmp_path, *, admin_notify: bool):
     blacklist = BlacklistStore(tmp_path / "blacklist.json")
     actions = MagicMock()
     actions.set_group_add_request = AsyncMock(
-        return_value=ActionResult(ok=True, retcode=0, message="ok")
+        return_value=action_result
+        or ActionResult(ok=True, retcode=0, message="ok")
     )
     notifier = MagicMock()
     notifier.notify_auto_result = AsyncMock()
@@ -117,12 +155,14 @@ def _pipeline(tmp_path, *, admin_notify: bool):
         notifier,
         blacklist_store=blacklist,
     )
-    return pipe, actions, settings, blacklist, notifier
+    return pipe, actions, settings, blacklist, notifier, requests
 
 
 @pytest.mark.asyncio
 async def test_pipeline_blacklist_reject_uses_dedicated_notify(tmp_path):
-    pipe, actions, settings, blacklist, notifier = _pipeline(tmp_path, admin_notify=True)
+    pipe, actions, settings, blacklist, notifier, _requests = _pipeline(
+        tmp_path, admin_notify=True
+    )
     await blacklist.add(kind="user_id", value="2492835361", reason="家长申请")
     event = GroupJoinRequest(
         group_id=GROUP,
@@ -136,6 +176,7 @@ async def test_pipeline_blacklist_reject_uses_dedicated_notify(tmp_path):
     notifier.notify_auto_result.assert_not_awaited()
     kwargs = notifier.notify_blacklist_reject_result.await_args.kwargs
     assert kwargs["ok"] is True
+    assert kwargs["final_status"] == "processed"
     assert kwargs["reject_reason"] == settings.blacklist_reject_reason
     assert "黑名单" not in kwargs["reject_reason"]
     assert kwargs["reason"].startswith("命中黑名单：")
@@ -145,8 +186,39 @@ async def test_pipeline_blacklist_reject_uses_dedicated_notify(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_pipeline_blacklist_already_refuse_notifies_dismissed(tmp_path):
+    pipe, _actions, settings, blacklist, notifier, requests = _pipeline(
+        tmp_path,
+        admin_notify=True,
+        action_result=ActionResult(
+            ok=False,
+            retcode=100,
+            message="OIDB error 120162003 on 0x10c8_1: already refuse msg",
+        ),
+    )
+    await blacklist.add(kind="user_id", value="2492835361", reason="家长申请")
+    event = GroupJoinRequest(
+        group_id=GROUP,
+        user_id="2492835361",
+        comment="张三 261220001",
+        flag="flag-bl-already-refuse",
+        sub_type="add",
+    )
+    req_id = await pipe._audit_and_act(event)
+    latest = await requests.get_by_id(req_id)
+    assert latest.status == "dismissed"
+    notifier.notify_blacklist_reject_result.assert_awaited()
+    notifier.notify_auto_result.assert_not_awaited()
+    kwargs = notifier.notify_blacklist_reject_result.await_args.kwargs
+    assert kwargs["ok"] is False
+    assert kwargs["final_status"] == "dismissed"
+    assert kwargs["reject_reason"] == settings.blacklist_reject_reason
+    assert "黑名单" not in kwargs["reject_reason"]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_blacklist_reject_skips_notify_when_disabled(tmp_path):
-    pipe, _actions, _settings, blacklist, notifier = _pipeline(
+    pipe, _actions, _settings, blacklist, notifier, _requests = _pipeline(
         tmp_path, admin_notify=False
     )
     await blacklist.add(kind="user_id", value="2492835361", reason="家长申请")
