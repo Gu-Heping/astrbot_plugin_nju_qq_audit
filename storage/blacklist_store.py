@@ -10,30 +10,38 @@ from pathlib import Path
 from typing import Any
 
 BLACKLIST_VERSION = 1
-SUPPORTED_KINDS = frozenset(
-    {"user_id", "student_id", "exam_no", "notice_no", "graduate_key"}
-)
+SUPPORTED_KINDS = frozenset({"user_id"})
 KIND_ALIASES = {
     "qq": "user_id",
     "user": "user_id",
     "userid": "user_id",
     "user_id": "user_id",
-    "student": "student_id",
-    "sid": "student_id",
-    "student_id": "student_id",
-    "学号": "student_id",
-    "exam": "exam_no",
-    "exam_no": "exam_no",
-    "考生号": "exam_no",
-    "notice": "notice_no",
-    "notice_no": "notice_no",
-    "通知书": "notice_no",
-    "通知书编号": "notice_no",
-    "grad": "graduate_key",
-    "graduate": "graduate_key",
-    "graduate_key": "graduate_key",
-    "研究生": "graduate_key",
+    "qq号": "user_id",
 }
+
+# 历史/误用别名：不再接受写入，match 时也忽略对应 kind
+UNSUPPORTED_KIND_HINT = "黑名单只支持 QQ 号；如需阻止家长/异常账号，请拉黑对应 QQ。"
+UNSUPPORTED_KIND_ALIASES = frozenset(
+    {
+        "student",
+        "sid",
+        "student_id",
+        "学号",
+        "exam",
+        "exam_no",
+        "考生号",
+        "notice",
+        "notice_no",
+        "通知书",
+        "通知书编号",
+        "grad",
+        "graduate",
+        "graduate_key",
+        "研究生",
+    }
+)
+
+_USER_ID_RE = re.compile(r"^\d{5,12}$")
 
 
 def utc_now_iso() -> str:
@@ -49,10 +57,22 @@ def normalize_kind(kind: str) -> str | None:
     return KIND_ALIASES.get(key)
 
 
+def is_unsupported_kind_alias(kind: str) -> bool:
+    key = (kind or "").strip().lower()
+    return key in UNSUPPORTED_KIND_ALIASES
+
+
 def normalize_value(kind: str, value: str) -> str:
-    text = (value or "").strip()
-    if kind in {"user_id", "student_id", "exam_no", "notice_no"}:
-        text = re.sub(r"\s+", "", text)
+    text = re.sub(r"\s+", "", (value or "").strip())
+    if kind == "user_id":
+        return text
+    return text
+
+
+def validate_user_id_value(value: str) -> str:
+    text = normalize_value("user_id", value)
+    if not _USER_ID_RE.fullmatch(text):
+        raise ValueError("QQ 号无效：请输入 5~12 位数字")
     return text
 
 
@@ -149,10 +169,10 @@ class BlacklistStore:
     ) -> BlacklistEntry:
         kind_norm = normalize_kind(kind)
         if kind_norm is None or kind_norm not in SUPPORTED_KINDS:
+            if is_unsupported_kind_alias(kind):
+                raise ValueError(UNSUPPORTED_KIND_HINT)
             raise ValueError(f"unsupported blacklist kind: {kind}")
-        value_norm = normalize_value(kind_norm, value)
-        if not value_norm:
-            raise ValueError("blacklist value is empty")
+        value_norm = validate_user_id_value(value)
         reason_text = (reason or "").strip()
         if not reason_text:
             raise ValueError("blacklist reason is empty")
@@ -221,53 +241,33 @@ class BlacklistStore:
         match: dict[str, Any] | None,
         enabled_only: bool = True,
     ) -> BlacklistHit | None:
+        del parsed, match  # QQ-only：不按学号/考生号等身份字段拦截
         data = self._read_unlocked()
         entries = list(self._entries(data).values())
         if enabled_only:
             entries = [e for e in entries if e.enabled]
-        parsed = parsed or {}
-        match = match or {}
-        candidates: dict[str, list[str]] = {
-            "user_id": [str(user_id)] if user_id else [],
-            "student_id": [],
-            "exam_no": [],
-            "notice_no": [],
-            "graduate_key": [],
-        }
-        if parsed.get("student_id"):
-            candidates["student_id"].append(str(parsed["student_id"]))
-        if parsed.get("exam_no"):
-            candidates["exam_no"].append(str(parsed["exam_no"]))
-        if parsed.get("notice_no"):
-            candidates["notice_no"].append(str(parsed["notice_no"]))
-        for item in parsed.get("notice_no_candidates") or []:
-            if item:
-                candidates["notice_no"].append(str(item))
-        if match.get("matched_student_key"):
-            candidates["graduate_key"].append(str(match["matched_student_key"]))
-        if parsed.get("matched_student_key"):
-            candidates["graduate_key"].append(str(parsed["matched_student_key"]))
-
+        if not user_id:
+            return None
+        target = normalize_value("user_id", str(user_id))
         profile_norm = (profile or "").strip() or None
         for entry in entries:
+            if entry.kind != "user_id":
+                continue
             if entry.group_id and str(entry.group_id) != str(group_id):
                 continue
             if entry.profile and profile_norm and entry.profile != profile_norm:
                 continue
             if entry.profile and not profile_norm:
                 continue
-            values = candidates.get(entry.kind) or []
-            target = normalize_value(entry.kind, entry.value)
-            for raw in values:
-                if normalize_value(entry.kind, str(raw)) == target:
-                    return BlacklistHit(
-                        entry_id=entry.id,
-                        kind=entry.kind,
-                        value=entry.value,
-                        reason=entry.reason,
-                        group_id=entry.group_id,
-                        profile=entry.profile,
-                    )
+            if normalize_value("user_id", entry.value) == target:
+                return BlacklistHit(
+                    entry_id=entry.id,
+                    kind=entry.kind,
+                    value=entry.value,
+                    reason=entry.reason,
+                    group_id=entry.group_id,
+                    profile=entry.profile,
+                )
         return None
 
     def match_user_id(

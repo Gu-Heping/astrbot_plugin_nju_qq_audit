@@ -23,6 +23,8 @@ def format_help(
         )
     if topic_key in {"debug", "排查", "probe"}:
         return _format_help_debug()
+    if topic_key in {"blacklist", "黑名单", "block", "ban"}:
+        return _format_help_blacklist()
     if topic_key in {"advanced", "adv", "高级", "all", "full"}:
         return _format_help_advanced(
             effective_mode=effective_mode,
@@ -86,11 +88,18 @@ def _format_help_default(
             "更多：",
             "/audit help batch     分批通过/补放",
             "/audit help grad      研究生审核说明",
+            "/audit help blacklist 黑名单管理",
             "/audit help debug     排查问题",
             "/audit help advanced  高级维护命令",
         ]
     )
     return "\n".join(lines)
+
+
+def _format_help_blacklist() -> str:
+    from admin.blacklist import format_blacklist_help
+
+    return format_blacklist_help()
 
 
 def _format_help_grad() -> str:
@@ -195,6 +204,7 @@ def _format_help_debug() -> str:
             "- 短编号来自最近一次 /audit list 或入群通知",
             "- 弱匹配、非 26 级、QQ 辅助不会自动通过",
             "- 黑名单优先级高于 strong；命中后不会批量放行",
+            "- 黑名单只按 QQ 号拦截，不按学号/考生号拦截",
         ]
     )
 
@@ -274,6 +284,7 @@ def _format_help_advanced(
             "/audit list undergraduate   仅本科待处理",
             "",
             "黑名单：",
+            "/audit help blacklist",
             "/audit blacklist list",
             "/audit blacklist add 3 confirm 家长申请",
             "/audit blacklist add qq 123456789 confirm 家长号",
@@ -291,6 +302,7 @@ def _format_help_advanced(
             "- 研究生：姓名 + 专业/代码 + 硕或博 唯一匹配",
             "- 弱匹配、信息不足、QQ 辅助匹配不会自动通过",
             "- 黑名单优先级高于 strong 匹配；命中后 release/catchup 不会放行",
+            "- 黑名单只按 QQ 号拦截，不按学号/考生号拦截，避免误伤学生本人",
             "",
             "完整模式命令：",
             "/audit mode                 查看当前全局模式",
@@ -315,7 +327,7 @@ def _format_help_advanced(
             "- catchup：先同步校对表，再重算待处理并补放新强匹配",
             "- lookup：用姓名/学号/通知书/考生号直接查当前缓存是否能匹配",
             "- sweep：本地批量关闭非强匹配（不调 QQ；适合 QQ 侧已拒但未上报）",
-            "- blacklist：按 QQ/学号/考生号/通知书/研究生匹配键阻止申请与批量放行",
+            "- blacklist：按 QQ 号阻止入群申请与批量放行",
             "- 校对表刚更新、历史待处理未匹配时优先 catchup",
             "- 修改目标群请编辑 target_group_ids 后重启",
             "",

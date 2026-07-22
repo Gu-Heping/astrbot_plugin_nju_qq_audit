@@ -850,23 +850,36 @@ class NjuQqAuditPlugin(Star):
                         rest[0], rest[1], " ".join(rest[2:]), ""
                     )
                 elif len(rest) >= 4 and rest[2].lower() == "confirm":
-                    parsed = {
-                        "mode": "direct",
-                        "kind": rest[0],
-                        "value": rest[1],
-                        "reason": " ".join(rest[3:]),
-                    }
-                    from storage.blacklist_store import normalize_kind
+                    from storage.blacklist_store import (
+                        UNSUPPORTED_KIND_HINT,
+                        is_unsupported_kind_alias,
+                        normalize_kind,
+                    )
 
-                    kind = normalize_kind(parsed["kind"])
-                    if kind is None:
-                        parsed = None
+                    if is_unsupported_kind_alias(rest[0]):
+                        parsed = {
+                            "mode": "error",
+                            "message": UNSUPPORTED_KIND_HINT,
+                        }
                     else:
-                        parsed["kind"] = kind
+                        kind = normalize_kind(rest[0])
+                        if kind is None:
+                            parsed = None
+                        else:
+                            parsed = {
+                                "mode": "direct",
+                                "kind": kind,
+                                "value": rest[1],
+                                "reason": " ".join(rest[3:]),
+                            }
             if parsed is None:
                 yield event.plain_result(
-                    "请使用 /audit blacklist add <编号|类型> ... confirm <原因>"
+                    "请使用 /audit blacklist add <编号|qq> ... confirm <原因>\n"
+                    "黑名单只支持 QQ 号；如需阻止家长/异常账号，请拉黑对应 QQ。"
                 )
+                return
+            if parsed.get("mode") == "error":
+                yield event.plain_result(parsed["message"])
                 return
             admin_id = event.get_sender_id()
             if parsed["mode"] == "list_ref":
@@ -909,6 +922,11 @@ class NjuQqAuditPlugin(Star):
                 else:
                     lines.append("该申请当前不可直接拒绝，已仅写入黑名单。")
                 yield event.plain_result("\n".join(lines))
+                return
+            if parsed["mode"] == "direct" and parsed.get("kind") != "user_id":
+                yield event.plain_result(
+                    "黑名单只支持 QQ 号；如需阻止家长/异常账号，请拉黑对应 QQ。"
+                )
                 return
             try:
                 entry = await self.ctx.blacklist.add(
