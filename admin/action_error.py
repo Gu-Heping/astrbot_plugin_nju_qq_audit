@@ -3,7 +3,37 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-ActionFailureKind = Literal["TRANSIENT", "PERMISSION", "ADAPTER", "STALE", "UNKNOWN"]
+ActionFailureKind = Literal[
+    "TRANSIENT",
+    "PERMISSION",
+    "ADAPTER",
+    "STALE",
+    "ALREADY_APPROVED",
+    "ALREADY_REFUSED",
+    "UNKNOWN",
+]
+
+_ALREADY_APPROVED_MARKERS = (
+    "already agree",
+    "already approved",
+    "already accept",
+    "already agreed",
+    "already agree msg",
+    "120162004",
+    "已同意",
+    "已经同意",
+)
+
+_ALREADY_REFUSED_MARKERS = (
+    "already refuse",
+    "already refused",
+    "already reject",
+    "already rejected",
+    "already refuse msg",
+    "120162003",
+    "已拒绝",
+    "已经拒绝",
+)
 
 _STALE_MARKERS = (
     "expired",
@@ -52,6 +82,10 @@ class ClassifiedFailure:
 
 def classify_action_failure(message: str | None, retcode: int | None = None) -> ClassifiedFailure:
     text = (message or "").lower()
+    if any(m in text for m in _ALREADY_APPROVED_MARKERS):
+        return ClassifiedFailure("ALREADY_APPROVED", message or "")
+    if any(m in text for m in _ALREADY_REFUSED_MARKERS):
+        return ClassifiedFailure("ALREADY_REFUSED", message or "")
     if any(m in text for m in _STALE_MARKERS):
         return ClassifiedFailure("STALE", message or "")
     if any(m in text for m in _PERMISSION_MARKERS):
@@ -68,6 +102,10 @@ def classify_action_failure(message: str | None, retcode: int | None = None) -> 
 def user_message_for_failure(kind: ActionFailureKind, *, became_external: bool = False) -> str:
     if became_external:
         return "该用户已在群内，队列已标记为 external。"
+    if kind == "ALREADY_APPROVED":
+        return "QQ 侧显示该申请已被同意，已从待放行队列移出。"
+    if kind == "ALREADY_REFUSED":
+        return "QQ 侧显示该申请已被拒绝，已从待放行队列移出。"
     if kind == "STALE":
         return (
             "QQ 侧已找不到这条申请，可能已被处理、撤回或过期。"

@@ -74,6 +74,13 @@ from admin.grad_release import (
     format_grad_release_result,
     list_grad_releasable,
 )
+from admin.blacklist import (
+    check_blacklist_query,
+    format_blacklist_entry,
+    format_blacklist_help,
+    format_blacklist_list,
+    parse_blacklist_add_args,
+)
 from admin.sweep import (
     collect_sweep_preview,
     format_sweep_help,
@@ -230,7 +237,11 @@ class NjuQqAuditPlugin(Star):
         )
         under_pending = len(pending) - grad_pending
         adapter_probe = await self.ctx.get_adapter_probe()
-        releasable = await list_releasable(self.ctx.requests, self._settings())
+        releasable = await list_releasable(
+            self.ctx.requests,
+            self._settings(),
+            blacklist_store=self.ctx.blacklist,
+        )
         return format_home(
             self._settings(),
             effective_mode=mode,
@@ -424,7 +435,11 @@ class NjuQqAuditPlugin(Star):
         pending = await self.ctx.requests.list_pending(limit=1000)
         releasable_count = 0
         try:
-            releasable = await list_releasable(self.ctx.requests, self._settings())
+            releasable = await list_releasable(
+                self.ctx.requests,
+                self._settings(),
+                blacklist_store=self.ctx.blacklist,
+            )
             releasable_count = len(releasable)
         except Exception:
             logger.debug("[audit] help: releasable count unavailable", exc_info=True)
@@ -776,6 +791,140 @@ class NjuQqAuditPlugin(Star):
         )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("blacklist")
+    async def audit_blacklist(
+        self,
+        event: AstrMessageEvent,
+        arg1: str = "",
+        arg2: str = "",
+        arg3: str = "",
+        arg4: str = "",
+    ):
+        allowed, message = can_run_command(self._settings(), "release", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        ensure_ctx_compat(self.ctx)
+        settings = self._settings()
+        action = (arg1 or "").strip().lower()
+        if not action or action in {"help", "帮助"}:
+            yield event.plain_result(format_blacklist_help())
+            return
+        if action == "list":
+            entries = await self.ctx.blacklist.list(enabled_only=True)
+            yield event.plain_result(format_blacklist_list(entries))
+            return
+        if action == "check":
+            yield event.plain_result(
+                await check_blacklist_query(self.ctx.blacklist, arg2)
+            )
+            return
+        if action == "remove":
+            if (arg3 or "").strip().lower() != "confirm":
+                yield event.plain_result(
+                    "请使用 /audit blacklist remove <BL-id> confirm"
+                )
+                return
+            removed = await self.ctx.blacklist.remove(arg2.strip())
+            if removed is None:
+                yield event.plain_result(f"未找到黑名单条目：{arg2}")
+                return
+            yield event.plain_result(
+                format_blacklist_entry(removed, title="已删除黑名单")
+            )
+            return
+        if action == "add":
+            parsed = parse_blacklist_add_args(arg2, arg3, arg4, "")
+            # AstrBot may pass reason as remaining tokens poorly; fall back to message_str.
+            if parsed is None:
+                parts = (event.message_str or "").strip().split()
+                # /audit blacklist add ...
+                try:
+                    idx = parts.index("add")
+                    rest = parts[idx + 1 :]
+                except ValueError:
+                    rest = []
+                if len(rest) >= 3 and rest[1].lower() == "confirm":
+                    parsed = parse_blacklist_add_args(
+                        rest[0], rest[1], " ".join(rest[2:]), ""
+                    )
+                elif len(rest) >= 4 and rest[2].lower() == "confirm":
+                    parsed = {
+                        "mode": "direct",
+                        "kind": rest[0],
+                        "value": rest[1],
+                        "reason": " ".join(rest[3:]),
+                    }
+                    from storage.blacklist_store import normalize_kind
+
+                    kind = normalize_kind(parsed["kind"])
+                    if kind is None:
+                        parsed = None
+                    else:
+                        parsed["kind"] = kind
+            if parsed is None:
+                yield event.plain_result(
+                    "请使用 /audit blacklist add <编号|类型> ... confirm <原因>"
+                )
+                return
+            admin_id = event.get_sender_id()
+            if parsed["mode"] == "list_ref":
+                resolved = await resolve_request_ref(
+                    admin_id,
+                    parsed["ref"],
+                    list_cache=self.ctx.list_cache,
+                    requests=self.ctx.requests,
+                )
+                if not resolved.ok:
+                    yield event.plain_result(resolved.message)
+                    return
+                req = resolved.request
+                entry = await self.ctx.blacklist.add(
+                    kind="user_id",
+                    value=req.user_id,
+                    reason=parsed["reason"],
+                    created_by=admin_id,
+                    group_id=None,
+                    profile=getattr(req, "profile", None),
+                )
+                lines = [
+                    format_blacklist_entry(entry, title="已加入黑名单（来自列表编号）")
+                ]
+                if req.status == "pending" and req.sub_type == "add" and req.flag:
+                    result = await self.ctx.pipeline.admin_reject(
+                        req,
+                        admin_id,
+                        settings.blacklist_reject_reason,
+                        list_cache=self.ctx.list_cache,
+                    )
+                    latest = await self.ctx.requests.get_by_id(req.id)
+                    status = latest.status if latest else req.status
+                    if result.ok:
+                        lines.append(f"已拒绝该申请（状态：{status}）。")
+                    else:
+                        lines.append(
+                            await self._format_action_failure(req.id, result)
+                        )
+                else:
+                    lines.append("该申请当前不可直接拒绝，已仅写入黑名单。")
+                yield event.plain_result("\n".join(lines))
+                return
+            try:
+                entry = await self.ctx.blacklist.add(
+                    kind=parsed["kind"],
+                    value=parsed["value"],
+                    reason=parsed["reason"],
+                    created_by=admin_id,
+                )
+            except ValueError as exc:
+                yield event.plain_result(f"添加失败：{exc}")
+                return
+            yield event.plain_result(format_blacklist_entry(entry))
+            return
+        yield event.plain_result(format_blacklist_help())
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("sweep")
     async def audit_sweep(
         self, event: AstrMessageEvent, arg1: str = "", arg2: str = ""
@@ -1020,7 +1169,11 @@ class NjuQqAuditPlugin(Star):
         await self._record_admin_session(event)
         settings = self._settings()
         if _is_grad_cmd_token(arg1):
-            releasable = await list_grad_releasable(self.ctx.requests, settings)
+            releasable = await list_grad_releasable(
+                self.ctx.requests,
+                settings,
+                blacklist_store=self.ctx.blacklist,
+            )
             if not arg2:
                 yield event.plain_result(
                     format_grad_release_help(len(releasable), settings)
@@ -1049,7 +1202,11 @@ class NjuQqAuditPlugin(Star):
                     return
             yield event.plain_result(await self._run_grad_release_batch(event, count))
             return
-        releasable = await list_releasable(self.ctx.requests, settings)
+        releasable = await list_releasable(
+            self.ctx.requests,
+            settings,
+            blacklist_store=self.ctx.blacklist,
+        )
         if not arg1:
             yield event.plain_result(format_release_help(len(releasable), settings))
             return

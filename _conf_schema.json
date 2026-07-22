@@ -305,5 +305,20 @@
     "description": "是否记录更详细 AI 调试信息（仅本地调试，不建议线上开启）",
     "type": "bool",
     "default": false
+  },
+  "blacklist_enabled": {
+    "description": "是否启用黑名单拦截（优先级高于 strong 匹配）",
+    "type": "bool",
+    "default": true
+  },
+  "blacklist_auto_reject": {
+    "description": "申请命中黑名单时是否自动调用 QQ 拒绝",
+    "type": "bool",
+    "default": true
+  },
+  "blacklist_reject_reason": {
+    "description": "黑名单自动拒绝时发给申请人的中性理由（勿写“黑名单”）",
+    "type": "string",
+    "default": "请使用本人账号并按要求填写验证信息"
   }
 }

@@ -41,6 +41,16 @@ def ensure_ctx_compat(ctx) -> None:
         if not isinstance(share, ReleaseService):
             share = None
         ctx.grad_release_service = GradReleaseService(share_with=share)
+    from storage.blacklist_store import BlacklistStore, NullBlacklistStore
+
+    if not hasattr(ctx, "blacklist"):
+        ctx.blacklist = BlacklistStore(ctx.data_dir / "blacklist.json")
+
+    pipeline = getattr(ctx, "pipeline", None)
+    if pipeline is not None:
+        current = getattr(pipeline, "blacklist", None)
+        if current is None or isinstance(current, NullBlacklistStore):
+            pipeline.blacklist = ctx.blacklist
     if not hasattr(ctx, "sync_scheduler"):
         from data_source.sync_scheduler import SyncScheduler
 

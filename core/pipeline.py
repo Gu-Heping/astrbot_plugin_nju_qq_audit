@@ -104,6 +104,23 @@ def _external_join_message(
     return f"QQ 侧已入群（{inner}）"
 
 
+def _attach_blacklist_markers(parsed_dict: dict, hit) -> dict:
+    parsed_dict = dict(parsed_dict or {})
+    parsed_dict["_blacklist_hit"] = True
+    parsed_dict["_blacklist_entry_id"] = hit.entry_id
+    parsed_dict["_blacklist_kind"] = hit.kind
+    return parsed_dict
+
+
+def _is_blacklist_decision(decision, pending: PendingRequest | None = None) -> bool:
+    reason = getattr(decision, "reason", "") or ""
+    if reason.startswith("命中黑名单："):
+        return True
+    if pending is not None and (pending.parsed or {}).get("_blacklist_hit"):
+        return True
+    return False
+
+
 def _parsed_to_dict(parsed, *, comment: str | None = None, profile: str | None = None) -> dict:
     if isinstance(parsed, GraduateParsedApplication):
         data = parsed.to_dict()
@@ -207,6 +224,7 @@ class AuditPipeline:
         notifier: AdminNotifier,
         grad_cache: GraduateStudentCache | None = None,
         astrbot_context: Any = None,
+        blacklist_store=None,
     ) -> None:
         self.settings = settings
         self.requests = requests
@@ -217,6 +235,11 @@ class AuditPipeline:
         self.actions = actions
         self.notifier = notifier
         self.astrbot_context = astrbot_context
+        if blacklist_store is None:
+            from storage.blacklist_store import NullBlacklistStore
+
+            blacklist_store = NullBlacklistStore()
+        self.blacklist = blacklist_store
 
     def reload_settings(
         self,
@@ -232,6 +255,37 @@ class AuditPipeline:
             self.notifier = notifier
         if astrbot_context is not None:
             self.astrbot_context = astrbot_context
+
+    def _match_blacklist_hit(
+        self,
+        *,
+        group_id: str,
+        user_id: str,
+        profile: str | None,
+        parsed_dict: dict,
+        match_dict: dict,
+    ):
+        if not self.settings.blacklist_enabled:
+            return None
+        store = getattr(self, "blacklist", None)
+        if store is None:
+            return None
+        from storage.blacklist_store import safe_match_request
+
+        return safe_match_request(
+            store,
+            group_id=group_id,
+            user_id=user_id,
+            profile=profile,
+            parsed=parsed_dict,
+            match=match_dict,
+        )
+
+    def _apply_blacklist_to_decision(self, decision, hit) -> None:
+        decision.decision = "reject"
+        decision.reason = f"命中黑名单：{hit.reason}"
+        decision.suggestion = "已按黑名单策略拒绝"
+        decision.should_auto_approve = False
 
     def _effective_mode(self) -> tuple[str, str]:
         return get_effective_mode(self.settings, self.runtime.get_mode_override())
@@ -733,6 +787,16 @@ class AuditPipeline:
                 profile=req_profile,
             )
             new_match = _match_to_dict(match)
+            hit = self._match_blacklist_hit(
+                group_id=req.group_id,
+                user_id=req.user_id,
+                profile=req_profile,
+                parsed_dict=new_parsed,
+                match_dict=new_match,
+            )
+            if hit is not None:
+                self._apply_blacklist_to_decision(decision, hit)
+                new_parsed = _attach_blacklist_markers(new_parsed, hit)
 
             changed = (
                 decision.decision != old_decision
@@ -843,11 +907,24 @@ class AuditPipeline:
             previous.append(old_comment[:200])
             previous = previous[-_MAX_PREVIOUS_COMMENTS:]
 
+        parsed_dict = _parsed_to_dict(parsed, comment=new_comment, profile=profile)
+        match_dict = _match_to_dict(match)
+        hit = self._match_blacklist_hit(
+            group_id=event.group_id,
+            user_id=event.user_id,
+            profile=profile,
+            parsed_dict=parsed_dict,
+            match_dict=match_dict,
+        )
+        if hit is not None:
+            self._apply_blacklist_to_decision(decision, hit)
+            parsed_dict = _attach_blacklist_markers(parsed_dict, hit)
+
         update = {
             "comment": new_comment,
             "sub_type": event.sub_type,
-            "parsed": _parsed_to_dict(parsed, comment=new_comment, profile=profile),
-            "match": _match_to_dict(match),
+            "parsed": parsed_dict,
+            "match": match_dict,
             "decision": decision.decision,
             "confidence": decision.confidence,
             "reason": decision.reason,
@@ -994,6 +1071,21 @@ class AuditPipeline:
         if carry_markers_from is not None:
             carry_ai_attempt_markers(parsed, carry_markers_from)
 
+        parsed_dict = _parsed_to_dict(
+            parsed, comment=event.comment or "", profile=resolved_profile
+        )
+        match_dict = _match_to_dict(match)
+        hit = self._match_blacklist_hit(
+            group_id=event.group_id,
+            user_id=event.user_id,
+            profile=resolved_profile,
+            parsed_dict=parsed_dict,
+            match_dict=match_dict,
+        )
+        if hit is not None:
+            self._apply_blacklist_to_decision(decision, hit)
+            parsed_dict = _attach_blacklist_markers(parsed_dict, hit)
+
         req_id = request_id or new_request_id()
         pending = PendingRequest(
             id=req_id,
@@ -1002,10 +1094,8 @@ class AuditPipeline:
             comment=event.comment or "",
             flag=event.flag,
             sub_type=event.sub_type,
-            parsed=_parsed_to_dict(
-                parsed, comment=event.comment or "", profile=resolved_profile
-            ),
-            match=_match_to_dict(match),
+            parsed=parsed_dict,
+            match=match_dict,
             decision=decision.decision,
             confidence=decision.confidence,
             reason=decision.reason,
@@ -1103,6 +1193,80 @@ class AuditPipeline:
                     req_id,
                 )
 
+        if _is_blacklist_decision(decision, pending):
+            if (
+                self.settings.blacklist_enabled
+                and self.settings.blacklist_auto_reject
+                and event.sub_type == "add"
+            ):
+                action_result = await self.actions.set_group_add_request(
+                    event.flag,
+                    event.sub_type,
+                    False,
+                    self.settings.blacklist_reject_reason,
+                )
+                await self._record_action_outcome(
+                    pending,
+                    action_result,
+                    admin_user_id=None,
+                    admin_command="blacklist_reject",
+                    reject_decision="reject",
+                )
+                await self.audit.append(
+                    {
+                        "type": "blacklist_rejected",
+                        "request_id": req_id,
+                        "group_id": event.group_id,
+                        "user_id": event.user_id,
+                        "ok": action_result.ok,
+                        "reason": decision.reason,
+                    }
+                )
+                if self.settings.admin_notify:
+                    try:
+                        await self.notifier.notify_auto_result(
+                            request_id=req_id,
+                            group_id=event.group_id,
+                            user_id=event.user_id,
+                            ok=action_result.ok,
+                            reason=decision.reason,
+                            summary=applicant_summary(pending),
+                            comment=pending.comment or event.comment or "",
+                            match_strength=(
+                                getattr(match, "strength", None)
+                                or pending.match_strength
+                                or (pending.match or {}).get("strength")
+                            ),
+                            action_message=action_result.message,
+                            parsed=strip_internal_parsed_keys(pending.parsed or {}),
+                        )
+                    except Exception:
+                        logger.exception(
+                            "[audit] blacklist reject notify failed request=%s",
+                            req_id,
+                        )
+                return
+            if self.settings.admin_notify:
+                try:
+                    notify_parsed = strip_internal_parsed_keys(pending.parsed or {})
+                    notify_parsed["_profile"] = (
+                        getattr(pending, "profile", None) or "undergraduate"
+                    )
+                    await self.notifier.notify_manual_review(
+                        request_id=req_id,
+                        group_id=event.group_id,
+                        user_id=event.user_id,
+                        comment=event.comment,
+                        parsed=notify_parsed,
+                        reason=decision.reason,
+                    )
+                except Exception:
+                    logger.exception(
+                        "[audit] blacklist manual notify failed request=%s",
+                        req_id,
+                    )
+            return
+
         if mode in {"manual", "record-only"} or decision.decision == "manual_review":
             if (
                 not notify_update
@@ -1199,6 +1363,22 @@ class AuditPipeline:
             return "processed"
 
         classified = classify_action_failure(result.message, result.retcode)
+        if classified.kind == "ALREADY_APPROVED":
+            return await self._resolve_already_approved_failure(
+                req,
+                classified.message or (result.message or "QQ 侧已同意"),
+                list_cache=list_cache,
+                admin_user_id=admin_user_id,
+                admin_command=admin_command,
+            )
+        if classified.kind == "ALREADY_REFUSED":
+            return await self._resolve_already_refused_failure(
+                req,
+                classified.message or (result.message or "QQ 侧已拒绝"),
+                list_cache=list_cache,
+                admin_user_id=admin_user_id,
+                admin_command=admin_command,
+            )
         if classified.kind == "STALE":
             return await self._resolve_stale_failure(
                 req,
@@ -1219,6 +1399,130 @@ class AuditPipeline:
             },
         )
         return "pending"
+
+    async def _resolve_already_approved_failure(
+        self,
+        req: PendingRequest,
+        reason: str,
+        *,
+        list_cache: AdminListCacheStore | None,
+        admin_user_id: str | None,
+        admin_command: str,
+    ) -> str:
+        text = (reason or "").lower()
+        by_self = "by self" in text or "本 bot" in text or "当前账号" in text
+        if by_self:
+            now = utc_now_iso()
+            message = "QQ 侧显示已由本 bot/当前账号同意，按已处理收口"
+            payload = {"ok": True, "message": message}
+            await self.requests.update_by_id(
+                req.id,
+                {
+                    "processed_at": now,
+                    "status": "processed",
+                    "decision": "approve",
+                    "action_result": payload,
+                    "last_action_result": payload,
+                    "last_action_at": now,
+                    "admin_override": admin_user_id is not None,
+                    "admin_user_id": admin_user_id,
+                    "admin_command": admin_command,
+                },
+            )
+            if list_cache is not None:
+                try:
+                    await list_cache.remove_request_id(req.id)
+                except Exception:
+                    logger.warning(
+                        "[audit] list_cache cleanup failed for request=%s",
+                        req.id,
+                        exc_info=True,
+                    )
+            await self.audit.append(
+                {
+                    "type": "action_already_approved",
+                    "request_id": req.id,
+                    "group_id": req.group_id,
+                    "user_id": req.user_id,
+                    "admin_user_id": admin_user_id,
+                    "admin_command": admin_command,
+                    "reason": reason[:200],
+                    "status": "processed",
+                }
+            )
+            return "processed"
+
+        message = "QQ 侧显示申请已被同意，按外部通过处理"
+        await self._apply_external_status(
+            req,
+            message,
+            source="action_already_approved",
+            list_cache=list_cache,
+            admin_user_id=admin_user_id,
+            admin_command=admin_command,
+        )
+        await self.audit.append(
+            {
+                "type": "action_already_approved",
+                "request_id": req.id,
+                "group_id": req.group_id,
+                "user_id": req.user_id,
+                "admin_user_id": admin_user_id,
+                "admin_command": admin_command,
+                "reason": reason[:200],
+                "status": "external",
+            }
+        )
+        return "external"
+
+    async def _resolve_already_refused_failure(
+        self,
+        req: PendingRequest,
+        reason: str,
+        *,
+        list_cache: AdminListCacheStore | None,
+        admin_user_id: str | None,
+        admin_command: str,
+    ) -> str:
+        now = utc_now_iso()
+        message = "QQ 侧显示该申请已被拒绝，已从待放行队列移出"
+        payload = {"ok": True, "message": message}
+        await self.requests.update_by_id(
+            req.id,
+            {
+                "status": "dismissed",
+                "processed_at": now,
+                "dismissed_at": now,
+                "dismissed_by": admin_user_id or "qq_side",
+                "dismiss_reason": "QQ 侧显示该申请已被拒绝",
+                "action_result": payload,
+                "last_action_result": payload,
+                "last_action_at": now,
+                "admin_user_id": admin_user_id,
+                "admin_command": admin_command or "qq_already_refused",
+            },
+        )
+        if list_cache is not None:
+            try:
+                await list_cache.remove_request_id(req.id)
+            except Exception:
+                logger.warning(
+                    "[audit] list_cache cleanup failed for request=%s",
+                    req.id,
+                    exc_info=True,
+                )
+        await self.audit.append(
+            {
+                "type": "action_already_refused",
+                "request_id": req.id,
+                "group_id": req.group_id,
+                "user_id": req.user_id,
+                "admin_user_id": admin_user_id,
+                "admin_command": admin_command,
+                "reason": reason[:200],
+            }
+        )
+        return "dismissed"
 
     async def _resolve_stale_failure(
         self,

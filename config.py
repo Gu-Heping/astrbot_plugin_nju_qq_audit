@@ -113,6 +113,9 @@ class PluginSettings:
     ai_parse_allow_auto_approve: bool = False
     ai_parse_on_rematch: bool = False
     ai_parse_log_raw: bool = False
+    blacklist_enabled: bool = True
+    blacklist_auto_reject: bool = True
+    blacklist_reject_reason: str = "请使用本人账号并按要求填写验证信息"
 
     def __repr__(self) -> str:
         return (
@@ -363,6 +366,15 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         ),
         ai_parse_on_rematch=bool(config.get("ai_parse_on_rematch", False)),
         ai_parse_log_raw=bool(config.get("ai_parse_log_raw", False)),
+        blacklist_enabled=bool(config.get("blacklist_enabled", True)),
+        blacklist_auto_reject=bool(config.get("blacklist_auto_reject", True)),
+        blacklist_reject_reason=str(
+            config.get(
+                "blacklist_reject_reason",
+                "请使用本人账号并按要求填写验证信息",
+            )
+        ).strip()
+        or "请使用本人账号并按要求填写验证信息",
     )
 
 
