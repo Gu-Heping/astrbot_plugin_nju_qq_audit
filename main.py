@@ -65,6 +65,15 @@ from admin.release import (
     format_release_result,
     list_releasable,
 )
+from admin.grad_release import (
+    format_grad_catchup_help,
+    format_grad_catchup_preview,
+    format_grad_catchup_result,
+    format_grad_release_help,
+    format_grad_release_preview,
+    format_grad_release_result,
+    list_grad_releasable,
+)
 from admin.sweep import (
     collect_sweep_preview,
     format_sweep_help,
@@ -99,6 +108,12 @@ from core.version import (
 from profiles.router import overlapping_group_ids
 
 PLUGIN_NAME = "astrbot_plugin_nju_qq_audit"
+
+_GRAD_CMD_TOKENS = frozenset({"grad", "graduate", "研究生"})
+
+
+def _is_grad_cmd_token(value: str) -> bool:
+    return (value or "").strip().lower() in _GRAD_CMD_TOKENS
 
 
 def _format_stale_list(items: list, index_map: dict[int, str]) -> str:
@@ -244,6 +259,24 @@ class NjuQqAuditPlugin(Star):
         if result is None:
             return "已有分批任务进行中，请稍后再试。"
         return format_release_result(result, self._settings())
+
+    async def _run_grad_sync(self, *, source: str = "grad_catchup") -> str:
+        return await self.ctx.run_grad_sync(source=source)
+
+    async def _run_grad_release_batch(
+        self, event: AstrMessageEvent, count: int | None
+    ) -> str:
+        result = await self.ctx.grad_release_service.run_batch(
+            requests_store=self.ctx.requests,
+            pipeline=self.ctx.pipeline,
+            settings=self._settings(),
+            admin_user_id=event.get_sender_id(),
+            count=count,
+            audit_log=self.ctx.audit,
+        )
+        if result is None:
+            return "已有分批任务进行中，请稍后再试。"
+        return format_grad_release_result(result, self._settings())
 
     def _probe_group_matches(self, group_id: str) -> bool:
         settings = self._settings()
@@ -954,7 +987,7 @@ class NjuQqAuditPlugin(Star):
             )
             return
         if action in {"grad", "graduate", "研究生"}:
-            result = await self.ctx.run_grad_sync(source="manual")
+            result = await self._run_grad_sync(source="manual")
             yield event.plain_result(result)
             return
         if action in {"undergraduate", "undergrad", "本科"}:
@@ -972,7 +1005,7 @@ class NjuQqAuditPlugin(Star):
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
-        result = await self.ctx.run_grad_sync(source="manual")
+        result = await self._run_grad_sync(source="manual")
         yield event.plain_result(result)
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
@@ -986,6 +1019,36 @@ class NjuQqAuditPlugin(Star):
             return
         await self._record_admin_session(event)
         settings = self._settings()
+        if _is_grad_cmd_token(arg1):
+            releasable = await list_grad_releasable(self.ctx.requests, settings)
+            if not arg2:
+                yield event.plain_result(
+                    format_grad_release_help(len(releasable), settings)
+                )
+                return
+            if arg2 == "preview":
+                preview = await self.ctx.grad_release_service.preview(
+                    self.ctx.requests,
+                    settings,
+                    pipeline=self.ctx.pipeline,
+                )
+                yield event.plain_result(format_grad_release_preview(preview, settings))
+                return
+            if arg3 != "confirm":
+                yield event.plain_result(
+                    "请使用 /audit release grad <数量|all> confirm"
+                )
+                return
+            if arg2 == "all":
+                count = None
+            else:
+                try:
+                    count = max(1, int(arg2))
+                except ValueError:
+                    yield event.plain_result("数量无效，请使用数字或 all")
+                    return
+            yield event.plain_result(await self._run_grad_release_batch(event, count))
+            return
         releasable = await list_releasable(self.ctx.requests, settings)
         if not arg1:
             yield event.plain_result(format_release_help(len(releasable), settings))
@@ -1012,9 +1075,21 @@ class NjuQqAuditPlugin(Star):
         yield event.plain_result(await self._run_release_batch(event, count))
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("grad-release")
+    async def audit_grad_release(
+        self, event: AstrMessageEvent, arg1: str = "", arg2: str = ""
+    ):
+        async for result in self.audit_release(event, "grad", arg1, arg2):
+            yield result
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("catchup")
     async def audit_catchup(
-        self, event: AstrMessageEvent, arg1: str = "", arg2: str = ""
+        self,
+        event: AstrMessageEvent,
+        arg1: str = "",
+        arg2: str = "",
+        arg3: str = "",
     ):
         allowed, message = can_run_command(self._settings(), "release", event)
         if not allowed:
@@ -1022,6 +1097,52 @@ class NjuQqAuditPlugin(Star):
             return
         await self._record_admin_session(event)
         settings = self._settings()
+        if _is_grad_cmd_token(arg1):
+            if not arg2:
+                yield event.plain_result(format_grad_catchup_help(settings))
+                return
+            if arg2 == "preview":
+                preview = await self.ctx.grad_release_service.catchup_preview(
+                    run_sync=self._run_grad_sync,
+                    pipeline=self.ctx.pipeline,
+                    requests_store=self.ctx.requests,
+                    settings=settings,
+                    grad_cache=self.ctx.grad_cache,
+                )
+                yield event.plain_result(format_grad_catchup_preview(preview, settings))
+                return
+            if arg2 == "confirm" and not arg3:
+                count = None
+            elif arg3 == "confirm":
+                if arg2 == "all":
+                    count = None
+                else:
+                    try:
+                        count = max(1, int(arg2))
+                    except ValueError:
+                        yield event.plain_result(
+                            "请使用 /audit catchup grad preview 或 "
+                            "/audit catchup grad [数量|all] confirm"
+                        )
+                        return
+            else:
+                yield event.plain_result(
+                    "请使用 /audit catchup grad preview 或 "
+                    "/audit catchup grad [数量|all] confirm"
+                )
+                return
+            result = await self.ctx.grad_release_service.catchup_batch(
+                run_sync=self._run_grad_sync,
+                pipeline=self.ctx.pipeline,
+                requests_store=self.ctx.requests,
+                settings=settings,
+                grad_cache=self.ctx.grad_cache,
+                admin_user_id=event.get_sender_id(),
+                count=count,
+                audit_log=self.ctx.audit,
+            )
+            yield event.plain_result(format_grad_catchup_result(result, settings))
+            return
         if not arg1:
             yield event.plain_result(format_catchup_help(settings))
             return
@@ -1065,6 +1186,14 @@ class NjuQqAuditPlugin(Star):
             audit_log=self.ctx.audit,
         )
         yield event.plain_result(format_catchup_result(result, settings))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("grad-catchup")
+    async def audit_grad_catchup(
+        self, event: AstrMessageEvent, arg1: str = "", arg2: str = ""
+    ):
+        async for result in self.audit_catchup(event, "grad", arg1, arg2):
+            yield result
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("batch")
