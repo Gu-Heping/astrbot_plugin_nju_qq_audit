@@ -282,6 +282,25 @@ class BlacklistStore:
             enabled_only=enabled_only,
         )
 
+    def find_user_entries(
+        self, user_id: str, *, enabled_only: bool = True
+    ) -> list[BlacklistEntry]:
+        """Lookup user_id entries for admin check; ignores group/profile scope."""
+        if not user_id:
+            return []
+        data = self._read_unlocked()
+        entries = list(self._entries(data).values())
+        if enabled_only:
+            entries = [e for e in entries if e.enabled]
+        target = normalize_value("user_id", str(user_id))
+        hits = [
+            e
+            for e in entries
+            if e.kind == "user_id" and normalize_value("user_id", e.value) == target
+        ]
+        hits.sort(key=lambda e: e.created_at, reverse=True)
+        return hits
+
 
 class NullBlacklistStore:
     """No-op store for legacy tests that construct AuditPipeline without blacklist."""
@@ -293,6 +312,10 @@ class NullBlacklistStore:
     def match_user_id(self, user_id: str, **kwargs) -> BlacklistHit | None:
         del user_id, kwargs
         return None
+
+    def find_user_entries(self, user_id: str, *, enabled_only: bool = True) -> list:
+        del user_id, enabled_only
+        return []
 
     async def list(self, *, enabled_only: bool = True) -> list[BlacklistEntry]:
         del enabled_only

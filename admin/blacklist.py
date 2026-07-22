@@ -116,10 +116,11 @@ async def check_blacklist_query(store: BlacklistStore, query: str) -> str:
         if entry is None:
             return f"未找到黑名单条目：{q}"
         return format_blacklist_entry(entry, title="黑名单条目")
-    hit = store.match_user_id(q)
-    if hit is None:
+    hits = store.find_user_entries(q)
+    if not hits:
         return f"未命中黑名单：{q}"
-    entry = await store.get(hit.entry_id)
-    if entry is None:
-        return f"命中黑名单 {hit.entry_id}（原因：{hit.reason}）"
-    return format_blacklist_entry(entry, title="命中黑名单")
+    entry = hits[0]
+    text = format_blacklist_entry(entry, title="命中黑名单")
+    if len(hits) > 1:
+        text = f"{text}\n（同 QQ 另有 {len(hits) - 1} 条历史条目）"
+    return text

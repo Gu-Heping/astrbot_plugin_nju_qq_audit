@@ -899,7 +899,7 @@ class NjuQqAuditPlugin(Star):
                     reason=parsed["reason"],
                     created_by=admin_id,
                     group_id=None,
-                    profile=getattr(req, "profile", None),
+                    profile=None,
                 )
                 lines = [
                     format_blacklist_entry(entry, title="已加入黑名单（来自列表编号）")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from unittest.mock import AsyncMock, MagicMock
 
@@ -265,12 +266,16 @@ async def test_blacklist_add_from_list_ref_rejects(tmp_path):
         MagicMock(),
         blacklist_store=blacklist,
     )
+    # list-ref 拉黑：全局 QQ，不写 profile
     entry = await blacklist.add(
         kind="user_id",
         value=req.user_id,
         reason="家长申请",
         created_by="admin",
+        group_id=None,
+        profile=None,
     )
+    assert entry.profile is None
     result = await pipe.admin_reject(
         req, "admin", settings.blacklist_reject_reason, list_cache=list_cache
     )
@@ -282,3 +287,73 @@ async def test_blacklist_add_from_list_ref_rejects(tmp_path):
     call = actions.set_group_add_request.await_args
     assert call.args[3] == settings.blacklist_reject_reason
     assert "黑名单" not in call.args[3]
+
+
+@pytest.mark.asyncio
+async def test_list_ref_blacklist_entry_is_global(tmp_path):
+    store = BlacklistStore(tmp_path / "blacklist.json")
+    req = _under(profile="undergraduate", user_id="12345")
+    entry = await store.add(
+        kind="user_id",
+        value=req.user_id,
+        reason="家长申请",
+        created_by="admin",
+        group_id=None,
+        profile=None,
+    )
+    assert entry.profile is None
+    assert (
+        store.match_request(
+            group_id=GRAD_GROUP,
+            user_id="12345",
+            profile="graduate",
+            parsed={},
+            match={},
+        )
+        is not None
+    )
+
+
+@pytest.mark.asyncio
+async def test_global_userid_blocks_grad_releasable(tmp_path):
+    settings = _settings()
+    store = BlacklistStore(tmp_path / "blacklist.json")
+    await store.add(kind="user_id", value="12345", reason="家长号", profile=None)
+    requests = RequestsStore(tmp_path / "requests.json")
+    await requests.upsert(_grad(user_id="12345"))
+    items = await list_grad_releasable(requests, settings, blacklist_store=store)
+    assert items == []
+
+
+@pytest.mark.asyncio
+async def test_check_finds_historical_profile_scoped_entry(tmp_path):
+    from admin.blacklist import check_blacklist_query
+
+    path = tmp_path / "blacklist.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    "BL-scoped": {
+                        "id": "BL-scoped",
+                        "kind": "user_id",
+                        "value": "12345",
+                        "reason": "历史本科拉黑",
+                        "profile": "undergraduate",
+                        "enabled": True,
+                        "created_at": "2026-07-22T00:00:00+00:00",
+                    }
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    store = BlacklistStore(path)
+    # match_user_id(profile=None) 仍可能查不到 scoped entry
+    assert store.match_user_id("12345") is None
+    text = await check_blacklist_query(store, "12345")
+    assert "命中黑名单" in text
+    assert "12345" in text
+    assert "历史本科拉黑" in text
