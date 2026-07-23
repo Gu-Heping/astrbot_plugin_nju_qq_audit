@@ -378,13 +378,26 @@ def _extract_compact_credentials(text: str, result: ParsedApplication) -> None:
             _assign_exam_no(result, exam_compact.group(2))
 
     if not result.student_id:
-        # (?!\d) avoids taking a 9-digit prefix of a 14-digit exam number.
-        sid_compact = re.search(r"([\u4e00-\u9fa5·]{2,4})(2[0-9]1\d{5,6})(?!\d)", text)
-        if sid_compact:
-            candidate_name = sid_compact.group(1)
-            if _looks_like_person_name(candidate_name):
-                _assign_name_if_better(result, candidate_name)
-            _assign_student_id(result, sid_compact.group(2))
+        # Prefer 姓名+专业+学号 so we don't take the last 2–4 chars of major as name.
+        for match in re.finditer(
+            r"([\u4e00-\u9fa5·]{2,30})(2[0-9]1\d{5,6})(?!\d)",
+            text,
+        ):
+            name, major = _split_name_major_prefix(match.group(1))
+            if name and major:
+                _assign_name_if_better(result, name)
+                _assign_student_id(result, match.group(2))
+                if not result.major:
+                    result.major = major
+                break
+        if not result.student_id:
+            # (?!\d) avoids taking a 9-digit prefix of a 14-digit exam number.
+            sid_compact = re.search(r"([\u4e00-\u9fa5·]{2,4})(2[0-9]1\d{5,6})(?!\d)", text)
+            if sid_compact:
+                candidate_name = sid_compact.group(1)
+                if _looks_like_person_name(candidate_name):
+                    _assign_name_if_better(result, candidate_name)
+                _assign_student_id(result, sid_compact.group(2))
 
     if not result.notice_no:
         notice_compact = re.search(r"([\u4e00-\u9fa5·]{2,4})(202[56]\d{4})(?!\d)", text)
@@ -396,7 +409,63 @@ def _extract_compact_credentials(text: str, result: ParsedApplication) -> None:
                 _add_notice_candidate(result, notice_compact.group(2))
 
 
+def _split_name_major_prefix(prefix: str) -> tuple[str | None, str | None]:
+    """Split glued Chinese prefix into (name, major) when major is a known token."""
+    text = (prefix or "").strip()
+    if len(text) < 4:
+        return None, None
+
+    # Prefer longest known major as suffix (more specific than short aliases).
+    known = sorted(
+        {a for a in _alias_keys_for_split()},
+        key=len,
+        reverse=True,
+    )
+    for alias in known:
+        if len(alias) < 2 or not text.endswith(alias):
+            continue
+        name_part = text[: -len(alias)]
+        if 2 <= len(name_part) <= 4 and _looks_like_person_name(name_part):
+            return normalize_name(name_part), alias
+
+    # Fallback: try name lengths 2/3/4 with known major remainder.
+    for nlen in (2, 3, 4):
+        if len(text) <= nlen:
+            continue
+        name_part = text[:nlen]
+        major_part = text[nlen:]
+        if not _looks_like_person_name(name_part):
+            continue
+        if is_known_major_token(major_part):
+            return normalize_name(name_part), major_part
+    return None, None
+
+
+def _alias_keys_for_split() -> list[str]:
+    from core.aliases import MAJOR_ALIASES
+
+    keys: list[str] = []
+    for canonical, aliases in MAJOR_ALIASES.items():
+        keys.append(canonical)
+        keys.extend(aliases)
+    return keys
+
+
 def _split_mixed_token(token: str) -> dict[str, str]:
+    # 姓名 + 专业 + 学号 连写（优先于短姓名+学号，避免吃掉专业尾字当姓名）
+    name_major_sid = re.match(
+        r"^([\u4e00-\u9fa5·]{2,30})(2[0-9]1\d{5,6})$",
+        token,
+    )
+    if name_major_sid:
+        name, major = _split_name_major_prefix(name_major_sid.group(1))
+        if name and major:
+            return {
+                "name": name,
+                "major": major,
+                "student_id": name_major_sid.group(2),
+            }
+
     glued_exam_major = re.match(
         r"^([\u4e00-\u9fa5·]{2,4})(2[0-9]\d{12})([\u4e00-\u9fa5a-zA-Z（）()·\-]{2,30})$",
         token,

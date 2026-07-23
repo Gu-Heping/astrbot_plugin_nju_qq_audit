@@ -86,6 +86,57 @@ def is_template_misparsed_major(major: str | None, raw: str | None) -> bool:
     return False
 
 
+def _answer_haystack(raw: str | None) -> str:
+    from core.ai_parser.prompt import split_question_answer
+
+    _q, answer = split_question_answer(raw or "")
+    return (answer or raw or "").strip()
+
+
+def _text_contains_field(value: str | None, haystack: str) -> bool:
+    if not value or not haystack:
+        return False
+    text = value.strip()
+    if not text:
+        return False
+    if text in haystack:
+        return True
+    compact_h = haystack.replace(" ", "").replace("　", "")
+    compact_v = text.replace(" ", "").replace("　", "")
+    return bool(compact_v) and compact_v in compact_h
+
+
+def _major_looks_suspicious(parsed: ParsedApplication, answer: str) -> bool:
+    major = (parsed.major or "").strip()
+    if not major:
+        return True
+    if is_template_misparsed_major(major, parsed.raw):
+        return True
+    for cred in (parsed.student_id, parsed.exam_no, parsed.notice_no):
+        if cred and str(cred) in major:
+            return True
+    if re.search(r"\d{6,}", major):
+        return True
+    ans = (answer or "").strip()
+    if ans and major.replace(" ", "") == ans.replace(" ", ""):
+        return True
+    return False
+
+
+def _name_looks_suspicious(parsed: ParsedApplication, answer: str) -> bool:
+    name = (parsed.name or "").strip()
+    if not name:
+        return True
+    if is_template_misparsed_name(name):
+        return True
+    if _major_looks_suspicious(parsed, answer):
+        return True
+    ans = (answer or "").strip()
+    if ans and not ans.startswith(name):
+        return True
+    return False
+
+
 def undergrad_parse_incomplete(parsed: ParsedApplication) -> bool:
     if is_template_misparsed_name(parsed.name):
         return True
@@ -113,10 +164,24 @@ def grad_parse_incomplete(parsed: GraduateParsedApplication) -> bool:
 def merge_ai_fields_into_undergrad_parsed(
     parsed: ParsedApplication,
     ai_fields: AiParsedFields,
+    *,
+    allow_overwrite: bool = False,
+    answer_text: str | None = None,
 ) -> ParsedApplication:
-    """Fill missing undergrad fields only; never overwrite student_id/notice_no/exam_no."""
+    """Fill missing undergrad fields; optionally overwrite suspicious name/major.
+
+    Never overwrite student_id / notice_no / exam_no when already set.
+    """
+    answer = answer_text if answer_text is not None else _answer_haystack(parsed.raw)
     if ai_fields.name:
-        if not parsed.name or is_template_misparsed_name(parsed.name):
+        name_ok = (not allow_overwrite) or _text_contains_field(ai_fields.name, answer)
+        if name_ok and (not parsed.name or is_template_misparsed_name(parsed.name)):
+            parsed.name = ai_fields.name
+        elif (
+            allow_overwrite
+            and name_ok
+            and _name_looks_suspicious(parsed, answer)
+        ):
             parsed.name = ai_fields.name
     if ai_fields.student_id and not parsed.student_id:
         parsed.student_id = ai_fields.student_id
@@ -127,7 +192,16 @@ def merge_ai_fields_into_undergrad_parsed(
         if ai_fields.notice_no not in parsed.notice_no_candidates:
             parsed.notice_no_candidates.append(ai_fields.notice_no)
     if ai_fields.major:
-        if not parsed.major or is_template_misparsed_major(parsed.major, parsed.raw):
+        major_ok = (not allow_overwrite) or _text_contains_field(ai_fields.major, answer)
+        if major_ok and (
+            not parsed.major or is_template_misparsed_major(parsed.major, parsed.raw)
+        ):
+            parsed.major = ai_fields.major
+        elif (
+            allow_overwrite
+            and major_ok
+            and _major_looks_suspicious(parsed, answer)
+        ):
             parsed.major = ai_fields.major
     if ai_fields.academy and not parsed.academy:
         parsed.academy = ai_fields.academy
@@ -139,13 +213,41 @@ def merge_ai_fields_into_undergrad_parsed(
 def merge_ai_fields_into_grad_parsed(
     parsed: GraduateParsedApplication,
     ai_fields: AiParsedFields,
+    *,
+    allow_overwrite: bool = False,
+    answer_text: str | None = None,
 ) -> GraduateParsedApplication:
-    """Fill missing graduate fields only; do not overwrite clear credentials."""
+    """Fill missing graduate fields; optionally overwrite suspicious name/major."""
+    answer = answer_text if answer_text is not None else _answer_haystack(parsed.raw)
     if ai_fields.name:
-        if not parsed.name or is_template_misparsed_name(parsed.name):
+        name_ok = (not allow_overwrite) or _text_contains_field(ai_fields.name, answer)
+        if name_ok and (not parsed.name or is_template_misparsed_name(parsed.name)):
+            parsed.name = ai_fields.name
+        elif (
+            allow_overwrite
+            and name_ok
+            and (
+                not parsed.name
+                or is_template_misparsed_name(parsed.name)
+                or not answer.startswith(parsed.name)
+            )
+        ):
             parsed.name = ai_fields.name
     if ai_fields.major:
-        if not parsed.major_text or is_template_misparsed_major(parsed.major_text, parsed.raw):
+        current_major = parsed.major_text
+        major_ok = (not allow_overwrite) or _text_contains_field(ai_fields.major, answer)
+        if major_ok and (
+            not current_major or is_template_misparsed_major(current_major, parsed.raw)
+        ):
+            parsed.major_text = ai_fields.major
+        elif (
+            allow_overwrite
+            and major_ok
+            and (
+                re.search(r"\d{6,}", current_major or "")
+                or (answer and (current_major or "").replace(" ", "") == answer.replace(" ", ""))
+            )
+        ):
             parsed.major_text = ai_fields.major
     if ai_fields.admission_type and not parsed.admission_type:
         parsed.admission_type = ai_fields.admission_type
@@ -240,11 +342,14 @@ async def maybe_run_ai_parse(
     astrbot_context: Any = None,
     umo: str | None = None,
     force: bool = False,
+    allow_overwrite: bool = False,
 ) -> AiParseResult | None:
     """Optionally call AI. Shadow mode records only; non-shadow merges when incomplete.
 
     Returns AiParseResult when AI was invoked; None when skipped.
     force=True: call even when parse looks complete (merge still respects shadow).
+    allow_overwrite=True: admin force-reparse may overwrite suspicious name/major
+      and still merges even when shadow mode is on (does not change online fallback).
     client_call: optional injectable for tests
       sync or async (messages, settings) -> (content_text, model_name)
     """
@@ -252,6 +357,8 @@ async def maybe_run_ai_parse(
         return None
 
     shadow = bool(settings.ai_parse_shadow_mode)
+    # Forced overwrite reparse must actually apply AI fields locally.
+    merge_shadow = shadow and not allow_overwrite
     if not shadow and not incomplete and not force:
         return None
 
@@ -336,13 +443,24 @@ async def maybe_run_ai_parse(
         )
 
     merged = False
-    if shadow:
+    if merge_shadow:
         _mark_shadow_or_used(parsed, shadow=True, model=result.model)
     elif result.ok and result.fields is not None and (incomplete or force):
+        answer_text = answer or ""
         if profile == "graduate" and isinstance(parsed, GraduateParsedApplication):
-            merge_ai_fields_into_grad_parsed(parsed, result.fields)
+            merge_ai_fields_into_grad_parsed(
+                parsed,
+                result.fields,
+                allow_overwrite=allow_overwrite,
+                answer_text=answer_text,
+            )
         elif isinstance(parsed, ParsedApplication):
-            merge_ai_fields_into_undergrad_parsed(parsed, result.fields)
+            merge_ai_fields_into_undergrad_parsed(
+                parsed,
+                result.fields,
+                allow_overwrite=allow_overwrite,
+                answer_text=answer_text,
+            )
         _append_model_marker(parsed.parse_errors, result.model)
         merged = True
     else:

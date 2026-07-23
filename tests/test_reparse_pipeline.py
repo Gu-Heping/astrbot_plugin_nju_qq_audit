@@ -221,6 +221,134 @@ async def test_reparse_ai_bypasses_old_attempt_markers(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_reparse_ai_overwrite_suspicious_glued_fields(tmp_path, monkeypatch):
+    """Force AI reparse may overwrite suspicious name/major; never calls QQ."""
+    pipe, requests, actions, _settings_obj = _pipeline(
+        tmp_path,
+        settings=_settings(ai_parse_shadow_mode=False),
+    )
+    comment = "张三计算机科学与技术261220001"
+    req = _pending(
+        comment=comment,
+        reason="未找到匹配记录",
+        parsed={
+            "name": "学与技术",
+            "student_id": "261220001",
+            "major": "张三计算机科学与技术261220001",
+            "parse_errors": [],
+        },
+        match={"strength": "none"},
+        match_strength="none",
+    )
+    await requests.upsert(req)
+
+    # Keep deterministic parse broken so overwrite path is exercised.
+    from core.parser import ParsedApplication
+
+    def fake_parse(_comment: str) -> ParsedApplication:
+        return ParsedApplication(
+            raw=comment,
+            name="学与技术",
+            student_id="261220001",
+            major="张三计算机科学与技术261220001",
+        )
+
+    monkeypatch.setattr("core.pipeline.parse_application_comment", fake_parse)
+
+    def fake_client(messages, _settings):
+        return (
+            _ai_json_reparse(
+                name="张三",
+                student_id="261220001",
+                major="计算机科学与技术",
+            ),
+            "test-model",
+        )
+
+    outcome = await pipe.reparse_pending(
+        req, mode="ai", apply=True, ai_client_call=fake_client
+    )
+    assert outcome.ok
+    latest = await requests.get_by_id(req.id)
+    assert latest.parsed["name"] == "张三"
+    assert latest.parsed["student_id"] == "261220001"
+    assert latest.parsed["major"] == "计算机科学与技术"
+    actions.set_group_add_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reparse_preview_hints_when_ai_unchanged(tmp_path, monkeypatch):
+    pipe, requests, _actions, _settings_obj = _pipeline(
+        tmp_path,
+        settings=_settings(ai_parse_shadow_mode=False),
+    )
+    comment = "答案：学与技术261220001"
+    req = _pending(
+        comment=comment,
+        parsed={
+            "name": "学与技术",
+            "student_id": "261220001",
+            "major": None,
+            "parse_errors": [],
+        },
+    )
+    await requests.upsert(req)
+
+    from core.parser import ParsedApplication
+
+    def fake_parse(_comment: str) -> ParsedApplication:
+        return ParsedApplication(
+            raw=comment,
+            name="学与技术",
+            student_id="261220001",
+            major=None,
+        )
+
+    monkeypatch.setattr("core.pipeline.parse_application_comment", fake_parse)
+
+    def fake_client(messages, _settings):
+        # Invented major not in answer → validator drops → no field change
+        return (
+            _ai_json_reparse(name="张三", student_id="261220001", major="不存在的专业"),
+            "test-model",
+        )
+
+    outcome = await pipe.reparse_pending(
+        req, mode="ai", apply=False, ai_client_call=fake_client
+    )
+    assert outcome.ai_invoked is True
+    text = format_reparse_preview(outcome, index=13)
+    assert "AI：已调用" in text
+    assert "未改变解析结果" in text
+
+
+def _ai_json_reparse(**kwargs) -> str:
+    import json
+
+    base = {
+        "profile": "undergraduate",
+        "name": None,
+        "student_id": None,
+        "notice_no": None,
+        "exam_no": None,
+        "major": None,
+        "academy": None,
+        "admission_type": None,
+        "confidence": 0.95,
+        "ambiguous": False,
+        "warnings": [],
+        "evidence": {},
+    }
+    base.update(kwargs)
+    ev = {}
+    for key in ("name", "student_id", "notice_no", "exam_no", "major", "academy"):
+        if base.get(key):
+            ev[key] = base[key]
+    base["evidence"] = ev
+    return json.dumps(base, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
 async def test_reparse_rejects_terminal_statuses(tmp_path):
     pipe, requests, _actions, _settings = _pipeline(tmp_path)
     for status in ("processed", "dismissed", "stale"):
