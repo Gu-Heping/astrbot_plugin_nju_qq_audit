@@ -623,20 +623,30 @@ class AuditPipeline:
         match = match_student(parsed, students, applicant_user_id=event.user_id)
         incomplete = undergrad_parse_incomplete(parsed)
         suspicious = undergrad_parse_suspicious(parsed)
-        # Cost control: only call AI when not already strong, unless forced reparse.
+        # Strategy:
+        # - strong: skip AI
+        # - weak: AI when incomplete/suspicious
+        # - none: always AI (when enabled)
         should_ai = force_ai_parse or (
             allow_ai_parse
             and match.strength != "strong"
-            and (incomplete or suspicious)
+            and (match.strength == "none" or incomplete or suspicious)
         )
         if should_ai and (allow_ai_parse or force_ai_parse):
-            overwrite = allow_ai_overwrite or suspicious
+            overwrite = (
+                allow_ai_overwrite
+                or force_ai_parse
+                or match.strength == "none"
+                or suspicious
+            )
+            if match.strength == "none" and "match_none_before_ai" not in parsed.parse_errors:
+                parsed.parse_errors.append("match_none_before_ai")
             await maybe_run_ai_parse(
                 self.settings,
                 profile="undergraduate",
                 raw_comment=event.comment or "",
                 parsed=parsed,
-                incomplete=incomplete or suspicious or force_ai_parse,
+                incomplete=True,
                 astrbot_context=self.astrbot_context,
                 umo=getattr(event, "umo", None),
                 force=force_ai_parse,

@@ -48,6 +48,22 @@ _TEMPLATE_NAME_BAD = frozenset(
     }
 )
 _AI_MARKERS = ("ai_parse_used", "ai_parse_shadow", "ai_parse_merged")
+_NAME_STATUS_BAD = frozenset(
+    {
+        "已录取",
+        "已确认",
+        "通过",
+        "本人",
+        "我是",
+        "新生",
+        "录取",
+        "已通过",
+        "确认",
+        "本科新生",
+        "南大",
+        "南京大学",
+    }
+)
 
 
 def _append_marker(parse_errors: list[str], marker: str) -> None:
@@ -137,6 +153,50 @@ def _name_looks_suspicious(parsed: ParsedApplication, answer: str) -> bool:
     return False
 
 
+def _name_overwrite_allowed(parsed: ParsedApplication, answer: str) -> bool:
+    name = (parsed.name or "").strip()
+    if not name:
+        return True
+    errors = parsed.parse_errors or []
+    if "match_none_before_ai" in errors:
+        return True
+    if name in _NAME_STATUS_BAD or is_template_misparsed_name(name):
+        return True
+    if answer and not _text_contains_field(name, answer):
+        return True
+    if _name_looks_suspicious(parsed, answer):
+        return True
+    return False
+
+
+def _major_is_name_like(major: str | None) -> bool:
+    text = (major or "").strip()
+    if not text:
+        return False
+    if re.fullmatch(r"[\u4e00-\u9fa5·]{2,4}", text) is None:
+        return False
+    try:
+        from core.parser import is_known_major_token
+
+        return not is_known_major_token(text)
+    except Exception:
+        return True
+
+
+def _major_overwrite_allowed(parsed: ParsedApplication, answer: str) -> bool:
+    major = (parsed.major or "").strip()
+    if not major:
+        return True
+    errors = parsed.parse_errors or []
+    if "match_none_before_ai" in errors:
+        return True
+    if _major_looks_suspicious(parsed, answer):
+        return True
+    if _major_is_name_like(major):
+        return True
+    return False
+
+
 def undergrad_parse_incomplete(parsed: ParsedApplication) -> bool:
     if is_template_misparsed_name(parsed.name):
         return True
@@ -214,7 +274,16 @@ def merge_ai_fields_into_undergrad_parsed(
     """Fill missing undergrad fields; optionally overwrite suspicious name/major.
 
     Never overwrite student_id / notice_no / exam_no when already set.
+    Marks ai_parse_merged only when fields actually change.
     """
+    before = {
+        "name": parsed.name,
+        "student_id": parsed.student_id,
+        "exam_no": parsed.exam_no,
+        "notice_no": parsed.notice_no,
+        "major": parsed.major,
+        "academy": parsed.academy,
+    }
     answer = answer_text if answer_text is not None else _answer_haystack(parsed.raw)
     if ai_fields.name:
         name_ok = (not allow_overwrite) or _text_contains_field(ai_fields.name, answer)
@@ -223,7 +292,7 @@ def merge_ai_fields_into_undergrad_parsed(
         elif (
             allow_overwrite
             and name_ok
-            and _name_looks_suspicious(parsed, answer)
+            and _name_overwrite_allowed(parsed, answer)
         ):
             parsed.name = ai_fields.name
     if ai_fields.student_id and not parsed.student_id:
@@ -243,13 +312,31 @@ def merge_ai_fields_into_undergrad_parsed(
         elif (
             allow_overwrite
             and major_ok
-            and _major_looks_suspicious(parsed, answer)
+            and _major_overwrite_allowed(parsed, answer)
         ):
             parsed.major = ai_fields.major
+    elif allow_overwrite:
+        current_major = (parsed.major or "").strip()
+        ai_name = (ai_fields.name or "").strip()
+        if current_major and (
+            (ai_name and current_major == ai_name) or _major_is_name_like(current_major)
+        ):
+            parsed.major = None
     if ai_fields.academy and not parsed.academy:
         parsed.academy = ai_fields.academy
+    after = {
+        "name": parsed.name,
+        "student_id": parsed.student_id,
+        "exam_no": parsed.exam_no,
+        "notice_no": parsed.notice_no,
+        "major": parsed.major,
+        "academy": parsed.academy,
+    }
     _append_marker(parsed.parse_errors, "ai_parse_used")
-    _append_marker(parsed.parse_errors, "ai_parse_merged")
+    if before != after:
+        _append_marker(parsed.parse_errors, "ai_parse_merged")
+    else:
+        _append_marker(parsed.parse_errors, "ai_parse_no_change")
     return parsed
 
 
@@ -260,7 +347,16 @@ def merge_ai_fields_into_grad_parsed(
     allow_overwrite: bool = False,
     answer_text: str | None = None,
 ) -> GraduateParsedApplication:
-    """Fill missing graduate fields; optionally overwrite suspicious name/major."""
+    """Fill missing graduate fields; optionally overwrite suspicious name/major.
+
+    Marks ai_parse_merged only when fields actually change.
+    """
+    before = {
+        "name": parsed.name,
+        "major_text": parsed.major_text,
+        "admission_type": parsed.admission_type,
+        "admission_type_raw": parsed.admission_type_raw,
+    }
     answer = answer_text if answer_text is not None else _answer_haystack(parsed.raw)
     if ai_fields.name:
         name_ok = (not allow_overwrite) or _text_contains_field(ai_fields.name, answer)
@@ -296,8 +392,17 @@ def merge_ai_fields_into_grad_parsed(
         parsed.admission_type = ai_fields.admission_type
         if not parsed.admission_type_raw:
             parsed.admission_type_raw = ai_fields.admission_type
+    after = {
+        "name": parsed.name,
+        "major_text": parsed.major_text,
+        "admission_type": parsed.admission_type,
+        "admission_type_raw": parsed.admission_type_raw,
+    }
     _append_marker(parsed.parse_errors, "ai_parse_used")
-    _append_marker(parsed.parse_errors, "ai_parse_merged")
+    if before != after:
+        _append_marker(parsed.parse_errors, "ai_parse_merged")
+    else:
+        _append_marker(parsed.parse_errors, "ai_parse_no_change")
     return parsed
 
 
@@ -505,7 +610,7 @@ async def maybe_run_ai_parse(
                 answer_text=answer_text,
             )
         _append_model_marker(parsed.parse_errors, result.model)
-        merged = True
+        merged = "ai_parse_merged" in (parsed.parse_errors or [])
     else:
         _append_marker(parsed.parse_errors, "ai_parse_used")
         _append_model_marker(parsed.parse_errors, result.model)
