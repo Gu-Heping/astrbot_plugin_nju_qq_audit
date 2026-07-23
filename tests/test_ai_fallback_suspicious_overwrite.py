@@ -35,6 +35,8 @@ MAJOR = "计算机科学与技术"
 GLUED = f"{NAME}{MAJOR}{SID}"
 BAD_NAME = "学与技术"
 BAD_MAJOR = GLUED
+NONE_NAME = "已录取"
+NONE_PERSON = "王五"
 
 
 class DummyConfig(dict):
@@ -88,9 +90,10 @@ def _pipeline(tmp_path, *, settings=None, students=None):
     audit = AuditLog(tmp_path / "audit.jsonl", settings)
     runtime = RuntimeStore(tmp_path / "runtime.json")
     cache = StudentCache(tmp_path)
-    cache.save_students(
+    roster = (
         students
-        or [
+        if students is not None
+        else [
             Student(
                 key=SID,
                 name=NAME,
@@ -102,6 +105,7 @@ def _pipeline(tmp_path, *, settings=None, students=None):
             )
         ]
     )
+    cache.save_students(roster)
     actions = MagicMock()
     actions.set_group_add_request = AsyncMock(
         return_value=ActionResult(ok=True, retcode=0, message="ok")
@@ -299,3 +303,265 @@ def test_ai_fields_absent_from_answer_not_overwritten():
     )
     assert parsed.name == BAD_NAME
     assert parsed.major == BAD_MAJOR
+
+
+@pytest.mark.asyncio
+async def test_match_none_must_call_ai_and_fix_name_major(tmp_path, monkeypatch):
+    students = [
+        Student(
+            key="k-none",
+            name=NONE_PERSON,
+            student_id="",
+            notice_no="",
+            major=MAJOR,
+            status="已确认",
+            updated_at="2026-07-23T00:00:00+00:00",
+        )
+    ]
+    pipe, _actions = _pipeline(tmp_path, students=students)
+
+    def fake_parse(_comment: str) -> ParsedApplication:
+        return ParsedApplication(raw=f"{NONE_NAME} {NONE_PERSON}", name=NONE_NAME, major=NONE_PERSON)
+
+    monkeypatch.setattr("core.pipeline.parse_application_comment", fake_parse)
+    called = {"n": 0}
+
+    def fake_client(messages, settings):
+        called["n"] += 1
+        return (_ai_json(name=NONE_PERSON), "test-model")
+
+    ev = await pipe._evaluate_undergraduate_request(
+        _event(f"{NONE_NAME} {NONE_PERSON}"),
+        allow_ai_parse=True,
+        ai_client_call=fake_client,
+    )
+    assert called["n"] == 1
+    assert ev.parsed.name == NONE_PERSON
+    assert ev.parsed.major is None
+    assert "match_none_before_ai" in ev.parsed.parse_errors
+
+
+@pytest.mark.asyncio
+async def test_match_none_ai_fill_id_then_strong_manual_when_guarded(tmp_path, monkeypatch):
+    target_name = NONE_PERSON
+    target_sid = SID
+    comment = f"{NONE_NAME} {target_name} {target_sid}"
+    pipe, _actions = _pipeline(
+        tmp_path,
+        settings=_settings(mode="auto", ai_parse_allow_auto_approve=False),
+        students=[
+            Student(
+                key=target_sid,
+                name=target_name,
+                student_id=target_sid,
+                notice_no="20260009",
+                major=MAJOR,
+                status="已确认",
+                updated_at="2026-07-23T00:00:00+00:00",
+            )
+        ],
+    )
+
+    def fake_parse(_comment: str) -> ParsedApplication:
+        return ParsedApplication(raw=comment, name=NONE_NAME, major=target_name)
+
+    monkeypatch.setattr("core.pipeline.parse_application_comment", fake_parse)
+
+    def fake_client(messages, settings):
+        return (_ai_json(name=target_name, student_id=target_sid, major=MAJOR), "test-model")
+
+    ev = await pipe._evaluate_undergraduate_request(
+        _event(comment),
+        allow_ai_parse=True,
+        ai_client_call=fake_client,
+    )
+    assert ev.match.strength == "strong"
+    assert ev.parsed.name == target_name
+    assert ev.parsed.student_id == target_sid
+    # major is absent in answer, validator drops it; name+sid still rematch strong.
+    assert ev.parsed.major is None
+    assert "ai_parse_merged" in ev.parsed.parse_errors
+    assert ev.decision.decision == "manual_review"
+    assert ev.decision.should_auto_approve is False
+
+
+@pytest.mark.asyncio
+async def test_weak_not_suspicious_never_overwrites_existing_credential(tmp_path, monkeypatch):
+    pipe, _actions = _pipeline(tmp_path)
+    weak_comment = f"{NAME} {SID}"
+
+    def fake_parse(_comment: str) -> ParsedApplication:
+        return ParsedApplication(raw=weak_comment, name=NAME, student_id=SID, major=None)
+
+    monkeypatch.setattr("core.pipeline.parse_application_comment", fake_parse)
+    called = {"n": 0}
+
+    def fake_client(messages, settings):
+        called["n"] += 1
+        return (_ai_json(name=NAME, student_id="261999999", major=MAJOR), "test-model")
+
+    ev = await pipe._evaluate_undergraduate_request(
+        _event(weak_comment),
+        allow_ai_parse=True,
+        ai_client_call=fake_client,
+    )
+    assert ev.parsed.student_id == SID
+    assert ev.parsed.major in (None, MAJOR)
+    # weak + not suspicious may skip AI by strategy; if invoked it still cannot overwrite sid.
+    assert called["n"] in (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_match_none_ai_name_outside_answer_not_overwritten(tmp_path, monkeypatch):
+    comment = f"{NONE_NAME} {NONE_PERSON}"
+    pipe, _actions = _pipeline(tmp_path)
+
+    def fake_parse(_comment: str) -> ParsedApplication:
+        return ParsedApplication(raw=comment, name=NONE_NAME, major=NONE_PERSON)
+
+    monkeypatch.setattr("core.pipeline.parse_application_comment", fake_parse)
+
+    def fake_client(messages, settings):
+        return (_ai_json(name="赵六"), "test-model")
+
+    ev = await pipe._evaluate_undergraduate_request(
+        _event(comment),
+        allow_ai_parse=True,
+        ai_client_call=fake_client,
+    )
+    assert ev.parsed.name == NONE_NAME
+    assert ev.parsed.major == NONE_PERSON
+    assert "ai_parse_merged" not in ev.parsed.parse_errors
+    assert "ai_parse_no_change" in ev.parsed.parse_errors
+
+
+def test_ai_empty_fields_do_not_clear_major():
+    raw = f"{NONE_NAME} {NONE_PERSON}"
+    parsed = ParsedApplication(raw=raw, name=NONE_NAME, major=NONE_PERSON)
+    parsed.parse_errors.append("match_none_before_ai")
+    ai = AiParsedFields(profile="undergraduate")
+    merge_ai_fields_into_undergrad_parsed(
+        parsed,
+        ai,
+        allow_overwrite=True,
+        answer_text=raw,
+    )
+    assert parsed.name == NONE_NAME
+    assert parsed.major == NONE_PERSON
+    assert "ai_parse_merged" not in parsed.parse_errors
+    assert "ai_parse_no_change" in parsed.parse_errors
+
+
+def test_ai_noop_does_not_mark_merged():
+    parsed = ParsedApplication(
+        raw=f"{NAME} {SID}",
+        name=NAME,
+        student_id=SID,
+        major=None,
+    )
+    ai = AiParsedFields(
+        profile="undergraduate",
+        name=NAME,
+        student_id=SID,
+        major=None,
+        evidence={"name": NAME, "student_id": SID},
+    )
+    merge_ai_fields_into_undergrad_parsed(
+        parsed,
+        ai,
+        allow_overwrite=True,
+        answer_text=f"{NAME} {SID}",
+    )
+    assert "ai_parse_used" in parsed.parse_errors
+    assert "ai_parse_merged" not in parsed.parse_errors
+    assert "ai_parse_no_change" in parsed.parse_errors
+
+
+@pytest.mark.asyncio
+async def test_match_none_roster_miss_ai_noop_not_merged(tmp_path, monkeypatch):
+    # Rule parse already correct, but roster empty → match none; AI echoes same fields.
+    pipe, _actions = _pipeline(tmp_path, students=[])
+    comment = f"{NAME} {SID}"
+
+    def fake_parse(_comment: str) -> ParsedApplication:
+        return ParsedApplication(raw=comment, name=NAME, student_id=SID, major=None)
+
+    monkeypatch.setattr("core.pipeline.parse_application_comment", fake_parse)
+    called = {"n": 0}
+
+    def fake_client(messages, settings):
+        called["n"] += 1
+        return (_ai_json(name=NAME, student_id=SID), "test-model")
+
+    ev = await pipe._evaluate_undergraduate_request(
+        _event(comment),
+        allow_ai_parse=True,
+        ai_client_call=fake_client,
+    )
+    assert called["n"] == 1
+    assert ev.parsed.name == NAME
+    assert ev.parsed.student_id == SID
+    assert ev.parsed.major is None
+    assert "ai_parse_merged" not in ev.parsed.parse_errors
+    assert "ai_parse_used" in ev.parsed.parse_errors
+
+
+def test_ai_status_name_fix_marks_merged():
+    raw = f"{NONE_NAME} {NONE_PERSON}"
+    parsed = ParsedApplication(raw=raw, name=NONE_NAME, major=NONE_PERSON)
+    parsed.parse_errors.append("match_none_before_ai")
+    ai = AiParsedFields(
+        profile="undergraduate",
+        name=NONE_PERSON,
+        evidence={"name": NONE_PERSON},
+    )
+    merge_ai_fields_into_undergrad_parsed(
+        parsed,
+        ai,
+        allow_overwrite=True,
+        answer_text=raw,
+    )
+    assert parsed.name == NONE_PERSON
+    assert parsed.major is None
+    assert "ai_parse_merged" in parsed.parse_errors
+    assert "ai_parse_no_change" not in parsed.parse_errors
+
+
+def test_ai_fill_student_id_marks_merged():
+    raw = f"{NAME} {SID}"
+    parsed = ParsedApplication(raw=raw, name=NAME, student_id=None)
+    ai = AiParsedFields(
+        profile="undergraduate",
+        student_id=SID,
+        evidence={"student_id": SID},
+    )
+    merge_ai_fields_into_undergrad_parsed(
+        parsed,
+        ai,
+        allow_overwrite=True,
+        answer_text=raw,
+    )
+    assert parsed.student_id == SID
+    assert "ai_parse_merged" in parsed.parse_errors
+
+
+def test_ai_does_not_clear_legitimate_major():
+    # Short majors that look name-like must not be wiped when AI only echoes name.
+    law_major = "法学"
+    raw = f"{NAME} {law_major}"
+    parsed = ParsedApplication(raw=raw, name=NAME, major=law_major)
+    ai = AiParsedFields(
+        profile="undergraduate",
+        name=NAME,
+        evidence={"name": NAME},
+    )
+    merge_ai_fields_into_undergrad_parsed(
+        parsed,
+        ai,
+        allow_overwrite=True,
+        answer_text=raw,
+    )
+    assert parsed.name == NAME
+    assert parsed.major == law_major
+    assert "ai_parse_merged" not in parsed.parse_errors
+    assert "ai_parse_no_change" in parsed.parse_errors

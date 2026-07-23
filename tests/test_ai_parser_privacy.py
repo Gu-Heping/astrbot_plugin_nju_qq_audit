@@ -20,7 +20,7 @@ class DummyConfig(dict):
 
 def test_prompt_excludes_flag_token_raw_event_and_roster():
     question, answer = split_question_answer(
-        "问题：姓名 学号/录取号 专业\n答案：何聿璿+261880009+技术科学试验班"
+        "问题：姓名 学号/录取号 专业\n答案：周七七+261880001+技术科学试验班"
     )
     messages = build_ai_parse_messages(
         profile="undergraduate",
@@ -35,12 +35,12 @@ def test_prompt_excludes_flag_token_raw_event_and_roster():
     assert "学生名单" not in blob
     assert "flag=" not in blob
     assert '"flag"' not in blob
-    assert "何聿璿" in blob
-    assert "261880009" in blob
+    assert "周七七" in blob
+    assert "261880001" in blob
 
 
 def test_split_question_answer_empty_when_only_question_template():
-    question, answer = split_question_answer("问题：姓名：张三 学号：261880009")
+    question, answer = split_question_answer("问题：姓名：张三 学号：261880001")
     assert "张三" in question or "姓名" in question
     assert answer == ""
 
@@ -52,10 +52,10 @@ def test_split_question_answer_empty_after_blank_answer_marker():
 
 
 def test_split_question_answer_keeps_newline_answer_without_marker():
-    question, answer = split_question_answer("问题：姓名 学号\n何聿璿 261880009")
+    question, answer = split_question_answer("问题：姓名 学号\n周七七 261880001")
     assert "姓名" in question
-    assert "何聿璿" in answer
-    assert "261880009" in answer
+    assert "周七七" in answer
+    assert "261880001" in answer
 
 
 def test_prompt_does_not_include_student_roster():
@@ -63,7 +63,7 @@ def test_prompt_does_not_include_student_roster():
     messages = build_ai_parse_messages(
         profile="undergraduate",
         question="姓名 学号",
-        answer="李四 261880009",
+        answer="李四 261880001",
         max_chars=500,
     )
     blob = "\n".join(m["content"] for m in messages)
@@ -108,25 +108,25 @@ async def test_service_does_not_put_api_key_in_prompt(monkeypatch):
         captured.append(json.dumps(messages, ensure_ascii=False))
         payload = {
             "profile": "undergraduate",
-            "name": "何聿璿",
-            "student_id": "261880009",
+            "name": "周七七",
+            "student_id": "261880001",
             "major": "技术科学试验班",
             "confidence": 0.9,
             "ambiguous": False,
             "warnings": [],
             "evidence": {
-                "name": "何聿璿",
-                "student_id": "261880009",
+                "name": "周七七",
+                "student_id": "261880001",
                 "major": "技术科学试验班",
             },
         }
         return json.dumps(payload, ensure_ascii=False), "m"
 
-    parsed = ParsedApplication(raw="何聿璿+261880009+技术科学试验班")
+    parsed = ParsedApplication(raw="周七七+261880001+技术科学试验班")
     await maybe_run_ai_parse(
         settings,
         profile="undergraduate",
-        raw_comment="答案：何聿璿+261880009+技术科学试验班",
+        raw_comment="答案：周七七+261880001+技术科学试验班",
         parsed=parsed,
         incomplete=True,
         client_call=fake_client,

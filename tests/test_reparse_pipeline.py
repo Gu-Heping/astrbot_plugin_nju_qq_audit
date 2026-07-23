@@ -54,9 +54,9 @@ def _pipeline(tmp_path, *, settings=None):
     cache.save_students(
         [
             Student(
-                key="261200028",
-                name="高煜韬",
-                student_id="261200028",
+                key="261220028",
+                name="吴九九",
+                student_id="261220028",
                 notice_no="20260028",
                 major="环境与健康实验班",
                 status="已确认",
@@ -85,14 +85,14 @@ def _pending(**kwargs) -> PendingRequest:
     defaults = dict(
         id="REQ-reparse-1",
         group_id=GROUP,
-        user_id="2874068048",
-        comment="问题：姓名 学号/录取号 专业\n答案：高煜韬-261200028-环境与健康实验班",
+        user_id="1000000001",
+        comment="问题：姓名 学号/录取号 专业\n答案：吴九九-261220028-环境与健康实验班",
         flag="flag-reparse",
         sub_type="add",
         profile="undergraduate",
         parsed={
             "name": None,
-            "student_id": "261200028",
+            "student_id": "261220028",
             "major": None,
             "parse_errors": ["ai_parse_used", "ai_parse_shadow"],
         },
@@ -132,7 +132,7 @@ async def test_reparse_preview_does_not_write_store(tmp_path):
     assert outcome.ok
     assert outcome.applied is False
     assert outcome.new_strength == "strong"
-    assert outcome.new_parsed["name"] == "高煜韬"
+    assert outcome.new_parsed["name"] == "吴九九"
     assert outcome.new_parsed["major"] == "环境与健康实验班"
     latest = await requests.get_by_id(req.id)
     assert latest.parsed.get("name") in (None, "")
@@ -140,7 +140,7 @@ async def test_reparse_preview_does_not_write_store(tmp_path):
     actions.set_group_add_request.assert_not_awaited()
     text = format_reparse_preview(outcome, index=18)
     assert "重解析预览 [18]" in text
-    assert "高煜韬" in text
+    assert "吴九九" in text
     assert "strong" in text
 
 
@@ -155,8 +155,8 @@ async def test_reparse_confirm_updates_without_qq_action(tmp_path):
     assert outcome.ok
     assert outcome.applied is True
     latest = await requests.get_by_id(req.id)
-    assert latest.parsed["name"] == "高煜韬"
-    assert latest.parsed["student_id"] == "261200028"
+    assert latest.parsed["name"] == "吴九九"
+    assert latest.parsed["student_id"] == "261220028"
     assert latest.parsed["major"] == "环境与健康实验班"
     assert latest.match_strength == "strong"
     assert latest.decision in {"approve", "manual_review"}
@@ -172,7 +172,7 @@ async def test_reparse_rule_does_not_call_ai(tmp_path):
 
     def fake_client(messages, settings):
         called["n"] += 1
-        return ('{"name":"高煜韬","student_id":"261200028","major":"环境与健康实验班"}', "m")
+        return ('{"name":"吴九九","student_id":"261220028","major":"环境与健康实验班"}', "m")
 
     outcome = await pipe.reparse_pending(
         req, mode="rule", apply=False, ai_client_call=fake_client
@@ -192,7 +192,7 @@ async def test_reparse_ai_bypasses_old_attempt_markers(tmp_path):
     req = _pending(
         parsed={
             "name": None,
-            "student_id": "261200028",
+            "student_id": "261220028",
             "major": None,
             "parse_errors": ["ai_parse_used", "ai_parse_shadow"],
         },
@@ -204,7 +204,7 @@ async def test_reparse_ai_bypasses_old_attempt_markers(tmp_path):
         called["n"] += 1
         # Echo fields that already appear in the answer so validator keeps them.
         return (
-            '{"name":"高煜韬","student_id":"261200028","major":"环境与健康实验班","exam_no":null,"notice_no":null,"academy":null,"admission_type":null}',
+            '{"name":"吴九九","student_id":"261220028","major":"环境与健康实验班","exam_no":null,"notice_no":null,"academy":null,"admission_type":null}',
             "test-model",
         )
 
@@ -215,8 +215,8 @@ async def test_reparse_ai_bypasses_old_attempt_markers(tmp_path):
     assert called["n"] == 1
     assert outcome.ai_invoked is True
     latest = await requests.get_by_id(req.id)
-    assert latest.parsed.get("name") == "高煜韬"
-    assert latest.parsed.get("student_id") == "261200028"
+    assert latest.parsed.get("name") == "吴九九"
+    assert latest.parsed.get("student_id") == "261220028"
     assert latest.match_strength == "strong"
 
 

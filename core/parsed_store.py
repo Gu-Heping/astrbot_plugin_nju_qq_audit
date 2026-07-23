@@ -12,7 +12,7 @@ from graduate.models import GraduateParsedApplication
 
 PARSER_VERSION = "v0.4.19"
 
-# Strip spaces around separators so「何聿璿+261」and「何聿璿 + 261」hash equal.
+# Strip spaces around separators so「周七七+261」and「周七七 + 261」hash equal.
 _HASH_SEP = re.compile(r"\s*([+＋/／,，、|;；：:（）()])\s*")
 
 

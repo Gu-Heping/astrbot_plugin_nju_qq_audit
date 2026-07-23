@@ -62,22 +62,22 @@ def _ai_json(**kwargs) -> str:
 
 
 def test_undergrad_merge_plus_format():
-    parsed = ParsedApplication(raw="何聿璿+261880009+技术科学试验班")
+    parsed = ParsedApplication(raw="周七七+261880001+技术科学试验班")
     ai = AiParsedFields(
         profile="undergraduate",
-        name="何聿璿",
-        student_id="261880009",
+        name="周七七",
+        student_id="261880001",
         major="技术科学试验班",
         confidence=0.9,
         evidence={
-            "name": "何聿璿",
-            "student_id": "261880009",
+            "name": "周七七",
+            "student_id": "261880001",
             "major": "技术科学试验班",
         },
     )
     merge_ai_fields_into_undergrad_parsed(parsed, ai)
-    assert parsed.name == "何聿璿"
-    assert parsed.student_id == "261880009"
+    assert parsed.name == "周七七"
+    assert parsed.student_id == "261880001"
     assert parsed.major == "技术科学试验班"
     assert "ai_parse_merged" in parsed.parse_errors
 
@@ -85,8 +85,8 @@ def test_undergrad_merge_plus_format():
 def test_undergrad_ai_does_not_overwrite_student_id():
     parsed = ParsedApplication(
         raw="x",
-        name="何聿璿",
-        student_id="261880009",
+        name="周七七",
+        student_id="261880001",
     )
     ai = AiParsedFields(
         profile="undergraduate",
@@ -94,20 +94,20 @@ def test_undergrad_ai_does_not_overwrite_student_id():
         evidence={"student_id": "261999999"},
     )
     merge_ai_fields_into_undergrad_parsed(parsed, ai)
-    assert parsed.student_id == "261880009"
+    assert parsed.student_id == "261880001"
 
 
 def test_grad_merge_compact():
-    parsed = GraduateParsedApplication(raw="陈俊毅生物学博")
+    parsed = GraduateParsedApplication(raw="钱十一生物学博")
     ai = AiParsedFields(
         profile="graduate",
-        name="陈俊毅",
+        name="钱十一",
         major="生物学",
         admission_type="博士",
-        evidence={"name": "陈俊毅", "major": "生物学", "admission_type": "博"},
+        evidence={"name": "钱十一", "major": "生物学", "admission_type": "博"},
     )
     merge_ai_fields_into_grad_parsed(parsed, ai)
-    assert parsed.name == "陈俊毅"
+    assert parsed.name == "钱十一"
     assert parsed.major_text == "生物学"
     assert parsed.admission_type == "博士"
 
@@ -139,12 +139,12 @@ async def test_grad_missing_evidence_dropped_via_service(monkeypatch):
         )
         return payload, "test-model"
 
-    parsed = parse_graduate_comment("答案：陈俊毅生物学博")
+    parsed = parse_graduate_comment("答案：钱十一生物学博")
     before = (parsed.name, parsed.major_text, parsed.admission_type)
     result = await maybe_run_ai_parse(
         settings,
         profile="graduate",
-        raw_comment="答案：陈俊毅生物学博",
+        raw_comment="答案：钱十一生物学博",
         parsed=parsed,
         incomplete=True,
         client_call=fake_client,
@@ -152,7 +152,7 @@ async def test_grad_missing_evidence_dropped_via_service(monkeypatch):
     assert result is not None
     assert result.ok
     # fabricated fields have no evidence in answer → dropped → nothing useful merged
-    assert parsed.name in {before[0], None, "陈俊毅"}
+    assert parsed.name in {before[0], None, "钱十一"}
     if result.fields:
         assert result.fields.name is None
         assert result.fields.major is None
@@ -170,7 +170,7 @@ async def test_shadow_mode_does_not_change_parsed_match_decision():
             }
         )
     )
-    comment = "答案：何聿璿+261880009+技术科学试验班"
+    comment = "答案：周七七+261880001+技术科学试验班"
     # Force a weak deterministic parse path by using only major-like garbage first
     parsed = parse_application_comment(comment)
     snap = (parsed.name, parsed.student_id, parsed.major)
@@ -178,8 +178,8 @@ async def test_shadow_mode_does_not_change_parsed_match_decision():
     def fake_client(messages, _settings):
         return (
             _ai_json(
-                name="何聿璿",
-                student_id="261880009",
+                name="周七七",
+                student_id="261880001",
                 major="技术科学试验班",
             ),
             "test-model",
@@ -199,9 +199,9 @@ async def test_shadow_mode_does_not_change_parsed_match_decision():
 
     students = [
         Student(
-            name="何聿璿",
+            name="周七七",
             updated_at="t",
-            student_id="261880009",
+            student_id="261880001",
             major="技术科学试验班",
         )
     ]
@@ -218,17 +218,17 @@ async def test_shadow_mode_does_not_change_parsed_match_decision():
 
 def test_ai_assist_strong_stays_manual_when_auto_approve_disallowed():
     parsed = ParsedApplication(
-        raw="何聿璿+261880009+技术科学试验班",
-        name="何聿璿",
-        student_id="261880009",
+        raw="周七七+261880001+技术科学试验班",
+        name="周七七",
+        student_id="261880001",
         major="技术科学试验班",
         parse_errors=["ai_parse_used", "ai_parse_merged"],
     )
     students = [
         Student(
-            name="何聿璿",
+            name="周七七",
             updated_at="t",
-            student_id="261880009",
+            student_id="261880001",
             major="技术科学试验班",
         )
     ]
@@ -255,13 +255,13 @@ async def test_non_shadow_merge_fills_missing_fields():
             }
         )
     )
-    parsed = ParsedApplication(raw="何聿璿+261880009+技术科学试验班")
+    parsed = ParsedApplication(raw="周七七+261880001+技术科学试验班")
 
     def fake_client(messages, _settings):
         return (
             _ai_json(
-                name="何聿璿",
-                student_id="261880009",
+                name="周七七",
+                student_id="261880001",
                 major="技术科学试验班",
             ),
             "test-model",
@@ -270,13 +270,13 @@ async def test_non_shadow_merge_fills_missing_fields():
     await maybe_run_ai_parse(
         settings,
         profile="undergraduate",
-        raw_comment="答案：何聿璿+261880009+技术科学试验班",
+        raw_comment="答案：周七七+261880001+技术科学试验班",
         parsed=parsed,
         incomplete=True,
         client_call=fake_client,
     )
-    assert parsed.name == "何聿璿"
-    assert parsed.student_id == "261880009"
+    assert parsed.name == "周七七"
+    assert parsed.student_id == "261880001"
     assert parsed.major == "技术科学试验班"
     assert "ai_parse_merged" in parsed.parse_errors
 
@@ -289,13 +289,13 @@ def test_grad_ai_assist_strong_manual_guard():
             college="生科院",
             major_code="071000",
             major_name="生物学",
-            name="陈俊毅",
+            name="钱十一",
             key="k1",
         )
     ]
     parsed = GraduateParsedApplication(
-        raw="陈俊毅生物学博",
-        name="陈俊毅",
+        raw="钱十一生物学博",
+        name="钱十一",
         major_text="生物学",
         admission_type="博士",
         parse_errors=["ai_parse_merged"],
