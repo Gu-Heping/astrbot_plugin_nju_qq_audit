@@ -81,6 +81,12 @@ from admin.blacklist import (
     format_blacklist_list,
     parse_blacklist_add_args,
 )
+from admin.reparse import (
+    format_reparse_help,
+    format_reparse_preview,
+    format_reparse_result,
+    parse_reparse_args,
+)
 from admin.sweep import (
     collect_sweep_preview,
     format_sweep_help,
@@ -620,6 +626,62 @@ class NjuQqAuditPlugin(Star):
             return
         result = run_lookup(self._settings(), self.ctx.cache, query=query)
         yield event.plain_result(format_lookup_result(result))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("reparse")
+    async def audit_reparse(
+        self,
+        event: AstrMessageEvent,
+        arg1: str = "",
+        arg2: str = "",
+        arg3: str = "",
+    ):
+        allowed, message = can_run_command(self._settings(), "debug", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        ensure_ctx_compat(self.ctx)
+        parsed_args = parse_reparse_args(arg1, arg2, arg3)
+        if parsed_args is None:
+            yield event.plain_result(format_reparse_help())
+            return
+        resolved = await resolve_request_ref(
+            event.get_sender_id(),
+            parsed_args["ref"],
+            list_cache=self.ctx.list_cache,
+            requests=self.ctx.requests,
+            for_view=True,
+        )
+        if not resolved.ok:
+            yield event.plain_result(resolved.message)
+            return
+        apply = parsed_args["action"] == "confirm"
+        outcome = await self.ctx.pipeline.reparse_pending(
+            resolved.request,
+            mode=parsed_args["mode"],
+            apply=apply,
+            admin_user_id=event.get_sender_id(),
+        )
+        if not outcome.ok:
+            yield event.plain_result(outcome.message)
+            return
+        if not apply:
+            group_label, user_label = await resolve_one_item_labels(
+                getattr(self.ctx, "display", None), resolved.request
+            )
+            yield event.plain_result(
+                format_reparse_preview(
+                    outcome,
+                    index=resolved.index,
+                    group_label=group_label,
+                    user_label=user_label,
+                )
+            )
+            return
+        yield event.plain_result(
+            format_reparse_result(outcome, index=resolved.index)
+        )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("ok")

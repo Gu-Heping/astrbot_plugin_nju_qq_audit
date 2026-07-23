@@ -9,11 +9,14 @@
 - 友好处理 QQ 侧 already agree/refuse 终态错误，自动移出批量放行队列，不再反复失败。
 - 新增 QQ 号黑名单：支持按申请 QQ 号阻止入群申请与批量放行。
 - 黑名单命中优先级高于 strong 匹配；申请时可自动拒绝，release/catchup 不会放行。
+- 新增 `/audit reparse`：可手动重算 pending 解析结果，用于验证 parser/AI parser 修改，不执行 QQ 审批动作。
+- parser 支持 `-` 作为姓名/学号/专业分隔符。
 
 ### 说明
 
 - 本科/研究生 strong 规则不变。
 - 黑名单拒绝理由对申请人使用中性文案，不暴露“黑名单”。
+- reparse confirm 只更新本地 parsed/match/decision，不自动同意/拒绝。
 
 ## [v0.4.20] - 2026-07-22
 

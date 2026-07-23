@@ -191,6 +191,24 @@ class RematchSummary:
 
 
 @dataclass
+class ReparseOutcome:
+    ok: bool
+    message: str = ""
+    mode: str = "auto"
+    applied: bool = False
+    request: PendingRequest | None = None
+    old_reason: str = ""
+    new_reason: str = ""
+    old_decision: str = ""
+    new_decision: str = ""
+    old_strength: str = ""
+    new_strength: str = ""
+    old_parsed: dict | None = None
+    new_parsed: dict | None = None
+    ai_invoked: bool = False
+
+
+@dataclass
 class AuditEvaluation:
     profile: AuditProfile
     mode: str
@@ -589,15 +607,17 @@ class AuditPipeline:
         *,
         allow_ai_parse: bool = True,
         stored_parsed=None,
+        force_ai_parse: bool = False,
+        ai_client_call=None,
     ):
         mode, _ = self._effective_mode()
         students = load_students_for_audit(self.settings, self.cache)
         # Always run deterministic parse; stored (often AI) only fills gaps so
         # rematch/catchup can still upgrade when the comment contains more fields.
         parsed = parse_application_comment(event.comment or "")
-        if stored_parsed is not None:
+        if stored_parsed is not None and not force_ai_parse:
             parsed = fill_undergrad_gaps_from_stored(parsed, stored_parsed)
-        elif allow_ai_parse:
+        elif allow_ai_parse or force_ai_parse:
             await maybe_run_ai_parse(
                 self.settings,
                 profile="undergraduate",
@@ -606,6 +626,8 @@ class AuditPipeline:
                 incomplete=undergrad_parse_incomplete(parsed),
                 astrbot_context=self.astrbot_context,
                 umo=getattr(event, "umo", None),
+                force=force_ai_parse,
+                client_call=ai_client_call,
             )
         match = match_student(parsed, students, applicant_user_id=event.user_id)
         decision = make_decision(parsed, match, is_target_group=True)
@@ -629,16 +651,18 @@ class AuditPipeline:
         *,
         allow_ai_parse: bool = True,
         stored_parsed=None,
+        force_ai_parse: bool = False,
+        ai_client_call=None,
     ):
         mode, _ = self._effective_mode()
         cache = self.grad_cache
         students = load_graduates_for_audit(self.settings, cache) if cache else []
         parsed = parse_graduate_comment(event.comment or "")
-        if stored_parsed is not None:
+        if stored_parsed is not None and not force_ai_parse:
             parsed = fill_grad_gaps_from_stored(parsed, stored_parsed)
         if self.settings.grad_roster_parse_enabled:
             parsed = complete_graduate_parse_from_roster(parsed, students)
-        if stored_parsed is None and allow_ai_parse:
+        if (stored_parsed is None or force_ai_parse) and (allow_ai_parse or force_ai_parse):
             await maybe_run_ai_parse(
                 self.settings,
                 profile="graduate",
@@ -647,6 +671,8 @@ class AuditPipeline:
                 incomplete=grad_parse_incomplete(parsed),
                 astrbot_context=self.astrbot_context,
                 umo=getattr(event, "umo", None),
+                force=force_ai_parse,
+                client_call=ai_client_call,
             )
         match = match_graduate(parsed, students)
         decision = make_graduate_decision(parsed, match, is_target_group=True)
@@ -671,6 +697,8 @@ class AuditPipeline:
         profile: AuditProfile | None = None,
         allow_ai_parse: bool = True,
         stored_parsed=None,
+        force_ai_parse: bool = False,
+        ai_client_call=None,
     ):
         resolved = profile or resolve_profile(event.group_id, self.settings) or "undergraduate"
         if resolved == "graduate":
@@ -678,11 +706,15 @@ class AuditPipeline:
                 event,
                 allow_ai_parse=allow_ai_parse,
                 stored_parsed=stored_parsed,
+                force_ai_parse=force_ai_parse,
+                ai_client_call=ai_client_call,
             )
         return await self._evaluate_undergraduate_request(
             event,
             allow_ai_parse=allow_ai_parse,
             stored_parsed=stored_parsed,
+            force_ai_parse=force_ai_parse,
+            ai_client_call=ai_client_call,
         )
 
     async def _evaluate_pending_fields(
@@ -746,6 +778,147 @@ class AuditPipeline:
         if carry_markers_from is not None:
             carry_ai_attempt_markers(ev.parsed, carry_markers_from)
         return ev.mode, ev.parsed, ev.match, ev.decision
+
+    async def reparse_pending(
+        self,
+        req: PendingRequest,
+        *,
+        mode: str = "auto",
+        apply: bool = False,
+        admin_user_id: str | None = None,
+        ai_client_call=None,
+    ) -> ReparseOutcome:
+        """Force re-evaluate one pending locally; never calls QQ approve/reject."""
+        mode_key = (mode or "auto").strip().lower()
+        if mode_key not in {"auto", "rule", "ai"}:
+            return ReparseOutcome(ok=False, message="mode 无效，请使用 auto / rule / ai")
+        if req.status != "pending" or req.processed_at:
+            return ReparseOutcome(
+                ok=False,
+                message=f"仅支持 pending 申请重解析（当前状态：{req.status}）",
+                mode=mode_key,
+                request=req,
+            )
+
+        profile = getattr(req, "profile", None) or "undergraduate"
+        event = GroupJoinRequest(
+            group_id=req.group_id,
+            user_id=req.user_id,
+            comment=req.comment or "",
+            flag=req.flag,
+            sub_type=req.sub_type or "add",
+        )
+        old_reason = req.reason or ""
+        old_decision = req.decision or ""
+        old_strength = req.match_strength or (req.match or {}).get("strength") or "none"
+        old_parsed = dict(req.parsed or {})
+
+        allow_ai = False
+        force_ai = False
+        if mode_key == "rule":
+            allow_ai = False
+            force_ai = False
+        elif mode_key == "ai":
+            if not self.settings.ai_parse_enabled:
+                return ReparseOutcome(
+                    ok=False,
+                    message="AI parser 未启用（ai_parse_enabled=false）",
+                    mode=mode_key,
+                    request=req,
+                    old_reason=old_reason,
+                    old_decision=old_decision,
+                    old_strength=old_strength,
+                    old_parsed=old_parsed,
+                )
+            allow_ai = True
+            force_ai = True
+        else:
+            # auto: respect config, but ignore stored parsed / prior attempt markers
+            allow_ai = bool(self.settings.ai_parse_enabled)
+            force_ai = False
+
+        evaluation = await self._evaluate_request(
+            event,
+            profile=profile,
+            allow_ai_parse=allow_ai,
+            stored_parsed=None,
+            force_ai_parse=force_ai,
+            ai_client_call=ai_client_call,
+        )
+        new_parsed = _parsed_to_dict(
+            evaluation.parsed,
+            comment=req.comment or "",
+            profile=profile,
+        )
+        new_match = _match_to_dict(evaluation.match)
+        decision = evaluation.decision
+        hit = self._match_blacklist_hit(
+            group_id=req.group_id,
+            user_id=req.user_id,
+            profile=profile,
+            parsed_dict=new_parsed,
+            match_dict=new_match,
+        )
+        if hit is not None:
+            self._apply_blacklist_to_decision(decision, hit)
+            new_parsed = _attach_blacklist_markers(new_parsed, hit)
+
+        errors = new_parsed.get("parse_errors") or []
+        ai_invoked = any(
+            m in errors
+            for m in ("ai_parse_used", "ai_parse_merged", "ai_parse_shadow")
+        )
+        outcome = ReparseOutcome(
+            ok=True,
+            mode=mode_key,
+            applied=False,
+            request=req,
+            old_reason=old_reason,
+            new_reason=decision.reason or "",
+            old_decision=old_decision,
+            new_decision=decision.decision,
+            old_strength=str(old_strength),
+            new_strength=evaluation.match.strength,
+            old_parsed=old_parsed,
+            new_parsed=new_parsed,
+            ai_invoked=ai_invoked,
+        )
+        if not apply:
+            return outcome
+
+        now = utc_now_iso()
+        updated = await self.requests.update_by_id(
+            req.id,
+            {
+                "parsed": new_parsed,
+                "match": new_match,
+                "decision": decision.decision,
+                "confidence": decision.confidence,
+                "reason": decision.reason,
+                "mode": evaluation.mode,
+                "match_strength": evaluation.match.strength,
+                "matched_student_key": decision.matched_student_key,
+                "updated_at": now,
+            },
+        )
+        await self.audit.append(
+            {
+                "type": "pending_reparsed",
+                "request_id": req.id,
+                "group_id": req.group_id,
+                "user_id": req.user_id,
+                "admin_user_id": admin_user_id,
+                "reparse_mode": mode_key,
+                "old_decision": old_decision,
+                "new_decision": decision.decision,
+                "old_match_strength": old_strength,
+                "new_match_strength": evaluation.match.strength,
+                "reason": decision.reason,
+            }
+        )
+        outcome.applied = True
+        outcome.request = updated or req
+        return outcome
 
     async def rematch_active_pending(
         self,

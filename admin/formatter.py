@@ -199,12 +199,15 @@ def _format_help_debug() -> str:
             "/audit unknown [n]          近 7 天未识别汇总",
             "/audit blacklist list       查看黑名单",
             "/audit blacklist add 3 confirm 家长申请",
+            "/audit reparse <n> preview  重解析预览（不写库）",
+            "/audit reparse <n> confirm  更新本地解析，不调 QQ",
             "",
             "说明：",
             "- 短编号来自最近一次 /audit list 或入群通知",
             "- 弱匹配、非 26 级、QQ 辅助不会自动通过",
             "- 黑名单优先级高于 strong；命中后不会批量放行",
             "- 黑名单只按 QQ 号拦截，不按学号/考生号拦截",
+            "- reparse 只重算本地 pending，不执行 QQ 审批",
         ]
     )
 
@@ -250,6 +253,8 @@ def _format_help_advanced(
             "/audit dismiss <n> confirm <原因>  本地关闭无效申请（不调 QQ）",
             "/audit sweep preview          预览将本地关闭的非强匹配待处理",
             "/audit sweep confirm <原因>   一键本地关闭非强匹配（保留强匹配）",
+            "/audit reparse <n> [rule|ai|auto] preview  重解析预览",
+            "/audit reparse <n> [rule|ai|auto] confirm  更新本地解析，不调 QQ",
             "",
             "分批放人（仅本科强匹配 26 级待处理，不改变 mode）：",
             "/audit release              帮助 + 当前可释放数",
