@@ -239,10 +239,12 @@ async def maybe_run_ai_parse(
     client_call=None,
     astrbot_context: Any = None,
     umo: str | None = None,
+    force: bool = False,
 ) -> AiParseResult | None:
     """Optionally call AI. Shadow mode records only; non-shadow merges when incomplete.
 
     Returns AiParseResult when AI was invoked; None when skipped.
+    force=True: call even when parse looks complete (merge still respects shadow).
     client_call: optional injectable for tests
       sync or async (messages, settings) -> (content_text, model_name)
     """
@@ -250,7 +252,7 @@ async def maybe_run_ai_parse(
         return None
 
     shadow = bool(settings.ai_parse_shadow_mode)
-    if not shadow and not incomplete:
+    if not shadow and not incomplete and not force:
         return None
 
     backend = _normalize_backend(settings)
@@ -336,7 +338,7 @@ async def maybe_run_ai_parse(
     merged = False
     if shadow:
         _mark_shadow_or_used(parsed, shadow=True, model=result.model)
-    elif result.ok and result.fields is not None and incomplete:
+    elif result.ok and result.fields is not None and (incomplete or force):
         if profile == "graduate" and isinstance(parsed, GraduateParsedApplication):
             merge_ai_fields_into_grad_parsed(parsed, result.fields)
         elif isinstance(parsed, ParsedApplication):

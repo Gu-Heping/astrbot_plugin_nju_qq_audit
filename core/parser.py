@@ -20,8 +20,8 @@ STUDENT_ID_LEGACY_PATTERN = re.compile(r"\b(2[0-9]1\d{6})\b")
 NOTICE_NO_PATTERN = re.compile(r"\b(202[56]\d{4})\b")
 EXAM_NO_PATTERN = re.compile(r"\b(2[0-9]\d{12})\b")
 LOOSE_TOKEN_PATTERN = re.compile(r"\b([A-Za-z0-9][A-Za-z0-9\-_/]{3,31})\b")
-# QQ 答案常见分隔：空白、中英文标点，以及 + / ＋ ／
-FIELD_SEPARATOR_PATTERN = re.compile(r"[\s,，、；;|+＋/／]+")
+# QQ 答案常见分隔：空白、中英文标点，以及 + / ＋ ／ 和各类横线（ASCII - 放末尾避免成 range）
+FIELD_SEPARATOR_PATTERN = re.compile(r"[\s,，、；;|+＋/／－—–-]+")
 NAME_LABEL_PATTERN = re.compile(
     r"(?:姓名|名字|真实姓名)[:：\s]+([\u4e00-\u9fa5·]{2,4})"
     r"(?=\s|学号|考生号|准考证|报名号|通知书|编号|专业|$|[:：])",
