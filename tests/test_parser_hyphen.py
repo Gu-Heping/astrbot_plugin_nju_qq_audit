@@ -24,3 +24,19 @@ def test_hyphen_does_not_put_exam_no_into_student_id():
     assert parsed.name == "张三"
     assert parsed.exam_no == "26110100123456"
     assert parsed.student_id is None
+
+
+def test_parse_name_major_sid_glued():
+    parsed = parse_application_comment("张三计算机科学与技术261220001")
+    assert parsed.name == "张三"
+    assert parsed.student_id == "261220001"
+    assert parsed.major == "计算机科学与技术"
+
+
+def test_parse_name_major_sid_glued_with_qa_prefix():
+    parsed = parse_application_comment(
+        "问题：姓名 学号/录取号 专业\n答案：张三计算机科学与技术261220001"
+    )
+    assert parsed.name == "张三"
+    assert parsed.student_id == "261220001"
+    assert parsed.major == "计算机科学与技术"

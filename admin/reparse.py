@@ -59,6 +59,13 @@ def _field(parsed: dict | None, *keys: str, default: str = "未提供") -> str:
     return default
 
 
+def _parsed_fields_unchanged(old_p: dict | None, new_p: dict | None) -> bool:
+    old = old_p or {}
+    new = new_p or {}
+    keys = ("name", "student_id", "exam_no", "notice_no", "major", "major_text")
+    return all((old.get(k) or None) == (new.get(k) or None) for k in keys)
+
+
 def format_reparse_preview(
     outcome: ReparseOutcome,
     *,
@@ -109,6 +116,11 @@ def format_reparse_preview(
     ]
     if outcome.ai_invoked:
         lines.append("AI：已调用")
+        if _parsed_fields_unchanged(old_p, new_p):
+            lines.append(
+                "提示：AI 已调用但未改变解析结果，可能是 AI 输出未通过校验"
+                "或当前 merge 策略未允许覆盖。"
+            )
     lines.extend(
         [
             "",

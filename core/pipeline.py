@@ -608,6 +608,7 @@ class AuditPipeline:
         allow_ai_parse: bool = True,
         stored_parsed=None,
         force_ai_parse: bool = False,
+        allow_ai_overwrite: bool = False,
         ai_client_call=None,
     ):
         mode, _ = self._effective_mode()
@@ -627,6 +628,7 @@ class AuditPipeline:
                 astrbot_context=self.astrbot_context,
                 umo=getattr(event, "umo", None),
                 force=force_ai_parse,
+                allow_overwrite=allow_ai_overwrite,
                 client_call=ai_client_call,
             )
         match = match_student(parsed, students, applicant_user_id=event.user_id)
@@ -652,6 +654,7 @@ class AuditPipeline:
         allow_ai_parse: bool = True,
         stored_parsed=None,
         force_ai_parse: bool = False,
+        allow_ai_overwrite: bool = False,
         ai_client_call=None,
     ):
         mode, _ = self._effective_mode()
@@ -672,6 +675,7 @@ class AuditPipeline:
                 astrbot_context=self.astrbot_context,
                 umo=getattr(event, "umo", None),
                 force=force_ai_parse,
+                allow_overwrite=allow_ai_overwrite,
                 client_call=ai_client_call,
             )
         match = match_graduate(parsed, students)
@@ -698,6 +702,7 @@ class AuditPipeline:
         allow_ai_parse: bool = True,
         stored_parsed=None,
         force_ai_parse: bool = False,
+        allow_ai_overwrite: bool = False,
         ai_client_call=None,
     ):
         resolved = profile or resolve_profile(event.group_id, self.settings) or "undergraduate"
@@ -707,6 +712,7 @@ class AuditPipeline:
                 allow_ai_parse=allow_ai_parse,
                 stored_parsed=stored_parsed,
                 force_ai_parse=force_ai_parse,
+                allow_ai_overwrite=allow_ai_overwrite,
                 ai_client_call=ai_client_call,
             )
         return await self._evaluate_undergraduate_request(
@@ -714,6 +720,7 @@ class AuditPipeline:
             allow_ai_parse=allow_ai_parse,
             stored_parsed=stored_parsed,
             force_ai_parse=force_ai_parse,
+            allow_ai_overwrite=allow_ai_overwrite,
             ai_client_call=ai_client_call,
         )
 
@@ -819,9 +826,11 @@ class AuditPipeline:
 
         allow_ai = False
         force_ai = False
+        allow_overwrite = False
         if mode_key == "rule":
             allow_ai = False
             force_ai = False
+            allow_overwrite = False
         elif mode_key == "ai":
             if not self.settings.ai_parse_enabled:
                 return ReparseOutcome(
@@ -836,10 +845,12 @@ class AuditPipeline:
                 )
             allow_ai = True
             force_ai = True
+            allow_overwrite = True
         else:
             # auto: respect config, but ignore stored parsed / prior attempt markers
             allow_ai = bool(self.settings.ai_parse_enabled)
             force_ai = False
+            allow_overwrite = False
 
         evaluation = await self._evaluate_request(
             event,
@@ -847,6 +858,7 @@ class AuditPipeline:
             allow_ai_parse=allow_ai,
             stored_parsed=None,
             force_ai_parse=force_ai,
+            allow_ai_overwrite=allow_overwrite,
             ai_client_call=ai_client_call,
         )
         new_parsed = _parsed_to_dict(

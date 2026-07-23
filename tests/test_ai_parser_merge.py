@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from config import PluginSettings, load_settings
+from config import load_settings
 from core.ai_parser.models import AiParsedFields
 from core.ai_parser.service import (
     apply_ai_auto_approve_guard,
@@ -307,3 +307,129 @@ def test_grad_ai_assist_strong_manual_guard():
     )
     if match.strength == "strong":
         assert decision.decision == "manual_review"
+
+
+def test_force_overwrite_suspicious_name_major():
+    raw = "问题：姓名 学号/录取号 专业\n答案：张三计算机科学与技术261220001"
+    parsed = ParsedApplication(
+        raw=raw,
+        name="学与技术",
+        student_id="261220001",
+        major="张三计算机科学与技术261220001",
+    )
+    ai = AiParsedFields(
+        profile="undergraduate",
+        name="张三",
+        student_id="261220001",
+        major="计算机科学与技术",
+        evidence={
+            "name": "张三",
+            "student_id": "261220001",
+            "major": "计算机科学与技术",
+        },
+    )
+    merge_ai_fields_into_undergrad_parsed(
+        parsed,
+        ai,
+        allow_overwrite=True,
+        answer_text="张三计算机科学与技术261220001",
+    )
+    assert parsed.name == "张三"
+    assert parsed.student_id == "261220001"
+    assert parsed.major == "计算机科学与技术"
+
+
+def test_non_force_merge_does_not_overwrite_existing_name():
+    raw = "问题：姓名 学号/录取号 专业\n答案：张三计算机科学与技术261220001"
+    parsed = ParsedApplication(
+        raw=raw,
+        name="学与技术",
+        student_id="261220001",
+        major="张三计算机科学与技术261220001",
+    )
+    ai = AiParsedFields(
+        profile="undergraduate",
+        name="张三",
+        student_id="999999999",
+        major="计算机科学与技术",
+        evidence={
+            "name": "张三",
+            "student_id": "999999999",
+            "major": "计算机科学与技术",
+        },
+    )
+    merge_ai_fields_into_undergrad_parsed(parsed, ai, allow_overwrite=False)
+    assert parsed.name == "学与技术"
+    assert parsed.student_id == "261220001"
+    # major equals glued answer (not full raw) and contains digits → still not
+    # overwritten without allow_overwrite unless template-misparsed vs raw.
+    assert parsed.major == "张三计算机科学与技术261220001"
+
+
+def test_overwrite_rejects_ai_fields_absent_from_answer():
+    answer = "张三计算机科学与技术261220001"
+    parsed = ParsedApplication(
+        raw=answer,
+        name="学与技术",
+        student_id="261220001",
+        major=answer,
+    )
+    ai = AiParsedFields(
+        profile="undergraduate",
+        name="李四",
+        major="软件工程",
+        evidence={"name": "李四", "major": "软件工程"},
+    )
+    merge_ai_fields_into_undergrad_parsed(
+        parsed,
+        ai,
+        allow_overwrite=True,
+        answer_text=answer,
+    )
+    assert parsed.name == "学与技术"
+    assert parsed.major == answer
+
+
+@pytest.mark.asyncio
+async def test_online_ai_fallback_does_not_overwrite_without_force():
+    settings = load_settings(
+        DummyConfig(
+            {
+                "ai_parse_enabled": True,
+                "ai_parse_shadow_mode": False,
+                "ai_parse_base_url": "http://example.invalid/v1",
+                "ai_parse_model": "test-model",
+            }
+        )
+    )
+    raw = "问题：姓名 学号/录取号 专业\n答案：张三计算机科学与技术261220001"
+    parsed = ParsedApplication(
+        raw=raw,
+        name="学与技术",
+        student_id="261220001",
+        major="张三计算机科学与技术261220001",
+    )
+
+    def fake_client(messages, _settings):
+        return (
+            _ai_json(
+                name="张三",
+                student_id="261220001",
+                major="计算机科学与技术",
+            ),
+            "test-model",
+        )
+
+    # incomplete=True simulates online fallback; allow_overwrite defaults False
+    await maybe_run_ai_parse(
+        settings,
+        profile="undergraduate",
+        raw_comment=raw,
+        parsed=parsed,
+        incomplete=True,
+        force=False,
+        allow_overwrite=False,
+        client_call=fake_client,
+    )
+    assert parsed.name == "学与技术"
+    assert parsed.student_id == "261220001"
