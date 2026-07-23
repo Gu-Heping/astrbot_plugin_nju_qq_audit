@@ -149,6 +149,49 @@ def undergrad_parse_incomplete(parsed: ParsedApplication) -> bool:
     return False
 
 
+# Common fragments when the rule parser takes the last chars of a major as "name".
+_SUSPICIOUS_NAME_TAILS = frozenset(
+    {
+        "学与技术",
+        "科学与技术",
+        "与技术",
+        "工程",
+        "科学",
+        "技术",
+        "实验班",
+        "试验班",
+    }
+)
+
+
+def undergrad_parse_suspicious(parsed: ParsedApplication) -> bool:
+    """True when name/major look like glued-token mis-parses worth AI correction."""
+    answer = _answer_haystack(parsed.raw)
+    name = (parsed.name or "").strip()
+    major = (parsed.major or "").strip()
+
+    if name in _SUSPICIOUS_NAME_TAILS:
+        return True
+    if is_template_misparsed_name(name):
+        return True
+    if _major_looks_suspicious(parsed, answer):
+        return True
+    # name is not at answer start while major looks glued / credential-contaminated
+    if name and answer and not answer.startswith(name) and major:
+        if _major_looks_suspicious(parsed, answer):
+            return True
+        compact_ans = answer.replace(" ", "").replace("　", "")
+        if name in compact_ans and re.search(
+            re.escape(name) + r"\d{6,}",
+            compact_ans,
+        ):
+            return True
+    # major looks like name+major+id glued blob
+    if major and re.search(r"[\u4e00-\u9fa5·]{4,}\d{6,}", major.replace(" ", "")):
+        return True
+    return False
+
+
 def grad_parse_incomplete(parsed: GraduateParsedApplication) -> bool:
     if is_template_misparsed_name(parsed.name):
         return True
@@ -347,9 +390,9 @@ async def maybe_run_ai_parse(
     """Optionally call AI. Shadow mode records only; non-shadow merges when incomplete.
 
     Returns AiParseResult when AI was invoked; None when skipped.
-    force=True: call even when parse looks complete (merge still respects shadow).
-    allow_overwrite=True: admin force-reparse may overwrite suspicious name/major
-      and still merges even when shadow mode is on (does not change online fallback).
+    force=True: call even when parse looks complete (merge still respects shadow unless force).
+    allow_overwrite=True: may overwrite suspicious name/major (forced reparse or online
+      non-strong fallback). Force reparse also merges when shadow mode is on.
     client_call: optional injectable for tests
       sync or async (messages, settings) -> (content_text, model_name)
     """
@@ -357,8 +400,8 @@ async def maybe_run_ai_parse(
         return None
 
     shadow = bool(settings.ai_parse_shadow_mode)
-    # Forced overwrite reparse must actually apply AI fields locally.
-    merge_shadow = shadow and not allow_overwrite
+    # Only forced reparse bypasses shadow; online overwrite still respects shadow.
+    merge_shadow = shadow and not force
     if not shadow and not incomplete and not force:
         return None
 
