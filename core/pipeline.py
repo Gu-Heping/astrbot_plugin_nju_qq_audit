@@ -14,6 +14,7 @@ from core.ai_parser.service import (
     grad_parse_incomplete,
     maybe_run_ai_parse,
     undergrad_parse_incomplete,
+    undergrad_parse_suspicious,
 )
 from core.decision import apply_auto_approve_flag, make_decision, should_auto_approve
 from core.matcher import MatchResult, match_student
@@ -618,20 +619,32 @@ class AuditPipeline:
         parsed = parse_application_comment(event.comment or "")
         if stored_parsed is not None and not force_ai_parse:
             parsed = fill_undergrad_gaps_from_stored(parsed, stored_parsed)
-        elif allow_ai_parse or force_ai_parse:
+
+        match = match_student(parsed, students, applicant_user_id=event.user_id)
+        incomplete = undergrad_parse_incomplete(parsed)
+        suspicious = undergrad_parse_suspicious(parsed)
+        # Cost control: only call AI when not already strong, unless forced reparse.
+        should_ai = force_ai_parse or (
+            allow_ai_parse
+            and match.strength != "strong"
+            and (incomplete or suspicious)
+        )
+        if should_ai and (allow_ai_parse or force_ai_parse):
+            overwrite = allow_ai_overwrite or suspicious
             await maybe_run_ai_parse(
                 self.settings,
                 profile="undergraduate",
                 raw_comment=event.comment or "",
                 parsed=parsed,
-                incomplete=undergrad_parse_incomplete(parsed),
+                incomplete=incomplete or suspicious or force_ai_parse,
                 astrbot_context=self.astrbot_context,
                 umo=getattr(event, "umo", None),
                 force=force_ai_parse,
-                allow_overwrite=allow_ai_overwrite,
+                allow_overwrite=overwrite,
                 client_call=ai_client_call,
             )
-        match = match_student(parsed, students, applicant_user_id=event.user_id)
+            match = match_student(parsed, students, applicant_user_id=event.user_id)
+
         decision = make_decision(parsed, match, is_target_group=True)
         decision = apply_auto_approve_flag(decision, mode, match)
         decision = apply_ai_auto_approve_guard(
@@ -847,7 +860,7 @@ class AuditPipeline:
             force_ai = True
             allow_overwrite = True
         else:
-            # auto: respect config, but ignore stored parsed / prior attempt markers
+            # auto: same online path — AI only when not strong and incomplete/suspicious
             allow_ai = bool(self.settings.ai_parse_enabled)
             force_ai = False
             allow_overwrite = False

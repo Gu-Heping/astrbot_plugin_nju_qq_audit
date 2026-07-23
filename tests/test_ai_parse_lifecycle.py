@@ -104,7 +104,8 @@ async def test_new_request_can_call_ai(tmp_path, ai_calls):
     event = GroupJoinRequest(
         group_id=GROUP_ID,
         user_id="1",
-        comment="答案：何聿璿+261880009+技术科学试验班",
+        # Incomplete deterministic parse (sid only) → non-strong → AI fallback.
+        comment="答案：学号261880009",
         flag="f1",
         sub_type="add",
     )
@@ -225,7 +226,8 @@ async def test_comment_change_allows_ai_again(tmp_path, ai_calls):
     event = GroupJoinRequest(
         group_id=GROUP_ID,
         user_id="3",
-        comment="答案：何聿璿+261880009+技术科学试验班",
+        # Incomplete parse path so AI is still invoked (strong deterministic skips AI).
+        comment="答案：学号261880009",
         flag="f3",
         sub_type="add",
     )
@@ -533,7 +535,8 @@ async def test_ai_parse_on_rematch_only_when_missing(tmp_path, ai_calls):
         id="r5",
         group_id=GROUP_ID,
         user_id="5",
-        comment="何聿璿+261880009+技术科学试验班",
+        # Missing stored parse + incomplete comment → rematch may call AI.
+        comment="答案：学号261880009",
         flag="f5",
         sub_type="add",
         status="pending",

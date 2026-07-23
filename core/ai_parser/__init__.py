@@ -6,6 +6,7 @@ from core.ai_parser.service import (
     merge_ai_fields_into_grad_parsed,
     merge_ai_fields_into_undergrad_parsed,
     maybe_run_ai_parse,
+    undergrad_parse_suspicious,
 )
 
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     "merge_ai_fields_into_grad_parsed",
     "merge_ai_fields_into_undergrad_parsed",
     "maybe_run_ai_parse",
+    "undergrad_parse_suspicious",
 ]
