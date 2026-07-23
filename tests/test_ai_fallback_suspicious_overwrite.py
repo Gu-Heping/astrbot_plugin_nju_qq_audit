@@ -430,6 +430,26 @@ async def test_match_none_ai_name_outside_answer_not_overwritten(tmp_path, monke
         ai_client_call=fake_client,
     )
     assert ev.parsed.name == NONE_NAME
+    assert ev.parsed.major == NONE_PERSON
+    assert "ai_parse_merged" not in ev.parsed.parse_errors
+    assert "ai_parse_no_change" in ev.parsed.parse_errors
+
+
+def test_ai_empty_fields_do_not_clear_major():
+    raw = f"{NONE_NAME} {NONE_PERSON}"
+    parsed = ParsedApplication(raw=raw, name=NONE_NAME, major=NONE_PERSON)
+    parsed.parse_errors.append("match_none_before_ai")
+    ai = AiParsedFields(profile="undergraduate")
+    merge_ai_fields_into_undergrad_parsed(
+        parsed,
+        ai,
+        allow_overwrite=True,
+        answer_text=raw,
+    )
+    assert parsed.name == NONE_NAME
+    assert parsed.major == NONE_PERSON
+    assert "ai_parse_merged" not in parsed.parse_errors
+    assert "ai_parse_no_change" in parsed.parse_errors
 
 
 def test_ai_noop_does_not_mark_merged():
@@ -523,3 +543,25 @@ def test_ai_fill_student_id_marks_merged():
     )
     assert parsed.student_id == SID
     assert "ai_parse_merged" in parsed.parse_errors
+
+
+def test_ai_does_not_clear_legitimate_major():
+    # Short majors that look name-like must not be wiped when AI only echoes name.
+    law_major = "法学"
+    raw = f"{NAME} {law_major}"
+    parsed = ParsedApplication(raw=raw, name=NAME, major=law_major)
+    ai = AiParsedFields(
+        profile="undergraduate",
+        name=NAME,
+        evidence={"name": NAME},
+    )
+    merge_ai_fields_into_undergrad_parsed(
+        parsed,
+        ai,
+        allow_overwrite=True,
+        answer_text=raw,
+    )
+    assert parsed.name == NAME
+    assert parsed.major == law_major
+    assert "ai_parse_merged" not in parsed.parse_errors
+    assert "ai_parse_no_change" in parsed.parse_errors

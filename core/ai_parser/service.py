@@ -285,6 +285,7 @@ def merge_ai_fields_into_undergrad_parsed(
         "academy": parsed.academy,
     }
     answer = answer_text if answer_text is not None else _answer_haystack(parsed.raw)
+    old_name = before["name"]
     if ai_fields.name:
         name_ok = (not allow_overwrite) or _text_contains_field(ai_fields.name, answer)
         if name_ok and (not parsed.name or is_template_misparsed_name(parsed.name)):
@@ -316,12 +317,16 @@ def merge_ai_fields_into_undergrad_parsed(
         ):
             parsed.major = ai_fields.major
     elif allow_overwrite:
+        # Only clear misplaced major when AI provided a valid evidenced name.
         current_major = (parsed.major or "").strip()
         ai_name = (ai_fields.name or "").strip()
-        if current_major and (
-            (ai_name and current_major == ai_name) or _major_is_name_like(current_major)
-        ):
-            parsed.major = None
+        valid_ai_name = bool(ai_name) and _text_contains_field(ai_name, answer)
+        name_changed = parsed.name != old_name
+        if current_major and valid_ai_name:
+            if current_major == ai_name:
+                parsed.major = None
+            elif name_changed and _major_is_name_like(current_major):
+                parsed.major = None
     if ai_fields.academy and not parsed.academy:
         parsed.academy = ai_fields.academy
     after = {
