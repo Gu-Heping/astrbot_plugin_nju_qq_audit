@@ -19,15 +19,15 @@ def test_valid_json_passes():
         json.dumps(
             {
                 "profile": "undergraduate",
-                "name": "何聿璿",
-                "student_id": "261880009",
+                "name": "周七七",
+                "student_id": "261880001",
                 "major": "技术科学试验班",
                 "confidence": 0.9,
                 "ambiguous": False,
                 "warnings": [],
                 "evidence": {
-                    "name": "何聿璿",
-                    "student_id": "261880009",
+                    "name": "周七七",
+                    "student_id": "261880001",
                     "major": "技术科学试验班",
                 },
             },
@@ -37,10 +37,10 @@ def test_valid_json_passes():
     fields = validate_ai_fields(
         _fields_from(data),
         question="姓名 学号/录取号 专业",
-        answer="何聿璿+261880009+技术科学试验班",
+        answer="周七七+261880001+技术科学试验班",
     )
-    assert fields.name == "何聿璿"
-    assert fields.student_id == "261880009"
+    assert fields.name == "周七七"
+    assert fields.student_id == "261880001"
     assert fields.major == "技术科学试验班"
 
 
@@ -66,8 +66,8 @@ def test_evidence_not_in_text_drops_field():
     fields = _fields_from(
         {
             "name": "张三",
-            "student_id": "261880009",
-            "evidence": {"name": "张三", "student_id": "261880009"},
+            "student_id": "261880001",
+            "evidence": {"name": "张三", "student_id": "261880001"},
         }
     )
     fields = validate_ai_fields(

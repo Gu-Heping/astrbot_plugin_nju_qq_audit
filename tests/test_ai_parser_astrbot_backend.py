@@ -104,17 +104,17 @@ async def test_astrbot_llm_generate_parses_fields():
     context.llm_generate = AsyncMock(
         return_value=SimpleNamespace(
             completion_text=_ai_json(
-                name="何聿璿",
-                student_id="261880009",
+                name="周七七",
+                student_id="261880001",
                 major="技术科学试验班",
             )
         )
     )
-    parsed = ParsedApplication(raw="何聿璿+261880009+技术科学试验班")
+    parsed = ParsedApplication(raw="周七七+261880001+技术科学试验班")
     result = await maybe_run_ai_parse(
         settings,
         profile="undergraduate",
-        raw_comment="答案：何聿璿+261880009+技术科学试验班",
+        raw_comment="答案：周七七+261880001+技术科学试验班",
         parsed=parsed,
         incomplete=True,
         astrbot_context=context,
@@ -122,8 +122,8 @@ async def test_astrbot_llm_generate_parses_fields():
     )
     assert result is not None
     assert result.ok
-    assert parsed.name == "何聿璿"
-    assert parsed.student_id == "261880009"
+    assert parsed.name == "周七七"
+    assert parsed.student_id == "261880001"
     assert parsed.major == "技术科学试验班"
     assert result.model == "astrbot_default:prov-1"
     context.llm_generate.assert_awaited()
@@ -150,11 +150,11 @@ async def test_astrbot_llm_exception_falls_back():
     context = MagicMock()
     context.get_current_chat_provider_id = AsyncMock(return_value="prov-1")
     context.llm_generate = AsyncMock(side_effect=RuntimeError("boom"))
-    parsed = ParsedApplication(raw="何聿璿+261880009+技术科学试验班")
+    parsed = ParsedApplication(raw="周七七+261880001+技术科学试验班")
     result = await maybe_run_ai_parse(
         settings,
         profile="undergraduate",
-        raw_comment="答案：何聿璿+261880009+技术科学试验班",
+        raw_comment="答案：周七七+261880001+技术科学试验班",
         parsed=parsed,
         incomplete=True,
         astrbot_context=context,
@@ -171,12 +171,12 @@ async def test_astrbot_prompt_privacy_via_flatten():
     messages = build_ai_parse_messages(
         profile="undergraduate",
         question="姓名 学号/录取号 专业",
-        answer="何聿璿+261880009+技术科学试验班",
+        answer="周七七+261880001+技术科学试验班",
         max_chars=500,
     )
     system, user = flatten_messages_for_astrbot(messages)
     blob = system + "\n" + user
-    assert "何聿璿" in blob
+    assert "周七七" in blob
     assert "raw_event" not in blob
     assert "access_token" not in blob
     assert "Bearer" not in blob
@@ -200,13 +200,13 @@ async def test_astrbot_shadow_does_not_merge():
     context.llm_generate = AsyncMock(
         return_value=SimpleNamespace(
             completion_text=_ai_json(
-                name="何聿璿",
-                student_id="261880009",
+                name="周七七",
+                student_id="261880001",
                 major="技术科学试验班",
             )
         )
     )
-    comment = "答案：何聿璿+261880009+技术科学试验班"
+    comment = "答案：周七七+261880001+技术科学试验班"
     parsed = parse_application_comment(comment)
     snap = (parsed.name, parsed.student_id, parsed.major)
     await maybe_run_ai_parse(
@@ -225,17 +225,17 @@ async def test_astrbot_shadow_does_not_merge():
 @pytest.mark.asyncio
 async def test_astrbot_merged_strong_still_manual_review():
     parsed = ParsedApplication(
-        raw="何聿璿+261880009+技术科学试验班",
-        name="何聿璿",
-        student_id="261880009",
+        raw="周七七+261880001+技术科学试验班",
+        name="周七七",
+        student_id="261880001",
         major="技术科学试验班",
         parse_errors=["ai_parse_used", "ai_parse_merged", "ai_parse_model:astrbot_default:p"],
     )
     students = [
         Student(
-            name="何聿璿",
+            name="周七七",
             updated_at="t",
-            student_id="261880009",
+            student_id="261880001",
             major="技术科学试验班",
         )
     ]
@@ -283,13 +283,13 @@ async def test_umo_passed_to_provider_resolver():
     context = MagicMock()
     context.get_current_chat_provider_id = AsyncMock(return_value="session-prov")
     context.llm_generate = AsyncMock(
-        return_value=SimpleNamespace(completion_text=_ai_json(name="何聿璿"))
+        return_value=SimpleNamespace(completion_text=_ai_json(name="周七七"))
     )
-    parsed = ParsedApplication(raw="何聿璿+261880009+技术科学试验班")
+    parsed = ParsedApplication(raw="周七七+261880001+技术科学试验班")
     await maybe_run_ai_parse(
         settings,
         profile="undergraduate",
-        raw_comment="答案：何聿璿+261880009+技术科学试验班",
+        raw_comment="答案：周七七+261880001+技术科学试验班",
         parsed=parsed,
         incomplete=True,
         astrbot_context=context,
@@ -320,7 +320,7 @@ async def test_llm_generate_typeerror_does_not_double_call():
     messages = build_ai_parse_messages(
         profile="undergraduate",
         question="姓名",
-        answer="何聿璿",
+        answer="周七七",
         max_chars=100,
     )
     with pytest.raises(TypeError):
@@ -347,11 +347,11 @@ async def test_astrbot_error_is_redacted_in_result():
             "Authorization: Bearer sk-astrbot-secret-key-should-not-leak"
         )
     )
-    parsed = ParsedApplication(raw="何聿璿+261880009+技术科学试验班")
+    parsed = ParsedApplication(raw="周七七+261880001+技术科学试验班")
     result = await maybe_run_ai_parse(
         settings,
         profile="undergraduate",
-        raw_comment="答案：何聿璿+261880009+技术科学试验班",
+        raw_comment="答案：周七七+261880001+技术科学试验班",
         parsed=parsed,
         incomplete=True,
         astrbot_context=context,

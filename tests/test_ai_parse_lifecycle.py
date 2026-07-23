@@ -33,9 +33,9 @@ class DummyConfig(dict):
 
 def _student(**kwargs) -> Student:
     base = dict(
-        key="261880009",
-        name="何聿璿",
-        student_id="261880009",
+        key="261880001",
+        name="周七七",
+        student_id="261880001",
         major="技术科学试验班",
         updated_at="t",
     )
@@ -85,9 +85,9 @@ def ai_calls(monkeypatch):
             }
         )
         # Simulate merge for incomplete undergrad comments with credentials.
-        if "261880009" in (raw_comment or "") and not parsed.name:
-            parsed.name = "何聿璿"
-            parsed.student_id = "261880009"
+        if "261880001" in (raw_comment or "") and not parsed.name:
+            parsed.name = "周七七"
+            parsed.student_id = "261880001"
             parsed.major = "技术科学试验班"
             if "ai_parse_merged" not in parsed.parse_errors:
                 parsed.parse_errors.append("ai_parse_used")
@@ -105,7 +105,7 @@ async def test_new_request_can_call_ai(tmp_path, ai_calls):
         group_id=GROUP_ID,
         user_id="1",
         # Incomplete deterministic parse (sid only) → non-strong → AI fallback.
-        comment="答案：学号261880009",
+        comment="答案：学号261880001",
         flag="f1",
         sub_type="add",
     )
@@ -115,11 +115,11 @@ async def test_new_request_can_call_ai(tmp_path, ai_calls):
 
 @pytest.mark.asyncio
 async def test_rematch_same_comment_does_not_call_ai(tmp_path, ai_calls):
-    comment = "答案：何聿璿+261880009+技术科学试验班"
+    comment = "答案：周七七+261880001+技术科学试验班"
     parsed = attach_parsed_meta(
         {
-            "name": "何聿璿",
-            "student_id": "261880009",
+            "name": "周七七",
+            "student_id": "261880001",
             "major": "技术科学试验班",
             "parse_errors": ["ai_parse_merged"],
         },
@@ -151,8 +151,8 @@ async def test_rematch_same_comment_does_not_call_ai(tmp_path, ai_calls):
     assert len(ai_calls) == 0
     updated = await pipe.requests.get_by_id("r1")
     assert updated is not None
-    assert updated.parsed.get("name") == "何聿璿"
-    assert updated.parsed.get("student_id") == "261880009"
+    assert updated.parsed.get("name") == "周七七"
+    assert updated.parsed.get("student_id") == "261880001"
     errors = updated.parsed.get("parse_errors") or []
     assert "ai_parse_merged" not in errors or "ai_parse_used" in errors
     assert any(m in errors for m in ("ai_parse_used", "ai_parse_merged", "ai_parse_shadow"))
@@ -160,9 +160,9 @@ async def test_rematch_same_comment_does_not_call_ai(tmp_path, ai_calls):
 
 @pytest.mark.asyncio
 async def test_rematch_upgrades_strong_with_new_roster(tmp_path, ai_calls):
-    comment = "何聿璿 261880009"
+    comment = "周七七 261880001"
     parsed = attach_parsed_meta(
-        {"name": "何聿璿", "student_id": "261880009", "parse_errors": ["ai_parse_merged"]},
+        {"name": "周七七", "student_id": "261880001", "parse_errors": ["ai_parse_merged"]},
         comment=comment,
         profile="undergraduate",
     )
@@ -227,7 +227,7 @@ async def test_comment_change_allows_ai_again(tmp_path, ai_calls):
         group_id=GROUP_ID,
         user_id="3",
         # Incomplete parse path so AI is still invoked (strong deterministic skips AI).
-        comment="答案：学号261880009",
+        comment="答案：学号261880001",
         flag="f3",
         sub_type="add",
     )
@@ -236,7 +236,7 @@ async def test_comment_change_allows_ai_again(tmp_path, ai_calls):
     updated = await pipe.requests.get_by_id("r3")
     assert updated is not None
     assert updated.parsed.get("_comment_hash") == compute_comment_hash(event.comment)
-    assert updated.parsed.get("name") == "何聿璿" or updated.parsed.get("student_id")
+    assert updated.parsed.get("name") == "周七七" or updated.parsed.get("student_id")
 
 
 @pytest.mark.asyncio
@@ -257,8 +257,8 @@ async def test_legacy_pending_without_hash_preserves_ai_fields(tmp_path, ai_call
         mode="auto",
         created_at="t",
         parsed={
-            "name": "何聿璿",
-            "student_id": "261880009",
+            "name": "周七七",
+            "student_id": "261880001",
             "parse_errors": ["ai_parse_merged"],
         },
         match={},
@@ -269,8 +269,8 @@ async def test_legacy_pending_without_hash_preserves_ai_fields(tmp_path, ai_call
     assert len(ai_calls) == 0
     updated = await pipe.requests.get_by_id("r4")
     assert updated is not None
-    assert updated.parsed.get("name") == "何聿璿"
-    assert updated.parsed.get("student_id") == "261880009"
+    assert updated.parsed.get("name") == "周七七"
+    assert updated.parsed.get("student_id") == "261880001"
     assert updated.match_strength == "strong"
 
 
@@ -353,11 +353,11 @@ async def test_legacy_unhashed_ai_markers_survive_rematch(tmp_path, ai_calls):
 
 @pytest.mark.asyncio
 async def test_failed_retry_same_comment_reuses_parsed(tmp_path, ai_calls):
-    comment = "答案：何聿璿+261880009+技术科学试验班"
+    comment = "答案：周七七+261880001+技术科学试验班"
     parsed = attach_parsed_meta(
         {
-            "name": "何聿璿",
-            "student_id": "261880009",
+            "name": "周七七",
+            "student_id": "261880001",
             "major": "技术科学试验班",
             "parse_errors": ["ai_parse_merged"],
         },
@@ -442,8 +442,8 @@ async def test_ai_merged_with_stale_unable_to_parse_is_reused(tmp_path, ai_calls
     comment = "答案：乱码无法本地解析"
     parsed = attach_parsed_meta(
         {
-            "name": "何聿璿",
-            "student_id": "261880009",
+            "name": "周七七",
+            "student_id": "261880001",
             "parse_errors": ["unable to parse any field", "ai_parse_merged"],
         },
         comment=comment,
@@ -472,19 +472,19 @@ async def test_ai_merged_with_stale_unable_to_parse_is_reused(tmp_path, ai_calls
     await pipe.rematch_active_pending(source="test")
     assert len(ai_calls) == 0
     updated = await pipe.requests.get_by_id("r4d")
-    assert updated.parsed.get("name") == "何聿璿"
+    assert updated.parsed.get("name") == "周七七"
     assert updated.match_strength == "strong"
 
 
 @pytest.mark.asyncio
 async def test_whitespace_only_comment_change_reuses_parsed(tmp_path, ai_calls):
-    old_comment = "答案：何聿璿+261880009"
-    new_comment = "答案： 何聿璿 + 261880009"
+    old_comment = "答案：周七七+261880001"
+    new_comment = "答案： 周七七 + 261880001"
     assert compute_comment_hash(old_comment) == compute_comment_hash(new_comment)
     parsed = attach_parsed_meta(
         {
-            "name": "何聿璿",
-            "student_id": "261880009",
+            "name": "周七七",
+            "student_id": "261880001",
             "parse_errors": ["ai_parse_merged"],
         },
         comment=old_comment,
@@ -519,7 +519,7 @@ async def test_whitespace_only_comment_change_reuses_parsed(tmp_path, ai_calls):
     await pipe._audit_and_update_pending(event, existing)
     assert len(ai_calls) == 0
     updated = await pipe.requests.get_by_id("r4c")
-    assert updated.parsed.get("name") == "何聿璿"
+    assert updated.parsed.get("name") == "周七七"
     errors = updated.parsed.get("parse_errors") or []
     assert any(m in errors for m in ("ai_parse_used", "ai_parse_merged", "ai_parse_shadow"))
 
@@ -536,7 +536,7 @@ async def test_ai_parse_on_rematch_only_when_missing(tmp_path, ai_calls):
         group_id=GROUP_ID,
         user_id="5",
         # Missing stored parse + incomplete comment → rematch may call AI.
-        comment="答案：学号261880009",
+        comment="答案：学号261880001",
         flag="f5",
         sub_type="add",
         status="pending",
@@ -556,9 +556,9 @@ async def test_ai_parse_on_rematch_only_when_missing(tmp_path, ai_calls):
 
 @pytest.mark.asyncio
 async def test_release_preview_does_not_call_ai(tmp_path, ai_calls):
-    comment = "何聿璿 261880009"
+    comment = "周七七 261880001"
     parsed = attach_parsed_meta(
-        {"name": "何聿璿", "student_id": "261880009"},
+        {"name": "周七七", "student_id": "261880001"},
         comment=comment,
         profile="undergraduate",
     )
@@ -591,9 +591,9 @@ async def test_release_preview_does_not_call_ai(tmp_path, ai_calls):
 
 @pytest.mark.asyncio
 async def test_catchup_paths_do_not_call_ai(tmp_path, ai_calls):
-    comment = "何聿璿 261880009"
+    comment = "周七七 261880001"
     parsed = attach_parsed_meta(
-        {"name": "何聿璿", "student_id": "261880009", "parse_errors": ["ai_parse_merged"]},
+        {"name": "周七七", "student_id": "261880001", "parse_errors": ["ai_parse_merged"]},
         comment=comment,
         profile="undergraduate",
     )
@@ -639,7 +639,7 @@ async def test_legacy_empty_parsed_falls_back_to_deterministic(tmp_path, ai_call
             id="r8",
             group_id=GROUP_ID,
             user_id="8",
-            comment="何聿璿 261880009",
+            comment="周七七 261880001",
             flag="f8",
             sub_type="add",
             status="pending",
@@ -658,17 +658,17 @@ async def test_legacy_empty_parsed_falls_back_to_deterministic(tmp_path, ai_call
     assert len(ai_calls) == 0
     updated = await pipe.requests.get_by_id("r8")
     assert updated is not None
-    assert updated.parsed.get("name") == "何聿璿"
-    assert updated.parsed.get("student_id") == "261880009"
+    assert updated.parsed.get("name") == "周七七"
+    assert updated.parsed.get("student_id") == "261880001"
     assert updated.match_strength == "strong"
 
 
 @pytest.mark.asyncio
 async def test_partial_stored_rematch_upgrades_via_deterministic(tmp_path, ai_calls):
     """Stored name-only must still reparse comment credentials on rematch."""
-    comment = "何聿璿 261880009"
+    comment = "周七七 261880001"
     parsed = attach_parsed_meta(
-        {"name": "何聿璿", "parse_errors": ["ai_parse_merged"]},
+        {"name": "周七七", "parse_errors": ["ai_parse_merged"]},
         comment=comment,
         profile="undergraduate",
     )
@@ -696,7 +696,7 @@ async def test_partial_stored_rematch_upgrades_via_deterministic(tmp_path, ai_ca
     await pipe.rematch_active_pending(source="catchup")
     assert len(ai_calls) == 0
     updated = await pipe.requests.get_by_id("r9")
-    assert updated.parsed.get("student_id") == "261880009"
+    assert updated.parsed.get("student_id") == "261880001"
     assert updated.match_strength == "strong"
     # Deterministic extracted credentials → do not keep ai_parse_merged (release-safe),
     # but keep an attempt marker so rematch won't call AI again.
@@ -746,7 +746,7 @@ async def test_legacy_retry_same_comment_skips_ai_without_hash(tmp_path, ai_call
 def test_comment_hash_stable():
     assert compute_comment_hash("a  b") == compute_comment_hash("a b")
     assert compute_comment_hash("a") != compute_comment_hash("b")
-    assert compute_comment_hash("何聿璿+261880009") == compute_comment_hash(
-        "何聿璿 + 261880009"
+    assert compute_comment_hash("周七七+261880001") == compute_comment_hash(
+        "周七七 + 261880001"
     )
     assert compute_comment_hash("张三；261") == compute_comment_hash("张三 ； 261")

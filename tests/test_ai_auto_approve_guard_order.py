@@ -14,17 +14,17 @@ from graduate.models import GraduateParsedApplication, GraduateStudent
 
 def test_undergrad_ai_merged_strong_blocks_auto_approve():
     parsed = ParsedApplication(
-        raw="何聿璿+261880009+技术科学试验班",
-        name="何聿璿",
-        student_id="261880009",
+        raw="周七七+261880001+技术科学试验班",
+        name="周七七",
+        student_id="261880001",
         major="技术科学试验班",
         parse_errors=["ai_parse_merged"],
     )
     students = [
         Student(
-            name="何聿璿",
+            name="周七七",
             updated_at="t",
-            student_id="261880009",
+            student_id="261880001",
             major="技术科学试验班",
         )
     ]
@@ -42,8 +42,8 @@ def test_undergrad_ai_merged_strong_blocks_auto_approve():
 
 def test_grad_ai_merged_strong_blocks_auto_approve():
     parsed = GraduateParsedApplication(
-        raw="陈俊毅生物学博",
-        name="陈俊毅",
+        raw="钱十一生物学博",
+        name="钱十一",
         major_text="生物学",
         admission_type="博士",
         parse_errors=["ai_parse_merged"],
@@ -55,7 +55,7 @@ def test_grad_ai_merged_strong_blocks_auto_approve():
             college="生科院",
             major_code="071000",
             major_name="生物学",
-            name="陈俊毅",
+            name="钱十一",
             key="k1",
         )
     ]
@@ -73,16 +73,16 @@ def test_grad_ai_merged_strong_blocks_auto_approve():
 
 def test_deterministic_strong_still_auto_in_auto_mode():
     parsed = ParsedApplication(
-        raw="何聿璿 261880009",
-        name="何聿璿",
-        student_id="261880009",
+        raw="周七七 261880001",
+        name="周七七",
+        student_id="261880001",
         parse_errors=[],
     )
     students = [
         Student(
-            name="何聿璿",
+            name="周七七",
             updated_at="t",
-            student_id="261880009",
+            student_id="261880001",
             major="技术科学试验班",
         )
     ]
@@ -98,16 +98,16 @@ def test_deterministic_strong_still_auto_in_auto_mode():
 
 def test_ai_allow_auto_approve_true_keeps_approve():
     parsed = ParsedApplication(
-        raw="何聿璿+261880009",
-        name="何聿璿",
-        student_id="261880009",
+        raw="周七七+261880001",
+        name="周七七",
+        student_id="261880001",
         parse_errors=["ai_parse_merged"],
     )
     students = [
         Student(
-            name="何聿璿",
+            name="周七七",
             updated_at="t",
-            student_id="261880009",
+            student_id="261880001",
             major="技术科学试验班",
         )
     ]

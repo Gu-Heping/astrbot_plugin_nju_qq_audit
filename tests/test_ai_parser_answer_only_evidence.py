@@ -45,18 +45,18 @@ def test_question_shuo_or_bo_cannot_prove_doctor():
     fields = validate_ai_fields(
         fields,
         question="姓名 专业 硕or博",
-        answer="黄昌意 计算机科学与技术",
+        answer="郑十十 计算机科学与技术",
     )
     assert fields.admission_type is None
 
 
 def test_question_template_only_no_admission_type():
     fields = _fields(
-        name="黄昌意",
+        name="郑十十",
         major="计算机科学与技术",
         admission_type="博士",
         evidence={
-            "name": "黄昌意",
+            "name": "郑十十",
             "major": "计算机科学与技术",
             "admission_type": "博",
         },
@@ -64,24 +64,24 @@ def test_question_template_only_no_admission_type():
     fields = validate_ai_fields(
         fields,
         question="姓名 专业 硕or博",
-        answer="黄昌意 计算机科学与技术",
+        answer="郑十十 计算机科学与技术",
     )
-    assert fields.name == "黄昌意"
+    assert fields.name == "郑十十"
     assert fields.major == "计算机科学与技术"
     assert fields.admission_type is None
 
 
 def test_answer_bo_allows_doctor():
     fields = _fields(
-        name="陈俊毅",
+        name="钱十一",
         major="生物学",
         admission_type="博士",
-        evidence={"name": "陈俊毅", "major": "生物学", "admission_type": "博"},
+        evidence={"name": "钱十一", "major": "生物学", "admission_type": "博"},
     )
     fields = validate_ai_fields(
         fields,
         question="姓名 专业 硕or博",
-        answer="陈俊毅 生物学 博",
+        answer="钱十一 生物学 博",
     )
     assert fields.admission_type == "博士"
 
@@ -91,7 +91,7 @@ def test_answer_shuo_bo_slash_ambiguous():
     fields = validate_ai_fields(
         fields,
         question="",
-        answer="陈俊毅 生物学 硕/博",
+        answer="钱十一 生物学 硕/博",
     )
     assert fields.admission_type is None
     assert fields.ambiguous is True
@@ -102,7 +102,7 @@ def test_answer_master_slash_doctor_ambiguous():
     fields = validate_ai_fields(
         fields,
         question="",
-        answer="陈俊毅 生物学 硕士/博士",
+        answer="钱十一 生物学 硕士/博士",
     )
     assert fields.admission_type is None
     assert fields.ambiguous is True
@@ -111,19 +111,19 @@ def test_answer_master_slash_doctor_ambiguous():
 def test_fields_only_in_question_are_dropped():
     fields = _fields(
         name="张三",
-        student_id="261880009",
+        student_id="261880001",
         notice_no="20260001",
         major="计算机",
         evidence={
             "name": "张三",
-            "student_id": "261880009",
+            "student_id": "261880001",
             "notice_no": "20260001",
             "major": "计算机",
         },
     )
     fields = validate_ai_fields(
         fields,
-        question="姓名：张三 学号：261880009 通知书：20260001 专业：计算机",
+        question="姓名：张三 学号：261880001 通知书：20260001 专业：计算机",
         answer="请审核",
     )
     assert fields.name is None
@@ -134,18 +134,18 @@ def test_fields_only_in_question_are_dropped():
 
 def test_value_in_answer_without_evidence_kept():
     fields = _fields(
-        name="何聿璿",
-        student_id="261880009",
+        name="周七七",
+        student_id="261880001",
         major="技术科学试验班",
         evidence={},
     )
     fields = validate_ai_fields(
         fields,
         question="姓名 学号 专业",
-        answer="何聿璿+261880009+技术科学试验班",
+        answer="周七七+261880001+技术科学试验班",
     )
-    assert fields.name == "何聿璿"
-    assert fields.student_id == "261880009"
+    assert fields.name == "周七七"
+    assert fields.student_id == "261880001"
     assert fields.major == "技术科学试验班"
 
 
@@ -157,7 +157,7 @@ def test_missing_from_answer_dropped():
     fields = validate_ai_fields(
         fields,
         question="",
-        answer="张三 261880009",
+        answer="张三 261880001",
     )
     assert fields.name is None
 
@@ -165,12 +165,12 @@ def test_missing_from_answer_dropped():
 def test_empty_answer_segment_rejects_question_evidence():
     fields = _fields(
         name="张三",
-        student_id="261880009",
-        evidence={"name": "张三", "student_id": "261880009"},
+        student_id="261880001",
+        evidence={"name": "张三", "student_id": "261880001"},
     )
     fields = validate_ai_fields(
         fields,
-        question="姓名：张三 学号：261880009",
+        question="姓名：张三 学号：261880001",
         answer="",
     )
     assert fields.name is None
@@ -211,49 +211,49 @@ def test_name_ending_bo_without_validated_name_not_peeled():
 
 
 def test_compact_major_bo_after_validated_name_kept():
-    """「陈俊毅生物学博」with validated name may keep admission_type=博士."""
+    """「钱十一生物学博」with validated name may keep admission_type=博士."""
     fields = _fields(
-        name="陈俊毅",
+        name="钱十一",
         major="生物学",
         admission_type="博士",
-        evidence={"name": "陈俊毅", "major": "生物学", "admission_type": "博"},
+        evidence={"name": "钱十一", "major": "生物学", "admission_type": "博"},
     )
     fields = validate_ai_fields(
         fields,
         question="姓名 专业 硕or博",
-        answer="陈俊毅生物学博",
+        answer="钱十一生物学博",
     )
-    assert fields.name == "陈俊毅"
+    assert fields.name == "钱十一"
     assert fields.major == "生物学"
     assert fields.admission_type == "博士"
 
 
 def test_semicolon_separated_bo_kept():
     fields = _fields(
-        name="陈俊毅",
+        name="钱十一",
         major="生物学",
         admission_type="博士",
-        evidence={"name": "陈俊毅", "major": "生物学", "admission_type": "博"},
+        evidence={"name": "钱十一", "major": "生物学", "admission_type": "博"},
     )
     fields = validate_ai_fields(
         fields,
         question="姓名 专业 硕or博",
-        answer="陈俊毅；博；生物学",
+        answer="钱十一；博；生物学",
     )
     assert fields.admission_type == "博士"
 
 
 def test_fullwidth_plus_separated_bo_kept():
     fields = _fields(
-        name="陈俊毅",
+        name="钱十一",
         major="生物学",
         admission_type="博士",
-        evidence={"name": "陈俊毅", "major": "生物学", "admission_type": "博"},
+        evidence={"name": "钱十一", "major": "生物学", "admission_type": "博"},
     )
     fields = validate_ai_fields(
         fields,
         question="",
-        answer="陈俊毅＋博＋生物学",
+        answer="钱十一＋博＋生物学",
     )
     assert fields.admission_type == "博士"
 

@@ -86,7 +86,7 @@ def _type_token_candidates(answer: str, *, exclude_name: str | None = None) -> l
     """Tokens for admission-type scanning.
 
     Trailing 硕/博 is peeled only after a validated name is removed from the
-    answer (e.g. 「陈俊毅生物学博」→「生物学博」→「博」). Without a validated name,
+    answer (e.g. 「钱十一生物学博」→「生物学博」→「博」). Without a validated name,
     tokens like 「欧阳博」are left intact so the name suffix is not type evidence.
     """
     scan = answer or ""
