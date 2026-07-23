@@ -74,10 +74,22 @@ def format_reparse_preview(
     qq_text = (user_label or "").strip() or req.user_id
     old_p = outcome.old_parsed or req.parsed or {}
     new_p = outcome.new_parsed or {}
+    summary_src = req
+    if new_p.get("name") or new_p.get("student_id") or new_p.get("major") or new_p.get(
+        "major_text"
+    ):
+
+        class _SummaryProxy:
+            parsed = new_p
+            profile = getattr(req, "profile", None) or (
+                "graduate" if new_p.get("admission_type") else "undergraduate"
+            )
+
+        summary_src = _SummaryProxy()
     lines = [
         f"重解析预览 [{idx}]",
         "",
-        f"申请：{applicant_summary(req)}",
+        f"申请：{applicant_summary(summary_src)}",
         f"QQ：{qq_text}",
         f"群：{group_text}",
         "",

@@ -229,3 +229,83 @@ async def test_reparse_rejects_terminal_statuses(tmp_path):
         outcome = await pipe.reparse_pending(req, mode="auto", apply=True)
         assert outcome.ok is False
         assert "pending" in outcome.message
+
+
+@pytest.mark.asyncio
+async def test_reparse_resolves_missing_profile_from_grad_group(tmp_path):
+    from graduate.cache import GraduateStudentCache
+    from graduate.models import GraduateStudent
+
+    grad_group = "200"
+    settings = _settings(
+        target_group_ids=GROUP,
+        grad_enabled=True,
+        grad_target_group_ids=grad_group,
+        ai_parse_enabled=False,
+    )
+    requests = RequestsStore(tmp_path / "requests.json")
+    audit = AuditLog(tmp_path / "audit.jsonl", settings)
+    runtime = RuntimeStore(tmp_path / "runtime.json")
+    cache = StudentCache(tmp_path)
+    grad_cache = GraduateStudentCache(tmp_path)
+    grad_cache.save_students(
+        [
+            GraduateStudent(
+                source_id="1",
+                admission_type="博士",
+                college="生命科学学院",
+                major_code="071001",
+                major_name="生物学",
+                name="张三",
+                key="张三:博士:071001",
+            )
+        ]
+    )
+    actions = MagicMock()
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(ok=True, retcode=0, message="ok")
+    )
+    pipe = AuditPipeline(
+        settings,
+        requests,
+        audit,
+        runtime,
+        cache,
+        actions,
+        MagicMock(),
+        blacklist_store=BlacklistStore(tmp_path / "blacklist.json"),
+        grad_cache=grad_cache,
+    )
+    req = PendingRequest(
+        id="REQ-grad-legacy",
+        group_id=grad_group,
+        user_id="123456789",
+        comment="张三 生物学 博",
+        flag="flag-grad",
+        sub_type="add",
+        profile=None,  # historical missing profile
+        parsed={"name": None},
+        match={"strength": "none"},
+        decision="manual_review",
+        confidence=0.1,
+        reason="信息不足",
+        mode="record-only",
+        status="pending",
+        created_at="2026-07-23T00:00:00+00:00",
+        match_strength="none",
+    )
+    await requests.upsert(req)
+    # Pass the in-memory object with profile=None (store may coerce missing profile).
+    outcome = await pipe.reparse_pending(req, mode="rule", apply=True)
+    assert outcome.ok
+    latest = await requests.get_by_id(req.id)
+    assert latest.profile == "graduate"
+    assert latest.parsed.get("name") == "张三"
+    assert latest.parsed.get("admission_type") == "博士"
+    assert latest.parsed.get("_profile") == "graduate"
+    actions.set_group_add_request.assert_not_awaited()
+    records = audit.read_all()
+    assert any(
+        r.get("type") == "pending_reparsed" and r.get("profile") == "graduate"
+        for r in records
+    )

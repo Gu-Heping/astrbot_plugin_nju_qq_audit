@@ -800,7 +800,11 @@ class AuditPipeline:
                 request=req,
             )
 
-        profile = getattr(req, "profile", None) or "undergraduate"
+        profile = (
+            getattr(req, "profile", None)
+            or resolve_profile(req.group_id, self.settings)
+            or "undergraduate"
+        )
         event = GroupJoinRequest(
             group_id=req.group_id,
             user_id=req.user_id,
@@ -898,6 +902,7 @@ class AuditPipeline:
                 "mode": evaluation.mode,
                 "match_strength": evaluation.match.strength,
                 "matched_student_key": decision.matched_student_key,
+                "profile": profile,
                 "updated_at": now,
             },
         )
@@ -909,6 +914,7 @@ class AuditPipeline:
                 "user_id": req.user_id,
                 "admin_user_id": admin_user_id,
                 "reparse_mode": mode_key,
+                "profile": profile,
                 "old_decision": old_decision,
                 "new_decision": decision.decision,
                 "old_match_strength": old_strength,
