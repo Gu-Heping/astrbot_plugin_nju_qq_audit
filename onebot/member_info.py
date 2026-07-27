@@ -30,9 +30,9 @@ _PROBE_DISPLAY_FIELDS = (
     "shut_up_timestamp",
 )
 
-_STRONG_MEMBER_ROLES = frozenset({"owner", "admin", "member"})
+_STRONG_MEMBER_ROLES = frozenset({"owner", "admin"})
 _STRONG_MEMBER_TIME_FIELDS = ("join_time", "last_sent_time")
-_STRONG_MEMBER_TEXT_FIELDS = ("card", "title", "level")
+_STRONG_MEMBER_TEXT_FIELDS = ("card", "title")
 
 _PROBE_HIDDEN_FIELDS = frozenset(
     {

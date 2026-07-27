@@ -100,7 +100,7 @@ async def test_external_approve_clears_pending_on_list_reconcile(tmp_path):
         ]
     )
     actions.get_group_member_info = AsyncMock(
-        return_value=ActionResult(ok=True, data={"user_id": int(USER_ID), "nickname": "张三", "role": "member"})
+        return_value=ActionResult(ok=True, data={"user_id": int(USER_ID), "nickname": "张三", "role": "member", "join_time": 123456})
     )
     pipe, requests, audit, list_cache, notifier = _pipeline(tmp_path, actions)
     req = _pending()
@@ -279,7 +279,7 @@ async def test_reconcile_is_idempotent(tmp_path):
         ]
     )
     actions.get_group_member_info = AsyncMock(
-        return_value=ActionResult(ok=True, data={"user_id": int(USER_ID), "nickname": "张三", "role": "member"})
+        return_value=ActionResult(ok=True, data={"user_id": int(USER_ID), "nickname": "张三", "role": "member", "join_time": 123456})
     )
     pipe, requests, audit, list_cache, notifier = _pipeline(tmp_path, actions)
     req = _pending()
@@ -420,7 +420,7 @@ async def test_saturated_snapshot_still_allows_member_approved(tmp_path):
         ]
     )
     actions.get_group_member_info = AsyncMock(
-        return_value=ActionResult(ok=True, data={"user_id": int(USER_ID), "nickname": "在群", "role": "member"})
+        return_value=ActionResult(ok=True, data={"user_id": int(USER_ID), "nickname": "在群", "role": "member", "join_time": 123456})
     )
     pipe, requests, audit, list_cache, _ = _pipeline(tmp_path, actions)
     req = _pending(flag=flag_a)

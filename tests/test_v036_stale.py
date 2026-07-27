@@ -115,7 +115,7 @@ async def test_stale_failure_marks_stale(tmp_path):
 async def test_stale_failure_member_present_marks_external(tmp_path):
     pipe, requests, audit, actions, notifier = _pipeline(tmp_path, admin_notify=True)
     actions.get_group_member_info = AsyncMock(
-        return_value=ActionResult(ok=True, retcode=0, message="ok", data={"user_id": "2492835361", "role": "member"})
+        return_value=ActionResult(ok=True, retcode=0, message="ok", data={"user_id": "2492835361", "role": "member", "join_time": 123456})
     )
     req = _pending()
     await requests.upsert(req)

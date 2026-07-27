@@ -64,7 +64,7 @@ def _member_map(membership: dict[tuple[str, str], bool]):
         if membership.get((group_id, user_id)):
             return ActionResult(
                 ok=True,
-                data={"user_id": user_id, "nickname": f"u{user_id}", "role": "member"},
+                data={"user_id": user_id, "nickname": f"u{user_id}", "role": "member", "join_time": 123456},
             )
         return ActionResult(ok=False, message="not found")
 

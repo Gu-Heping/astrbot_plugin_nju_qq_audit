@@ -55,7 +55,7 @@ def _result(**kwargs) -> ActionResult:
 
 
 def test_member_present_when_user_id_matches_with_evidence():
-    result = _result(data={"user_id": USER_ID, "role": "member"})
+    result = _result(data={"user_id": USER_ID, "join_time": 123456})
     check = inspect_user_in_group(
         result, expected_group_id=GROUP_A, expected_user_id=USER_ID
     )
@@ -92,8 +92,54 @@ def test_member_ambiguous_when_only_default_fields(extra):
     assert check.ambiguity_reason == "missing_member_evidence"
 
 
-def test_member_present_when_role_member():
+def test_member_ambiguous_when_role_member_only():
     result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "role": "member"})
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is None
+    assert check.ambiguity_reason == "missing_member_evidence"
+
+
+def test_member_ambiguous_when_default_role_and_times():
+    result = _result(
+        data={
+            "user_id": USER_ID,
+            "group_id": GROUP_A,
+            "role": "member",
+            "join_time": 0,
+            "last_sent_time": 0,
+            "level": 0,
+        }
+    )
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is None
+    assert check.ambiguity_reason == "missing_member_evidence"
+
+
+def test_member_ambiguous_when_level_zero_only():
+    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "level": 0})
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is None
+    assert check.ambiguity_reason == "missing_member_evidence"
+
+
+def test_member_ambiguous_when_level_string_only():
+    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "level": "1"})
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is None
+    assert check.ambiguity_reason == "missing_member_evidence"
+
+
+@pytest.mark.parametrize("role", ["admin", "owner"])
+def test_member_present_when_privileged_role(role):
+    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "role": role})
     check = inspect_user_in_group(
         result, expected_group_id=GROUP_A, expected_user_id=USER_ID
     )
@@ -108,12 +154,104 @@ def test_member_present_when_join_time_positive():
     assert check.present is True
 
 
-def test_member_present_when_card_present():
-    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "card": "xxx"})
+def test_member_present_when_last_sent_time_positive():
+    result = _result(
+        data={"user_id": USER_ID, "group_id": GROUP_A, "last_sent_time": 456}
+    )
     check = inspect_user_in_group(
         result, expected_group_id=GROUP_A, expected_user_id=USER_ID
     )
     assert check.present is True
+
+
+def test_member_present_when_title_present():
+    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "title": "活跃"})
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is True
+
+
+def test_member_present_when_card_present():
+    result = _result(
+        data={"user_id": USER_ID, "group_id": GROUP_A, "card": "25 电子 <NAME>"}
+    )
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is True
+
+
+def test_member_probe_report_default_role_fields_not_counted_as_evidence():
+    result = _result(
+        data={
+            "user_id": USER_ID,
+            "group_id": GROUP_A,
+            "role": "member",
+            "join_time": 0,
+            "last_sent_time": 0,
+            "level": 0,
+            "flag": "secret",
+        }
+    )
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    text = format_member_probe_report(
+        group_id=GROUP_A,
+        user_id=USER_ID,
+        check=check,
+        data=result.data,
+    )
+    assert "结果：无法确认" in text
+    assert "成员证据：无" in text
+    assert "role=member" in text
+    assert "join_time=0" in text
+    assert "last_sent_time=0" in text
+    assert "level=0" in text
+    assert "备注：missing_member_evidence" in text
+    assert "flag" not in text
+    assert "raw_event" not in text
+    assert "token" not in text
+
+
+@pytest.mark.asyncio
+async def test_default_shell_member_check_does_not_hit_exclusive(tmp_path):
+    settings = _settings()
+
+    async def member_info(group_id, user_id, *, no_cache=True):
+        if group_id == GROUP_A:
+            return _result(
+                data={
+                    "user_id": user_id,
+                    "group_id": group_id,
+                    "role": "member",
+                    "join_time": 0,
+                    "last_sent_time": 0,
+                    "level": 0,
+                }
+            )
+        return ActionResult(ok=False, message="not found")
+
+    actions = MagicMock()
+    actions.get_group_member_info = AsyncMock(side_effect=member_info)
+    audit = AuditLog(tmp_path / "audit.jsonl", settings)
+    hit = await check_undergrad_exclusive_membership(
+        actions,
+        settings,
+        current_group_id=GROUP_B,
+        user_id=USER_ID,
+        audit_log=audit,
+        audit_context={"source": "test"},
+    )
+    assert hit.hit is False
+    assert GROUP_A in hit.failed_group_ids
+    assert any(
+        row.get("type") == "undergrad_exclusive_member_check"
+        and row.get("result_status") == "ambiguous"
+        and row.get("ambiguity_reason") == "missing_member_evidence"
+        for row in audit.read_all()
+    )
 
 
 @pytest.mark.asyncio
