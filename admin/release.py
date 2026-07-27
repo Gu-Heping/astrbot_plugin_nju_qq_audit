@@ -13,6 +13,7 @@ from core.normalize import (
 )
 from core.pending_reconcile import build_group_snapshot_fetch
 from core.pipeline import RematchSummary
+from core.undergrad_exclusive import filter_releasable_for_undergrad_exclusive
 from data_source.student_cache import SyncState
 from data_source.students import PendingRequest
 from storage.blacklist_store import safe_match_request
@@ -66,6 +67,7 @@ class ReleaseResult:
     cancelled: bool = False
     rematch: RematchSummary | None = None
     blacklist_blocked: int = 0
+    undergrad_exclusive_blocked: int = 0
 
 
 @dataclass
@@ -388,35 +390,38 @@ def _format_rematch_lines(rematch: RematchSummary | None) -> list[str]:
 
 def format_release_help(count: int, settings: PluginSettings) -> str:
     interval_sec = settings.batch_approve_interval_ms / 1000
-    return "\n".join(
-        [
-            "分批通过（临时放行历史强匹配申请）",
-            "",
-            f"当前可通过：{count} 条",
-            f"单次上限：{settings.batch_approve_max_count} 条",
-            f"间隔：{interval_sec:g} 秒",
-            "",
-            "命令：",
-            "/audit release preview        预览（会先按当前缓存重算待处理）",
-            "/audit release 10 confirm     通过最多 10 条",
-            "/audit release all confirm    通过最多上限条数",
-            "",
-            "同步名单并补放：",
-            "/audit catchup preview        拉最新名单 + 重算 + 预览",
-            "/audit catchup confirm        拉最新名单 + 重算 + 放行（上限内）",
-            "",
-            "筛选条件（须同时满足）：",
-            "- 本科申请",
-            "- 系统强匹配",
-            "- 学号/考生号判断为 26 级",
-            "- 仍在待处理队列中",
-            "",
-            "说明：",
-            "- 不改变当前运行模式（不是长期自动审核）",
-            "- 建议先发欢迎消息，再分批执行",
-            "- 校对表更新后优先使用 /audit catchup preview",
-        ]
-    )
+    lines = [
+        "分批通过（临时放行历史强匹配申请）",
+        "",
+        f"当前可通过：{count} 条",
+        f"单次上限：{settings.batch_approve_max_count} 条",
+        f"间隔：{interval_sec:g} 秒",
+        "",
+        "命令：",
+        "/audit release preview        预览（会先按当前缓存重算待处理）",
+        "/audit release 10 confirm     通过最多 10 条",
+        "/audit release all confirm    通过最多上限条数",
+        "",
+        "同步名单并补放：",
+        "/audit catchup preview        拉最新名单 + 重算 + 预览",
+        "/audit catchup confirm        拉最新名单 + 重算 + 放行（上限内）",
+        "",
+        "筛选条件（须同时满足）：",
+        "- 本科申请",
+        "- 系统强匹配",
+        "- 学号/考生号判断为 26 级",
+        "- 仍在待处理队列中",
+        "",
+        "说明：",
+        "- 不改变当前运行模式（不是长期自动审核）",
+        "- 建议先发欢迎消息，再分批执行",
+        "- 校对表更新后优先使用 /audit catchup preview",
+    ]
+    if settings.undergrad_exclusive_groups_enabled:
+        lines.append(
+            "- 本科多群互斥开启时，已在其他本科目标群的 QQ 不进入 release/catchup，会转人工确认"
+        )
+    return "\n".join(lines)
 
 
 def format_catchup_help(settings: PluginSettings) -> str:
@@ -516,6 +521,8 @@ def format_release_result(result: ReleaseResult, settings: PluginSettings) -> st
                 status = f"命中黑名单，已关闭：{line.message}"
             elif line.final_status == "skipped":
                 status = f"已跳过：{line.message}"
+            elif line.final_status == "undergrad_exclusive":
+                status = "已在其他本科新生群，已移出放行队列，需人工确认"
             lines.append(f"[{line.index}] {line.summary} ... {status}")
         lines.append("")
     lines.extend(
@@ -528,6 +535,15 @@ def format_release_result(result: ReleaseResult, settings: PluginSettings) -> st
             f"外部已入群：{result.external_count}",
             f"失败：{result.failed}",
             f"剩余可通过：{result.remaining}",
+        ]
+    )
+    if result.undergrad_exclusive_blocked:
+        lines.insert(
+            -2,
+            f"本科多群互斥：{result.undergrad_exclusive_blocked}",
+        )
+    lines.extend(
+        [
             "",
             "建议：",
             "管理员可以发送欢迎消息后，再执行 /audit release 10 confirm",
@@ -819,6 +835,16 @@ class ReleaseService:
         preflight_batch = await preflight_releasable_with_live_snapshot(
             pipeline, requests_store, settings, batch
         )
+        preflight_batch, undergrad_blocked = (
+            await filter_releasable_for_undergrad_exclusive(
+                pipeline,
+                settings,
+                requests_store,
+                preflight_batch,
+                audit_log=audit_log,
+            )
+        )
+        result.undergrad_exclusive_blocked = undergrad_blocked
         preflight_ids = {req.id for req in preflight_batch}
         index_by_id = {req.id: idx for idx, req in enumerate(batch, start=1)}
         summary_by_id = {req.id: applicant_summary(req) for req in batch}
@@ -881,6 +907,20 @@ class ReleaseService:
                     )
                 )
             elif latest.status == "pending":
+                if (latest.parsed or {}).get("_undergrad_exclusive_hit"):
+                    result.processed += 1
+                    result.skipped_count += 1
+                    result.lines.append(
+                        ReleaseLineResult(
+                            index=index_by_id[req.id],
+                            request_id=req.id,
+                            summary=summary_by_id[req.id],
+                            ok=True,
+                            message="已在其他本科新生群，已移出放行队列，需人工确认",
+                            final_status="undergrad_exclusive",
+                        )
+                    )
+                    continue
                 result.processed += 1
                 result.skipped_count += 1
                 result.lines.append(

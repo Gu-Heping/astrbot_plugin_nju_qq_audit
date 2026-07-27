@@ -175,6 +175,7 @@ def _format_help_batch(
         "- 校对表刚更新时优先 catchup",
         "- 本科 release/catchup 只处理本科；研究生用 release/catchup grad",
         "- 别名：/audit batch strong N confirm、/audit temp N confirm",
+        "- 本科多群互斥开启时，已在其他本科目标群的 QQ 不进入 release/catchup，会转人工确认",
     ]
     lines.extend(
         _help_context(
@@ -268,6 +269,7 @@ def _format_help_advanced(
             "别名：/audit batch strong N confirm",
             "      /audit temp N confirm",
             "      /audit process strong confirm（兼容）",
+            "- 本科多群互斥开启时，已在其他本科目标群的 QQ 不进入 release/catchup，会转人工确认",
             "",
             "研究生分批放人（不改变 mode）：",
             "/audit release grad preview      预览研究生强匹配",

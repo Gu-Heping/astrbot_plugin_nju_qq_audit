@@ -320,5 +320,20 @@
     "description": "黑名单自动拒绝时发给申请人的中性理由（勿写“黑名单”）",
     "type": "string",
     "default": "请使用本人账号并按要求填写验证信息"
+  },
+  "undergrad_exclusive_groups_enabled": {
+    "description": "本科多群互斥：同一 QQ 已在其他本科目标群时转人工确认（不自动拒绝）",
+    "type": "bool",
+    "default": false
+  },
+  "undergrad_exclusive_group_ids": {
+    "description": "本科多群互斥检查的群号列表（逗号分隔；留空则使用 target_group_ids）",
+    "type": "string",
+    "default": ""
+  },
+  "undergrad_exclusive_reject_reason": {
+    "description": "管理员确认不可加入多个群时，建议用于 /audit no 的拒绝理由",
+    "type": "string",
+    "default": "不可加入多个群"
   }
 }

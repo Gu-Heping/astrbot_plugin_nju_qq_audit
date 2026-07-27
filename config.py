@@ -116,6 +116,9 @@ class PluginSettings:
     blacklist_enabled: bool = True
     blacklist_auto_reject: bool = True
     blacklist_reject_reason: str = "请使用本人账号并按要求填写验证信息"
+    undergrad_exclusive_groups_enabled: bool = False
+    undergrad_exclusive_group_ids: str = ""
+    undergrad_exclusive_reject_reason: str = "不可加入多个群"
 
     def __repr__(self) -> str:
         return (
@@ -375,6 +378,16 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
             )
         ).strip()
         or "请使用本人账号并按要求填写验证信息",
+        undergrad_exclusive_groups_enabled=bool(
+            config.get("undergrad_exclusive_groups_enabled", False)
+        ),
+        undergrad_exclusive_group_ids=str(
+            config.get("undergrad_exclusive_group_ids", "")
+        ).strip(),
+        undergrad_exclusive_reject_reason=str(
+            config.get("undergrad_exclusive_reject_reason", "不可加入多个群")
+        ).strip()
+        or "不可加入多个群",
     )
 
 
