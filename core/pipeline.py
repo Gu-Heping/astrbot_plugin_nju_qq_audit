@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from astrbot.api import logger
 
-from config import PluginSettings, get_effective_mode
+from config import PluginSettings, get_effective_mode, get_effective_undergrad_exclusive_action
 from admin.action_error import classify_action_failure
 from admin.labels import applicant_summary
 from core.ai_parser.service import (
@@ -342,8 +342,16 @@ class AuditPipeline:
             user_id=user_id,
         )
         if hit.hit:
+            override = self.runtime.get_undergrad_exclusive_action_override()
+            effective_action, _ = get_effective_undergrad_exclusive_action(
+                self.settings, override
+            )
             parsed_dict = apply_undergrad_exclusive_hit(
-                decision, parsed_dict, hit, self.settings
+                decision,
+                parsed_dict,
+                hit,
+                self.settings,
+                action=effective_action,
             )
             audit_type = (
                 "undergrad_exclusive_policy_hit"

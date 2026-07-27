@@ -152,15 +152,19 @@ def apply_undergrad_exclusive_hit(
     parsed_dict: dict,
     hit: UndergradExclusiveHit,
     settings: PluginSettings,
+    *,
+    action: str | None = None,
 ) -> dict:
     parsed_dict = dict(parsed_dict or {})
     parsed_dict["_undergrad_exclusive_hit"] = True
     parsed_dict["_undergrad_exclusive_group_ids"] = list(hit.group_ids)
     parsed_dict["_undergrad_exclusive_checked_group_ids"] = list(hit.checked_group_ids)
-    action = normalize_undergrad_exclusive_action(settings.undergrad_exclusive_action)
-    parsed_dict["_undergrad_exclusive_action"] = action
+    effective_action = normalize_undergrad_exclusive_action(
+        action if action is not None else settings.undergrad_exclusive_action
+    )
+    parsed_dict["_undergrad_exclusive_action"] = effective_action
     decision.should_auto_approve = False
-    if action == "auto_reject":
+    if effective_action == "auto_reject":
         decision.decision = "reject"
         decision.reason = (
             "申请人 QQ 已在其他本科目标群，已按多群互斥策略自动拒绝"

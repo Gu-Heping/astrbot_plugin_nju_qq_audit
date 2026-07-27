@@ -1,4 +1,9 @@
-from config import load_settings, get_effective_mode, mask_secret
+from config import (
+    get_effective_mode,
+    get_effective_undergrad_exclusive_action,
+    load_settings,
+    mask_secret,
+)
 from storage.runtime_store import RuntimeStore
 
 
@@ -24,6 +29,22 @@ def test_runtime_mode_override(tmp_path):
 
     asyncio.run(runtime.set_mode("auto", "123"))
     assert get_effective_mode(settings, runtime.get_mode_override()) == ("auto", "runtime")
+
+
+def test_runtime_undergrad_exclusive_action_override(tmp_path):
+    import asyncio
+
+    settings = load_settings(
+        DummyConfig({"undergrad_exclusive_action": "manual_review"})
+    )
+    runtime = RuntimeStore(tmp_path / "runtime.json")
+    assert get_effective_undergrad_exclusive_action(
+        settings, runtime.get_undergrad_exclusive_action_override()
+    ) == ("manual_review", "plugin_config")
+    asyncio.run(runtime.set_undergrad_exclusive_action_override("auto_reject", "123"))
+    assert get_effective_undergrad_exclusive_action(
+        settings, runtime.get_undergrad_exclusive_action_override()
+    ) == ("auto_reject", "runtime")
 
 
 def test_target_group_ids_parse():

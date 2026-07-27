@@ -31,6 +31,24 @@ class RuntimeStore:
             pass
         return self._empty()
 
+    def get_undergrad_exclusive_action_override(self) -> str | None:
+        data = self.load()
+        value = data.get("undergrad_exclusive_action_override")
+        if isinstance(value, str) and value:
+            return value
+        return None
+
+    async def set_undergrad_exclusive_action_override(
+        self, action: str, updated_by: str
+    ) -> None:
+        async with self._lock:
+            data = self.load()
+            data.setdefault("version", 1)
+            data["undergrad_exclusive_action_override"] = action
+            data["undergrad_exclusive_action_updated_at"] = utc_now_iso()
+            data["undergrad_exclusive_action_updated_by"] = updated_by
+            self._write(data)
+
     def get_mode_override(self) -> str | None:
         data = self.load()
         mode = data.get("mode")

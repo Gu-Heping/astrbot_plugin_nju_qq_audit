@@ -45,6 +45,7 @@ from admin.receipts import (
     resolve_display_labels,
     resolve_one_item_labels,
 )
+from admin.policy import handle_policy_command, parse_policy_command
 from admin.handlers import PluginContext
 from admin.ctx_compat import ensure_ctx_compat
 from admin.labels import applicant_summary
@@ -1200,6 +1201,36 @@ class NjuQqAuditPlugin(Star):
             return
         await self.ctx.runtime.set_mode(arg, event.get_sender_id())
         yield event.plain_result(f"runtime mode 已切换为: {arg}")
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit.command("policy")
+    async def audit_policy(
+        self,
+        event: AstrMessageEvent,
+        arg1: str = "",
+        arg2: str = "",
+        arg3: str = "",
+        arg4: str = "",
+    ):
+        allowed, message = can_run_command(self._settings(), "policy", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        command = parse_policy_command(
+            event.message_str or "",
+            arg1,
+            arg2,
+            arg3,
+            arg4,
+        )
+        result = await handle_policy_command(
+            settings=self._settings(),
+            runtime=self.ctx.runtime,
+            command=command,
+            updated_by=event.get_sender_id(),
+        )
+        yield event.plain_result(result)
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("sync")
