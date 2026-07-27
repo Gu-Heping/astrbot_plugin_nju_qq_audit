@@ -2,12 +2,59 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from config import PluginSettings, parse_numeric_ids
+from config import UNDERGRAD_EXCLUSIVE_ACTIONS, PluginSettings, parse_numeric_ids
 from data_source.students import PendingRequest
 from onebot.member_info import is_user_in_group
 from storage.audit_log import utc_now_iso
 
 UNDERGRAD_EXCLUSIVE_SUGGESTION = "该 QQ 已在其他本科目标群，请管理员人工确认"
+UNDERGRAD_EXCLUSIVE_AUTO_SUGGESTION = (
+    "该 QQ 已在其他本科目标群，已按多群互斥策略拒绝"
+)
+
+
+def normalize_undergrad_exclusive_action(value: str) -> str:
+    action = str(value or "manual_review").strip().lower()
+    if action not in UNDERGRAD_EXCLUSIVE_ACTIONS:
+        return "manual_review"
+    return action
+
+
+def build_undergrad_exclusive_qq_reject_reason(settings: PluginSettings) -> str:
+    return (
+        (settings.undergrad_exclusive_reject_reason or "").strip()
+        or "不可加入多个群"
+    )
+
+
+def build_undergrad_exclusive_reason(settings: PluginSettings) -> str:
+    reject_reason = build_undergrad_exclusive_qq_reject_reason(settings)
+    return (
+        "申请人 QQ 已在本科新生群之一，不进入自动/批量放行；"
+        f"如确认不可加入多个群，请使用 /audit no <编号> {reject_reason} confirm"
+    )
+
+
+def is_undergrad_exclusive_decision(
+    decision,
+    pending: PendingRequest | None = None,
+) -> bool:
+    parsed = (pending.parsed if pending is not None else {}) or {}
+    if parsed.get("_undergrad_exclusive_hit"):
+        return True
+    reason = getattr(decision, "reason", "") or ""
+    return "已在本科新生群" in reason or "已在其他本科目标群" in reason
+
+
+def is_undergrad_exclusive_auto_reject(
+    decision,
+    pending: PendingRequest | None = None,
+) -> bool:
+    parsed = (pending.parsed if pending is not None else {}) or {}
+    if not parsed.get("_undergrad_exclusive_hit"):
+        return False
+    action = parsed.get("_undergrad_exclusive_action") or "manual_review"
+    return action == "auto_reject" and getattr(decision, "decision", None) == "reject"
 
 
 @dataclass
@@ -24,17 +71,6 @@ def resolve_undergrad_exclusive_group_ids(settings: PluginSettings) -> frozenset
     if raw:
         return parse_numeric_ids(raw, "undergrad_exclusive_group_ids")
     return settings.target_group_ids
-
-
-def build_undergrad_exclusive_reason(settings: PluginSettings) -> str:
-    reject_reason = (
-        (settings.undergrad_exclusive_reject_reason or "").strip()
-        or "不可加入多个群"
-    )
-    return (
-        "申请人 QQ 已在本科新生群之一，不进入自动/批量放行；"
-        f"如确认不可加入多个群，请使用 /audit no <编号> {reject_reason} confirm"
-    )
 
 
 async def check_undergrad_exclusive_membership(
@@ -75,14 +111,12 @@ async def check_undergrad_exclusive_membership(
             failed_groups.append(group_id)
             continue
 
-        if not getattr(result, "ok", False):
-            failed_groups.append(group_id)
-            continue
-
         present = is_user_in_group(result)
         if present is True:
             hit_groups.append(group_id)
-        elif present is None:
+        elif present is False:
+            pass
+        else:
             failed_groups.append(group_id)
 
     if hit_groups:
@@ -123,10 +157,19 @@ def apply_undergrad_exclusive_hit(
     parsed_dict["_undergrad_exclusive_hit"] = True
     parsed_dict["_undergrad_exclusive_group_ids"] = list(hit.group_ids)
     parsed_dict["_undergrad_exclusive_checked_group_ids"] = list(hit.checked_group_ids)
-    decision.decision = "manual_review"
+    action = normalize_undergrad_exclusive_action(settings.undergrad_exclusive_action)
+    parsed_dict["_undergrad_exclusive_action"] = action
     decision.should_auto_approve = False
-    decision.reason = build_undergrad_exclusive_reason(settings)
-    decision.suggestion = UNDERGRAD_EXCLUSIVE_SUGGESTION
+    if action == "auto_reject":
+        decision.decision = "reject"
+        decision.reason = (
+            "申请人 QQ 已在其他本科目标群，已按多群互斥策略自动拒绝"
+        )
+        decision.suggestion = UNDERGRAD_EXCLUSIVE_AUTO_SUGGESTION
+    else:
+        decision.decision = "manual_review"
+        decision.reason = build_undergrad_exclusive_reason(settings)
+        decision.suggestion = UNDERGRAD_EXCLUSIVE_SUGGESTION
     return parsed_dict
 
 
@@ -164,6 +207,7 @@ async def filter_releasable_for_undergrad_exclusive(
             parsed["_undergrad_exclusive_checked_group_ids"] = list(
                 hit.checked_group_ids
             )
+            parsed["_undergrad_exclusive_action"] = "manual_review"
             await requests_store.update_by_id(
                 req.id,
                 {

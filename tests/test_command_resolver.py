@@ -121,6 +121,16 @@ def test_parse_no_command_reason():
     assert reason == "信息不完整"
 
 
+def test_parse_no_command_reason_with_trailing_confirm():
+    reason = parse_no_command_reason("/audit no 3 不可加入多个群 confirm", "3")
+    assert reason == "不可加入多个群"
+
+
+def test_parse_no_command_reason_confirm_before_reason():
+    reason = parse_no_command_reason("/audit no 3 confirm 不可加入多个群", "3")
+    assert reason == "不可加入多个群"
+
+
 def test_parse_no_command_default_reason():
     reason = parse_no_command_reason("/audit no 2", "2")
     assert "学号" in reason

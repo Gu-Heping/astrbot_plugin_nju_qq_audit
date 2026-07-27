@@ -14,6 +14,7 @@ from core.normalize import (
 from core.pending_reconcile import build_group_snapshot_fetch
 from core.pipeline import RematchSummary
 from core.undergrad_exclusive import filter_releasable_for_undergrad_exclusive
+from core.undergrad_overflow import filter_releasable_for_undergrad_overflow
 from data_source.student_cache import SyncState
 from data_source.students import PendingRequest
 from storage.blacklist_store import safe_match_request
@@ -68,6 +69,7 @@ class ReleaseResult:
     rematch: RematchSummary | None = None
     blacklist_blocked: int = 0
     undergrad_exclusive_blocked: int = 0
+    undergrad_overflow_blocked: int = 0
 
 
 @dataclass
@@ -421,6 +423,10 @@ def format_release_help(count: int, settings: PluginSettings) -> str:
         lines.append(
             "- 本科多群互斥开启时，已在其他本科目标群的 QQ 不进入 release/catchup，会转人工确认"
         )
+    if settings.undergrad_overflow_enabled:
+        lines.append(
+            "- 本科 overflow 开启时，指定群达到阈值后会自动拒绝并提示备用群"
+        )
     return "\n".join(lines)
 
 
@@ -523,6 +529,8 @@ def format_release_result(result: ReleaseResult, settings: PluginSettings) -> st
                 status = f"已跳过：{line.message}"
             elif line.final_status == "undergrad_exclusive":
                 status = "已在其他本科新生群，已移出放行队列，需人工确认"
+            elif line.final_status == "undergrad_overflow":
+                status = "本科群接近满员，已移出放行队列，请申请人去备用群"
             lines.append(f"[{line.index}] {line.summary} ... {status}")
         lines.append("")
     lines.extend(
@@ -541,6 +549,11 @@ def format_release_result(result: ReleaseResult, settings: PluginSettings) -> st
         lines.insert(
             -2,
             f"本科多群互斥：{result.undergrad_exclusive_blocked}",
+        )
+    if result.undergrad_overflow_blocked:
+        lines.insert(
+            -2,
+            f"本科群满员引导：{result.undergrad_overflow_blocked}",
         )
     lines.extend(
         [
@@ -845,6 +858,16 @@ class ReleaseService:
             )
         )
         result.undergrad_exclusive_blocked = undergrad_blocked
+        preflight_batch, overflow_blocked = (
+            await filter_releasable_for_undergrad_overflow(
+                pipeline,
+                settings,
+                requests_store,
+                preflight_batch,
+                audit_log=audit_log,
+            )
+        )
+        result.undergrad_overflow_blocked = overflow_blocked
         preflight_ids = {req.id for req in preflight_batch}
         index_by_id = {req.id: idx for idx, req in enumerate(batch, start=1)}
         summary_by_id = {req.id: applicant_summary(req) for req in batch}
@@ -918,6 +941,20 @@ class ReleaseService:
                             ok=True,
                             message="已在其他本科新生群，已移出放行队列，需人工确认",
                             final_status="undergrad_exclusive",
+                        )
+                    )
+                    continue
+                if (latest.parsed or {}).get("_undergrad_overflow_hit"):
+                    result.processed += 1
+                    result.skipped_count += 1
+                    result.lines.append(
+                        ReleaseLineResult(
+                            index=index_by_id[req.id],
+                            request_id=req.id,
+                            summary=summary_by_id[req.id],
+                            ok=True,
+                            message="本科群接近满员，已移出放行队列，请申请人去备用群",
+                            final_status="undergrad_overflow",
                         )
                     )
                     continue

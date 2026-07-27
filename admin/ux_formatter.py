@@ -796,6 +796,87 @@ def format_blacklist_reject_notice(
     return "\n".join(lines)
 
 
+def format_policy_reject_notice(
+    *,
+    title: str,
+    request_id: str,
+    group_label: str,
+    user_label: str,
+    ok: bool,
+    reason: str,
+    reject_reason: str,
+    summary: str,
+    comment: str,
+    action_message: str | None,
+    final_status: str,
+) -> str:
+    comment_line = (comment or "").strip()[:120]
+    reason_text = (reason or "").strip() or "（无）"
+    reject_text = (reject_reason or "").strip() or "（无）"
+    status = (final_status or "").strip() or None
+
+    lines = [
+        f"[入群审核] {title}",
+        "",
+        f"申请：{summary}",
+        f"QQ：{user_label}",
+        f"群：{group_label}",
+    ]
+    if comment_line:
+        lines.append(f"验证：{comment_line}")
+    lines.extend(["", f"原因：{reason_text}"])
+
+    if ok:
+        lines.extend(
+            [
+                "处理：已向 QQ 发送拒绝",
+                f"发给申请人的理由：{reject_text}",
+                "",
+                "查看记录：",
+                f"/audit view {request_id}",
+            ]
+        )
+    elif status == "dismissed":
+        lines.extend(
+            [
+                "处理：QQ 侧已拒绝，已移出队列",
+                "",
+                "查看记录：",
+                f"/audit view {request_id}",
+            ]
+        )
+    elif status in {"processed", "external"}:
+        lines.extend(
+            [
+                "处理：QQ 侧已处理，已移出队列",
+                "",
+                "查看记录：",
+                f"/audit view {request_id}",
+            ]
+        )
+    elif status == "stale":
+        lines.extend(
+            [
+                "处理：QQ 侧申请已失效，已移出队列",
+                "",
+                "查看记录：",
+                f"/audit view {request_id}",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f"处理：自动拒绝失败（{sanitize_action_message(action_message) or '未知错误'}）",
+                "已保留记录，请管理员手动确认",
+                "",
+                "建议：",
+                "/audit list",
+                f"/audit view {request_id}",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def format_auto_warning() -> str:
     return "\n".join(
         [

@@ -90,6 +90,7 @@ def _pipeline(tmp_path, settings, actions=None, *, blacklist=None):
     notifier = MagicMock()
     notifier.notify_manual_review = AsyncMock()
     notifier.notify_auto_result = AsyncMock()
+    notifier.notify_policy_reject_result = AsyncMock()
     pipe = AuditPipeline(
         settings,
         requests,
@@ -184,6 +185,41 @@ async def test_not_in_other_groups_keeps_strong_approve(tmp_path):
     assert pending.decision == "approve"
     assert pending.match_strength == "strong"
     actions.set_group_add_request.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_exclusive_not_found_is_not_partial_failure(tmp_path):
+    settings = _exclusive_settings()
+
+    async def member_info(group_id, user_id, *, no_cache=True):
+        if group_id == GROUP_A and user_id == USER_ID:
+            return ActionResult(ok=False, message="not found")
+        return ActionResult(ok=False, message="not found")
+
+    actions = MagicMock()
+    actions.get_group_member_info = AsyncMock(side_effect=member_info)
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(ok=True, retcode=0, message="ok")
+    )
+    pipe, requests, audit, actions, _ = _pipeline(tmp_path, settings, actions)
+
+    event = GroupJoinRequest(
+        group_id=GROUP_B,
+        user_id=USER_ID,
+        comment="周七七 261880001",
+        flag="flag-not-found",
+        sub_type="add",
+    )
+    req_id = await pipe._audit_and_act(event)
+    pending = await requests.get_by_id(req_id)
+
+    assert not pending.parsed.get("_undergrad_exclusive_hit")
+    assert pending.decision == "approve"
+    assert pending.match_strength == "strong"
+    assert not any(
+        r.get("type") == "undergrad_exclusive_check_partial_failed"
+        for r in audit.read_all()
+    )
 
 
 @pytest.mark.asyncio
@@ -400,6 +436,44 @@ async def test_current_group_membership_not_counted_as_hit(tmp_path):
     assert GROUP_A not in call_groups
     assert not pending.parsed.get("_undergrad_exclusive_hit")
     assert pending.decision == "approve"
+
+
+@pytest.mark.asyncio
+async def test_exclusive_auto_reject_calls_qq_reject(tmp_path):
+    settings = _exclusive_settings(
+        undergrad_exclusive_action="auto_reject",
+        mode="record-only",
+    )
+    actions = MagicMock()
+    actions.get_group_member_info = AsyncMock(
+        side_effect=_member_map({(GROUP_A, USER_ID): True})
+    )
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(ok=True, retcode=0, message="ok")
+    )
+    pipe, requests, audit, actions, _ = _pipeline(tmp_path, settings, actions)
+
+    event = GroupJoinRequest(
+        group_id=GROUP_B,
+        user_id=USER_ID,
+        comment="周七七 261880001",
+        flag="flag-auto-reject",
+        sub_type="add",
+    )
+    req_id = await pipe._audit_and_act(event)
+    pending = await requests.get_by_id(req_id)
+
+    assert pending.decision == "reject"
+    assert pending.parsed.get("_undergrad_exclusive_action") == "auto_reject"
+    actions.set_group_add_request.assert_awaited()
+    call = actions.set_group_add_request.await_args
+    assert call.args[2] is False
+    assert "不可加入多个群" in call.args[3]
+    assert await list_releasable(requests, settings) == []
+    assert any(
+        r.get("type") == "undergrad_exclusive_reject_rejected"
+        for r in audit.read_all()
+    )
 
 
 @pytest.mark.asyncio

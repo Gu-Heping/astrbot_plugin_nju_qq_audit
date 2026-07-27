@@ -309,6 +309,50 @@ class AdminNotifier:
         )
         await self._notify_admins(message, exclude_user_id=user_id)
 
+    async def notify_policy_reject_result(
+        self,
+        *,
+        title: str,
+        request_id: str,
+        group_id: str,
+        user_id: str,
+        ok: bool,
+        reason: str,
+        reject_reason: str,
+        summary: str | None = None,
+        comment: str | None = None,
+        action_message: str | None = None,
+        group_label: str | None = None,
+        user_label: str | None = None,
+        parsed: dict | None = None,
+        final_status: str | None = None,
+    ) -> None:
+        if not self.settings.admin_notify:
+            return
+        from admin.ux_formatter import format_policy_reject_notice
+
+        group_label, user_label = await self._resolve_labels(
+            group_id=group_id,
+            user_id=user_id,
+            parsed=parsed,
+            group_label=group_label,
+            user_label=user_label,
+        )
+        message = format_policy_reject_notice(
+            title=title,
+            request_id=request_id,
+            group_label=group_label,
+            user_label=user_label,
+            ok=ok,
+            reason=reason,
+            reject_reason=reject_reason,
+            summary=(summary or "").strip() or str(user_id or ""),
+            comment=comment or "",
+            action_message=action_message,
+            final_status=final_status or "",
+        )
+        await self._notify_admins(message, exclude_user_id=user_id)
+
     async def notify_external_handled(
         self,
         *,

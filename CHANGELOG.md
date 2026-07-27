@@ -2,6 +2,14 @@
 
 本文件记录 NJU QQ Audit 插件的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v0.4.23] - 2026-07-27
+
+### 新增
+
+- 新增本科多群策略模式：`manual_review` / `auto_reject`。
+- 新增本科群接近满员 overflow 引导：指定群达到阈值后自动拒绝并提示备用群。
+- release/catchup 增加 overflow preflight 保险。
+
 ## [v0.4.22] - 2026-07-27
 
 ### 新增
