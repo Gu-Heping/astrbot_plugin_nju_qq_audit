@@ -50,6 +50,9 @@ def build_ai_parse_messages(
         "本科考生号是 14 位数字，通常以 26 开头；它不是学号。"
         "不要把考生号填到 student_id。"
         "如果答案中出现 14 位考生号，填 exam_no。"
+        "如果答案中出现「261 开头学号紧跟中文」，应把数字部分抽为 student_id，"
+        "把后面的中文按语义拆为 name/major；不要把「学号+专业」整体填入 major。"
+        "紧凑格式示例：<NAME> <STUDENT_ID><MAJOR>、<STUDENT_ID><NAME><MAJOR>。"
         "evidence 中每个非空值必须是原文中可找到的子串。"
         "不要编造学号、姓名或专业。"
     )
