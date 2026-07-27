@@ -14,6 +14,43 @@ _NOT_FOUND_MARKERS = (
     "not in",
 )
 
+_GROUP_MEMBER_EVIDENCE_FIELDS = (
+    "role",
+    "join_time",
+    "last_sent_time",
+    "level",
+    "card",
+    "title",
+    "title_expire_time",
+    "card_changeable",
+    "unfriendly",
+    "shut_up_timestamp",
+)
+
+_PROBE_DISPLAY_FIELDS = (
+    "user_id",
+    "group_id",
+    "nickname",
+    "role",
+    "join_time",
+    "last_sent_time",
+    "level",
+    "card",
+    "title",
+    "title_expire_time",
+    "card_changeable",
+    "unfriendly",
+    "shut_up_timestamp",
+)
+
+_PROBE_HIDDEN_FIELDS = frozenset(
+    {
+        "raw_event",
+        "flag",
+        "token",
+    }
+)
+
 
 @dataclass(frozen=True)
 class MemberPresenceCheck:
@@ -33,6 +70,37 @@ def _short_message(message: str | None) -> str | None:
     if len(text) > 120:
         return text[:117] + "..."
     return text
+
+
+def _has_group_member_evidence(data: dict) -> bool:
+    for key in _GROUP_MEMBER_EVIDENCE_FIELDS:
+        if key in data and data.get(key) not in (None, ""):
+            return True
+    return False
+
+
+def _format_returned_fields(data: dict | None) -> str:
+    if not isinstance(data, dict) or not data:
+        return "（无）"
+    parts: list[str] = []
+    for key in _PROBE_DISPLAY_FIELDS:
+        if key in _PROBE_HIDDEN_FIELDS or str(key).startswith("_"):
+            continue
+        value = data.get(key)
+        if value not in (None, ""):
+            parts.append(f"{key}={value}")
+    return "、".join(parts) if parts else "（无）"
+
+
+def _format_member_evidence(data: dict | None) -> str:
+    if not isinstance(data, dict) or not data:
+        return "无"
+    parts: list[str] = []
+    for key in _GROUP_MEMBER_EVIDENCE_FIELDS:
+        value = data.get(key)
+        if value not in (None, ""):
+            parts.append(f"{key}={value}")
+    return " / ".join(parts) if parts else "无"
 
 
 def inspect_user_in_group(
@@ -82,11 +150,10 @@ def inspect_user_in_group(
 
     if expected_user_id:
         if returned_user_id is None:
-            if data.get("nickname") or data.get("card") or data.get("shut_up_timestamp") is not None:
+            if _has_group_member_evidence(data):
                 return MemberPresenceCheck(
                     present=None,
                     result_status="ambiguous",
-                    returned_user_id=returned_user_text,
                     returned_group_id=returned_group_text,
                     retcode=retcode,
                     message=message,
@@ -122,7 +189,18 @@ def inspect_user_in_group(
                 ambiguity_reason="group_mismatch",
             )
 
-    if expected_user_id:
+    has_user_id = returned_user_id is not None or bool(expected_user_id)
+    if has_user_id:
+        if not _has_group_member_evidence(data):
+            return MemberPresenceCheck(
+                present=None,
+                result_status="ambiguous",
+                returned_user_id=returned_user_text,
+                returned_group_id=returned_group_text,
+                retcode=retcode,
+                message=message,
+                ambiguity_reason="missing_member_evidence",
+            )
         return MemberPresenceCheck(
             present=True,
             result_status="present",
@@ -132,16 +210,7 @@ def inspect_user_in_group(
             message=message,
         )
 
-    if returned_user_id is not None:
-        return MemberPresenceCheck(
-            present=True,
-            result_status="present",
-            returned_user_id=returned_user_text,
-            returned_group_id=returned_group_text,
-            retcode=retcode,
-            message=message,
-        )
-    if data.get("nickname") or data.get("card") or data.get("shut_up_timestamp") is not None:
+    if _has_group_member_evidence(data):
         return MemberPresenceCheck(
             present=None,
             result_status="ambiguous",
@@ -186,6 +255,7 @@ def format_member_probe_report(
     group_id: str,
     user_id: str,
     check: MemberPresenceCheck,
+    data: dict | None = None,
 ) -> str:
     lines = [
         "get_group_member_info 检查结果",
@@ -198,10 +268,8 @@ def format_member_probe_report(
         lines.append(f"retcode：{check.retcode}")
     if check.message:
         lines.append(f"message：{check.message}")
-    if check.returned_user_id is not None:
-        lines.append(f"返回 user_id：{check.returned_user_id}")
-    if check.returned_group_id is not None:
-        lines.append(f"返回 group_id：{check.returned_group_id}")
+    lines.append(f"返回字段：{_format_returned_fields(data)}")
+    lines.append(f"成员证据：{_format_member_evidence(data)}")
     if check.ambiguity_reason:
         lines.append(f"备注：{check.ambiguity_reason}")
     return "\n".join(lines)

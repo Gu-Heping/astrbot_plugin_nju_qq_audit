@@ -1824,6 +1824,7 @@ class NjuQqAuditPlugin(Star):
                 group_id=group_id,
                 user_id=user_id,
                 check=check,
+                data=result.data if isinstance(result.data, dict) else None,
             )
         )
 
