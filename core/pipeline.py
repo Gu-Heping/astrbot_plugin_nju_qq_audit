@@ -19,6 +19,10 @@ from core.ai_parser.service import (
 from core.decision import apply_auto_approve_flag, make_decision, should_auto_approve
 from core.matcher import MatchResult, match_student
 from core.parser import parse_application_comment
+from core.undergrad_exclusive import (
+    apply_undergrad_exclusive_hit,
+    check_undergrad_exclusive_membership,
+)
 from core.parsed_store import (
     ai_parse_already_attempted,
     attach_parsed_meta,
@@ -305,6 +309,55 @@ class AuditPipeline:
         decision.reason = f"命中黑名单：{hit.reason}"
         decision.suggestion = "已按黑名单策略拒绝"
         decision.should_auto_approve = False
+
+    async def _apply_undergrad_exclusive_guard(
+        self,
+        *,
+        group_id: str,
+        user_id: str,
+        profile: str,
+        decision,
+        parsed_dict: dict,
+    ) -> dict:
+        if profile != "undergraduate":
+            return parsed_dict
+        if not self.settings.undergrad_exclusive_groups_enabled:
+            return parsed_dict
+        if _is_blacklist_decision(decision) or parsed_dict.get("_blacklist_hit"):
+            return parsed_dict
+
+        hit = await check_undergrad_exclusive_membership(
+            self.actions,
+            self.settings,
+            current_group_id=group_id,
+            user_id=user_id,
+        )
+        if hit.hit:
+            parsed_dict = apply_undergrad_exclusive_hit(
+                decision, parsed_dict, hit, self.settings
+            )
+            await self.audit.append(
+                {
+                    "type": "undergrad_exclusive_manual_review",
+                    "group_id": group_id,
+                    "user_id": user_id,
+                    "hit_group_ids": hit.group_ids,
+                    "checked_group_ids": hit.checked_group_ids,
+                }
+            )
+            return parsed_dict
+
+        if hit.failed_group_ids:
+            await self.audit.append(
+                {
+                    "type": "undergrad_exclusive_check_partial_failed",
+                    "group_id": group_id,
+                    "user_id": user_id,
+                    "failed_group_ids": hit.failed_group_ids,
+                    "checked_group_ids": hit.checked_group_ids,
+                }
+            )
+        return parsed_dict
 
     def _effective_mode(self) -> tuple[str, str]:
         return get_effective_mode(self.settings, self.runtime.get_mode_override())
@@ -902,6 +955,14 @@ class AuditPipeline:
             self._apply_blacklist_to_decision(decision, hit)
             new_parsed = _attach_blacklist_markers(new_parsed, hit)
 
+        new_parsed = await self._apply_undergrad_exclusive_guard(
+            group_id=req.group_id,
+            user_id=req.user_id,
+            profile=profile,
+            decision=decision,
+            parsed_dict=new_parsed,
+        )
+
         errors = new_parsed.get("parse_errors") or []
         ai_invoked = any(
             m in errors
@@ -1011,6 +1072,14 @@ class AuditPipeline:
             if hit is not None:
                 self._apply_blacklist_to_decision(decision, hit)
                 new_parsed = _attach_blacklist_markers(new_parsed, hit)
+
+            new_parsed = await self._apply_undergrad_exclusive_guard(
+                group_id=req.group_id,
+                user_id=req.user_id,
+                profile=req_profile,
+                decision=decision,
+                parsed_dict=new_parsed,
+            )
 
             changed = (
                 decision.decision != old_decision
@@ -1133,6 +1202,14 @@ class AuditPipeline:
         if hit is not None:
             self._apply_blacklist_to_decision(decision, hit)
             parsed_dict = _attach_blacklist_markers(parsed_dict, hit)
+
+        parsed_dict = await self._apply_undergrad_exclusive_guard(
+            group_id=event.group_id,
+            user_id=event.user_id,
+            profile=profile,
+            decision=decision,
+            parsed_dict=parsed_dict,
+        )
 
         update = {
             "comment": new_comment,
@@ -1299,6 +1376,14 @@ class AuditPipeline:
         if hit is not None:
             self._apply_blacklist_to_decision(decision, hit)
             parsed_dict = _attach_blacklist_markers(parsed_dict, hit)
+
+        parsed_dict = await self._apply_undergrad_exclusive_guard(
+            group_id=event.group_id,
+            user_id=event.user_id,
+            profile=resolved_profile,
+            decision=decision,
+            parsed_dict=parsed_dict,
+        )
 
         req_id = request_id or new_request_id()
         pending = PendingRequest(
