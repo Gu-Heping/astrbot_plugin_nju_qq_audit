@@ -13,6 +13,7 @@ from admin.labels import (
     mode_label,
     qq_match_label,
     status_label,
+    undergrad_exclusive_display_lines,
 )
 from admin.command_resolver import sanitize_action_message
 from config import PluginSettings, mask_http_url
@@ -287,10 +288,16 @@ def format_list(
                     f"群：{group_text}",
                     f"验证：{comment or '（空）'}",
                     f"判断：{human_judgement(item)}",
-                    "",
-                    "操作：",
                 ]
             )
+            exclusive_lines = undergrad_exclusive_display_lines(
+                public.get("parsed") or {},
+                group_labels=group_labels,
+            )
+            if exclusive_lines:
+                lines.extend(exclusive_lines)
+            lines.append("")
+            lines.append("操作：")
             if hint == "ok":
                 lines.append(f"/audit ok {idx}")
                 lines.append(f"/audit view {idx}")
@@ -326,6 +333,7 @@ def format_view(
     *,
     group_label: str | None = None,
     user_label: str | None = None,
+    group_labels: dict[str, str] | None = None,
 ) -> str:
     public = item.to_public_dict()
     parsed = public.get("parsed") or {}
@@ -386,6 +394,13 @@ def format_view(
                 "",
             ]
         )
+    exclusive_lines = undergrad_exclusive_display_lines(
+        parsed,
+        group_labels=group_labels,
+    )
+    if exclusive_lines:
+        lines.extend(exclusive_lines)
+        lines.append("")
     last_action = public.get("last_action_result") or {}
     action_result = public.get("action_result") or {}
     if status == "external":
@@ -809,6 +824,9 @@ def format_policy_reject_notice(
     comment: str,
     action_message: str | None,
     final_status: str,
+    parsed: dict | None = None,
+    group_labels: dict[str, str] | None = None,
+    exclusive_hit_group_ids: list[str] | None = None,
 ) -> str:
     comment_line = (comment or "").strip()[:120]
     reason_text = (reason or "").strip() or "（无）"
@@ -825,6 +843,13 @@ def format_policy_reject_notice(
     if comment_line:
         lines.append(f"验证：{comment_line}")
     lines.extend(["", f"原因：{reason_text}"])
+    exclusive_lines = undergrad_exclusive_display_lines(
+        parsed,
+        group_labels=group_labels,
+        hit_group_ids=exclusive_hit_group_ids,
+    )
+    if exclusive_lines:
+        lines.extend([""] + exclusive_lines)
 
     if ok:
         lines.extend(
@@ -927,6 +952,8 @@ def format_manual_review_notice(
     summary: str | None = None,
     group_label: str | None = None,
     user_label: str | None = None,
+    group_labels: dict[str, str] | None = None,
+    exclusive_hit_group_ids: list[str] | None = None,
 ) -> str:
     parsed = parsed or {}
     ref = str(index) if index is not None else None
@@ -961,6 +988,14 @@ def format_manual_review_notice(
             "",
         ]
     )
+    exclusive_lines = undergrad_exclusive_display_lines(
+        parsed,
+        group_labels=group_labels,
+        hit_group_ids=exclusive_hit_group_ids,
+    )
+    if exclusive_lines:
+        lines.extend(exclusive_lines)
+        lines.append("")
     if ref is not None:
         lines.extend(
             [

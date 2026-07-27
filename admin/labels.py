@@ -34,6 +34,36 @@ STATUS_LABELS = {
 DEFAULT_REJECT_REASON = "请填写真实姓名和学号后重新申请。"
 
 
+def undergrad_exclusive_display_lines(
+    parsed: dict | None,
+    *,
+    group_labels: dict[str, str] | None = None,
+    hit_group_ids: list[str] | None = None,
+) -> list[str]:
+    parsed = parsed or {}
+    explicit_ids = [str(x) for x in (hit_group_ids or []) if x]
+    parsed_hit = bool(parsed.get("_undergrad_exclusive_hit"))
+    hit_ids = explicit_ids or parsed.get("_undergrad_exclusive_group_ids") or []
+
+    if not parsed_hit and not hit_ids:
+        return []
+
+    if not hit_ids:
+        return ["多群互斥：命中"]
+    labels: list[str] = []
+    for gid in hit_ids:
+        gid_str = str(gid)
+        label = (group_labels or {}).get(gid_str)
+        if label:
+            labels.append(label)
+        else:
+            labels.append(gid_str)
+    return [
+        "多群互斥：命中",
+        f"命中本科群：{'、'.join(labels)}",
+    ]
+
+
 def mode_label(mode: str) -> str:
     return MODE_LABELS.get(mode, mode)
 

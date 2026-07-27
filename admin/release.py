@@ -308,7 +308,11 @@ async def preflight_releasable_with_live_snapshot(
                 member_result = await pipeline.actions.get_group_member_info(
                     latest.group_id, latest.user_id
                 )
-                member_present = is_user_in_group(member_result)
+                member_present = is_user_in_group(
+                    member_result,
+                    expected_group_id=latest.group_id,
+                    expected_user_id=latest.user_id,
+                )
             except Exception:
                 member_present = None
 

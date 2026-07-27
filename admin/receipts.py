@@ -21,6 +21,16 @@ async def resolve_display_labels(
     for item in items:
         gid = str(getattr(item, "group_id", "") or "")
         uid = str(getattr(item, "user_id", "") or "")
+        parsed = getattr(item, "parsed", None) or {}
+        for hit_gid in parsed.get("_undergrad_exclusive_group_ids") or []:
+            hit_gid = str(hit_gid)
+            if hit_gid and hit_gid not in group_labels:
+                group_labels[hit_gid] = f"群 {hit_gid}"
+                if display is not None:
+                    try:
+                        group_labels[hit_gid] = await display.get_group_label(hit_gid)
+                    except Exception:
+                        pass
         if gid and gid not in group_labels:
             group_labels[gid] = f"群 {gid}"
             if display is not None:
