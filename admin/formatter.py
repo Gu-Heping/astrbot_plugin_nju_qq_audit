@@ -11,6 +11,7 @@ def format_help(
     pending_count: int | None = None,
     releasable_count: int | None = None,
     topic: str | None = None,
+    settings: PluginSettings | None = None,
 ) -> str:
     topic_key = (topic or "").strip().lower()
     if topic_key in {"grad", "graduate", "研究生"}:
@@ -20,16 +21,20 @@ def format_help(
             effective_mode=effective_mode,
             pending_count=pending_count,
             releasable_count=releasable_count,
+            settings=settings,
         )
     if topic_key in {"debug", "排查", "probe"}:
         return _format_help_debug()
     if topic_key in {"blacklist", "黑名单", "block", "ban"}:
         return _format_help_blacklist()
+    if topic_key in {"policy", "routing", "路由", "策略", "本科策略"}:
+        return _format_help_policy(settings=settings)
     if topic_key in {"advanced", "adv", "高级", "all", "full"}:
         return _format_help_advanced(
             effective_mode=effective_mode,
             pending_count=pending_count,
             releasable_count=releasable_count,
+            settings=settings,
         )
     return _format_help_default(
         effective_mode=effective_mode,
@@ -87,10 +92,117 @@ def _format_help_default(
             "",
             "更多：",
             "/audit help batch     分批通过/补放",
+            "/audit help policy    本科路由/多群策略",
             "/audit help grad      研究生审核说明",
             "/audit help blacklist 黑名单管理",
             "/audit help debug     排查问题",
             "/audit help advanced  高级维护命令",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _undergrad_policy_help_lines(settings: PluginSettings | None = None) -> list[str]:
+    lines = [
+        "本科多群策略：",
+        "- undergrad_exclusive_groups_enabled=true 后，同一 QQ 已在其他本科目标群时会触发互斥策略。",
+        "- undergrad_exclusive_action=manual_review：转人工确认，不自动拒绝。",
+        "- undergrad_exclusive_action=auto_reject：实时申请自动拒绝，拒绝理由使用 undergrad_exclusive_reject_reason。",
+        "- release/catchup 中不会批量拒绝；命中互斥时只移出放行队列并转人工确认。",
+        "",
+        "本科满员引导：",
+        "- undergrad_overflow_enabled=true 后，source 群 member_count >= threshold 时，实时申请自动拒绝并提示 redirect 群。",
+        "- get_group_info 失败时 fail-open，不会因为查不到人数就拒绝。",
+        "- release/catchup 中不会批量拒绝；命中 overflow 时只移出放行队列并转人工确认。",
+    ]
+    if settings is not None:
+        lines.extend([""] + _undergrad_policy_status_lines(settings))
+    return lines
+
+
+def _undergrad_policy_status_lines(settings: PluginSettings) -> list[str]:
+    exclusive_on = settings.undergrad_exclusive_groups_enabled
+    overflow_on = settings.undergrad_overflow_enabled
+    action = settings.undergrad_exclusive_action
+    source = (settings.undergrad_overflow_source_group_id or "").strip() or "未配置"
+    redirect = (settings.undergrad_overflow_redirect_group_id or "").strip() or "未配置"
+    lines = [
+        "当前本科多群策略：",
+        f"- 多群互斥：{'开启' if exclusive_on else '关闭'}",
+        f"- 互斥动作：{action}",
+        f"- 互斥拒绝理由：{settings.undergrad_exclusive_reject_reason}",
+        f"- 满员引导：{'开启' if overflow_on else '关闭'}",
+        f"- 源群：{source}",
+        f"- 备用群：{redirect}",
+        f"- 阈值：{settings.undergrad_overflow_threshold}",
+    ]
+    if exclusive_on and action == "auto_reject":
+        lines.append(
+            "⚠️ 当前多群互斥为 auto_reject：已在其他本科目标群的 QQ 再申请本科目标群时，实时路径会自动拒绝。"
+        )
+    if overflow_on:
+        lines.append(
+            "⚠️ 当前满员引导开启：源群达到阈值后，实时申请会自动拒绝并提示备用群。"
+        )
+    lines.extend(
+        [
+            "",
+            "提示：",
+            "- auto_reject 只影响实时新申请；release/catchup 命中策略时只会跳过并转人工。",
+            "- 开启 auto_reject 前，请先用测试 QQ 验证拒绝理由是否符合运营预期。",
+            "- overflow 查询失败时 fail-open，不会因无法获取群人数而拒绝。",
+        ]
+    )
+    return lines
+
+
+def _undergrad_batch_policy_lines() -> list[str]:
+    return [
+        "本科路由策略（release/catchup）：",
+        "- 多群互斥命中：不会在批量流程里自动拒绝，只移出放行队列并转人工确认。",
+        "- 满员引导命中：不会在批量流程里自动拒绝，只移出放行队列并转人工确认。",
+        "- 自动拒绝只发生在「实时新申请」路径，并且必须显式开启对应策略。",
+        "- undergrad_exclusive_action=manual_review：实时申请转人工，不自动拒绝。",
+        "- undergrad_exclusive_action=auto_reject：实时申请自动拒绝；release/catchup 仍只跳过并转人工。",
+    ]
+
+
+def _format_help_policy(settings: PluginSettings | None = None) -> str:
+    lines = [
+        f"NJU QQ Audit {PLUGIN_VERSION} · 本科路由/策略帮助",
+        "",
+        "配置：",
+        "- undergrad_exclusive_groups_enabled：开启多群互斥",
+        "- undergrad_exclusive_action：",
+        "  - manual_review：命中后转人工",
+        "  - auto_reject：命中后实时自动拒绝",
+        "- undergrad_exclusive_reject_reason：auto_reject 发给申请人的理由",
+        "- undergrad_overflow_enabled：开启满员引导",
+        "- undergrad_overflow_source_group_id：源群",
+        "- undergrad_overflow_redirect_group_id：备用群",
+        "- undergrad_overflow_threshold：触发阈值",
+        "",
+        "行为：",
+        "- 黑名单优先级最高。",
+        "- 多群互斥优先于满员引导。",
+        "- 研究生不受本科策略影响。",
+        "- release/catchup 只移出放行队列，不做批量拒绝。",
+        "",
+    ]
+    lines.extend(_undergrad_policy_help_lines(settings))
+    lines.extend(
+        [
+            "",
+            "示例配置（占位，请替换为实际群号）：",
+            "undergrad_exclusive_groups_enabled=true",
+            "undergrad_exclusive_action=auto_reject",
+            "undergrad_exclusive_reject_reason=不可加入多个群",
+            "",
+            "undergrad_overflow_enabled=true",
+            "undergrad_overflow_source_group_id=<SOURCE_GROUP_ID>",
+            "undergrad_overflow_redirect_group_id=<REDIRECT_GROUP_ID>",
+            "undergrad_overflow_threshold=1950",
+            "undergrad_overflow_reject_reason_template=当前群人数较多，请申请加入 {redirect_group_id} 群",
         ]
     )
     return "\n".join(lines)
@@ -142,6 +254,7 @@ def _format_help_batch(
     effective_mode: str | None,
     pending_count: int | None,
     releasable_count: int | None,
+    settings: PluginSettings | None = None,
 ) -> str:
     lines = [
         f"NJU QQ Audit {PLUGIN_VERSION} · 分批通过 / 补放",
@@ -175,10 +288,16 @@ def _format_help_batch(
         "- 校对表刚更新时优先 catchup",
         "- 本科 release/catchup 只处理本科；研究生用 release/catchup grad",
         "- 别名：/audit batch strong N confirm、/audit temp N confirm",
-        "- 本科多群互斥开启时，已在其他本科目标群的 QQ 不进入 release/catchup，会转人工确认",
-        "- 本科多群互斥可配置为转人工（manual_review）或自动拒绝（auto_reject）",
-        "- 本科 overflow 开启时，指定群达到阈值后会自动拒绝并提示备用群",
+        "",
     ]
+    lines.extend(_undergrad_batch_policy_lines())
+    lines.append("- 详情：/audit help policy")
+    if settings is not None and (
+        settings.undergrad_exclusive_groups_enabled
+        or settings.undergrad_overflow_enabled
+    ):
+        lines.append("")
+        lines.extend(_undergrad_policy_status_lines(settings))
     lines.extend(
         _help_context(
             effective_mode=effective_mode,
@@ -220,6 +339,7 @@ def _format_help_advanced(
     effective_mode: str | None,
     pending_count: int | None,
     releasable_count: int | None,
+    settings: PluginSettings | None = None,
 ) -> str:
     lines = [
         f"NJU QQ Audit {PLUGIN_VERSION} 管理命令（完整）",
@@ -271,8 +391,18 @@ def _format_help_advanced(
             "别名：/audit batch strong N confirm",
             "      /audit temp N confirm",
             "      /audit process strong confirm（兼容）",
-            "- 本科多群互斥开启时，已在其他本科目标群的 QQ 不进入 release/catchup，会转人工确认",
-            "- 本科多群互斥可配置为转人工或自动拒绝；overflow 满员时自动引导备用群",
+        ]
+    )
+    lines.extend(_undergrad_batch_policy_lines())
+    lines.append("- 详情：/audit help policy")
+    if settings is not None and (
+        settings.undergrad_exclusive_groups_enabled
+        or settings.undergrad_overflow_enabled
+    ):
+        lines.append("")
+        lines.extend(_undergrad_policy_status_lines(settings))
+    lines.extend(
+        [
             "",
             "研究生分批放人（不改变 mode）：",
             "/audit release grad preview      预览研究生强匹配",
