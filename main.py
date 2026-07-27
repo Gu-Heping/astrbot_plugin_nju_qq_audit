@@ -455,6 +455,7 @@ class NjuQqAuditPlugin(Star):
                 pending_count=len(pending),
                 releasable_count=releasable_count,
                 topic=topic,
+                settings=self._settings(),
             )
         except TypeError:
             # 热重载后 main.py / formatter.py 版本不一致时的兼容
