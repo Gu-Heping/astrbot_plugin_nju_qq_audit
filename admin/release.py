@@ -422,31 +422,9 @@ def format_release_help(count: int, settings: PluginSettings) -> str:
         "本科路由策略（release/catchup）：",
         "- 多群互斥命中：不会在批量流程里自动拒绝，只移出放行队列并转人工确认。",
         "- 满员引导命中：不会在批量流程里自动拒绝，只移出放行队列并转人工确认。",
-        "- 自动拒绝只发生在「实时新申请」路径，并且必须显式开启对应策略。",
+        "- 自动拒绝只影响实时新申请。",
+        "- 查看/切换多群互斥策略：/audit policy",
     ]
-    if settings.undergrad_exclusive_groups_enabled:
-        if settings.undergrad_exclusive_action == "auto_reject":
-            lines.append(
-                "- 多群互斥 auto_reject 已开启：实时申请会自动拒绝"
-                f"（理由：{settings.undergrad_exclusive_reject_reason}）；"
-                "release/catchup 不自动拒绝。"
-            )
-        else:
-            lines.append(
-                "- 多群互斥已开启（manual_review）：实时申请转人工，不自动拒绝；"
-                "release/catchup 只跳过并转人工。"
-            )
-    if settings.undergrad_overflow_enabled:
-        source = (
-            (settings.undergrad_overflow_source_group_id or "").strip() or "未配置"
-        )
-        redirect = (
-            (settings.undergrad_overflow_redirect_group_id or "").strip() or "未配置"
-        )
-        lines.append(
-            f"- 满员引导已开启：源群 {source} 达到阈值 {settings.undergrad_overflow_threshold} 后，"
-            f"实时申请自动拒绝并提示备用群 {redirect}；release/catchup 不自动拒绝。"
-        )
     return "\n".join(lines)
 
 
@@ -476,30 +454,9 @@ def format_catchup_help(settings: PluginSettings) -> str:
         "本科路由策略（release/catchup）：",
         "- 多群互斥命中：不会在批量流程里自动拒绝，只移出放行队列并转人工确认。",
         "- 满员引导命中：不会在批量流程里自动拒绝，只移出放行队列并转人工确认。",
-        "- 自动拒绝只发生在「实时新申请」路径，并且必须显式开启对应策略。",
+        "- 自动拒绝只影响实时新申请。",
+        "- 查看/切换多群互斥策略：/audit policy",
     ]
-    if settings.undergrad_exclusive_groups_enabled:
-        if settings.undergrad_exclusive_action == "auto_reject":
-            lines.append(
-                "- 多群互斥 auto_reject 已开启：实时申请会自动拒绝；"
-                "release/catchup 不自动拒绝。"
-            )
-        else:
-            lines.append(
-                "- 多群互斥已开启（manual_review）：实时申请转人工；"
-                "release/catchup 只跳过并转人工。"
-            )
-    if settings.undergrad_overflow_enabled:
-        source = (
-            (settings.undergrad_overflow_source_group_id or "").strip() or "未配置"
-        )
-        redirect = (
-            (settings.undergrad_overflow_redirect_group_id or "").strip() or "未配置"
-        )
-        lines.append(
-            f"- 满员引导已开启：源群 {source} 达到阈值 {settings.undergrad_overflow_threshold} 后，"
-            f"实时申请自动拒绝并提示备用群 {redirect}；release/catchup 不自动拒绝。"
-        )
     return "\n".join(lines)
 
 

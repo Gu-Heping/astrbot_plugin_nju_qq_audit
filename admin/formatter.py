@@ -28,7 +28,7 @@ def format_help(
     if topic_key in {"blacklist", "黑名单", "block", "ban"}:
         return _format_help_blacklist()
     if topic_key in {"policy", "routing", "路由", "策略", "本科策略"}:
-        return _format_help_policy(settings=settings)
+        return _format_help_policy()
     if topic_key in {"advanced", "adv", "高级", "all", "full"}:
         return _format_help_advanced(
             effective_mode=effective_mode,
@@ -102,110 +102,40 @@ def _format_help_default(
     return "\n".join(lines)
 
 
-def _undergrad_policy_help_lines(settings: PluginSettings | None = None) -> list[str]:
-    lines = [
-        "本科多群策略：",
-        "- undergrad_exclusive_groups_enabled=true 后，同一 QQ 已在其他本科目标群时会触发互斥策略。",
-        "- undergrad_exclusive_action=manual_review：转人工确认，不自动拒绝。",
-        "- undergrad_exclusive_action=auto_reject：实时申请自动拒绝，拒绝理由使用 undergrad_exclusive_reject_reason。",
-        "- release/catchup 中不会批量拒绝；命中互斥时只移出放行队列并转人工确认。",
-        "",
-        "本科满员引导：",
-        "- undergrad_overflow_enabled=true 后，source 群 member_count >= threshold 时，实时申请自动拒绝并提示 redirect 群。",
-        "- get_group_info 失败时 fail-open，不会因为查不到人数就拒绝。",
-        "- release/catchup 中不会批量拒绝；命中 overflow 时只移出放行队列并转人工确认。",
-    ]
-    if settings is not None:
-        lines.extend([""] + _undergrad_policy_status_lines(settings))
-    return lines
-
-
-def _undergrad_policy_status_lines(settings: PluginSettings) -> list[str]:
-    exclusive_on = settings.undergrad_exclusive_groups_enabled
-    overflow_on = settings.undergrad_overflow_enabled
-    action = settings.undergrad_exclusive_action
-    source = (settings.undergrad_overflow_source_group_id or "").strip() or "未配置"
-    redirect = (settings.undergrad_overflow_redirect_group_id or "").strip() or "未配置"
-    lines = [
-        "当前本科多群策略：",
-        f"- 多群互斥：{'开启' if exclusive_on else '关闭'}",
-        f"- 互斥动作：{action}",
-        f"- 互斥拒绝理由：{settings.undergrad_exclusive_reject_reason}",
-        f"- 满员引导：{'开启' if overflow_on else '关闭'}",
-        f"- 源群：{source}",
-        f"- 备用群：{redirect}",
-        f"- 阈值：{settings.undergrad_overflow_threshold}",
-    ]
-    if exclusive_on and action == "auto_reject":
-        lines.append(
-            "⚠️ 当前多群互斥为 auto_reject：已在其他本科目标群的 QQ 再申请本科目标群时，实时路径会自动拒绝。"
-        )
-    if overflow_on:
-        lines.append(
-            "⚠️ 当前满员引导开启：源群达到阈值后，实时申请会自动拒绝并提示备用群。"
-        )
-    lines.extend(
-        [
-            "",
-            "提示：",
-            "- auto_reject 只影响实时新申请；release/catchup 命中策略时只会跳过并转人工。",
-            "- 开启 auto_reject 前，请先用测试 QQ 验证拒绝理由是否符合运营预期。",
-            "- overflow 查询失败时 fail-open，不会因无法获取群人数而拒绝。",
-        ]
-    )
-    return lines
-
-
 def _undergrad_batch_policy_lines() -> list[str]:
     return [
         "本科路由策略（release/catchup）：",
         "- 多群互斥命中：不会在批量流程里自动拒绝，只移出放行队列并转人工确认。",
         "- 满员引导命中：不会在批量流程里自动拒绝，只移出放行队列并转人工确认。",
-        "- 自动拒绝只发生在「实时新申请」路径，并且必须显式开启对应策略。",
-        "- undergrad_exclusive_action=manual_review：实时申请转人工，不自动拒绝。",
-        "- undergrad_exclusive_action=auto_reject：实时申请自动拒绝；release/catchup 仍只跳过并转人工。",
+        "- 自动拒绝只影响实时新申请。",
+        "- 查看/切换多群互斥策略：/audit policy",
     ]
 
 
-def _format_help_policy(settings: PluginSettings | None = None) -> str:
-    lines = [
-        f"NJU QQ Audit {PLUGIN_VERSION} · 本科路由/策略帮助",
-        "",
-        "配置：",
-        "- undergrad_exclusive_groups_enabled：开启多群互斥",
-        "- undergrad_exclusive_action：",
-        "  - manual_review：命中后转人工",
-        "  - auto_reject：命中后实时自动拒绝",
-        "- undergrad_exclusive_reject_reason：auto_reject 发给申请人的理由",
-        "- undergrad_overflow_enabled：开启满员引导",
-        "- undergrad_overflow_source_group_id：源群",
-        "- undergrad_overflow_redirect_group_id：备用群",
-        "- undergrad_overflow_threshold：触发阈值",
-        "",
-        "行为：",
-        "- 黑名单优先级最高。",
-        "- 多群互斥优先于满员引导。",
-        "- 研究生不受本科策略影响。",
-        "- release/catchup 只移出放行队列，不做批量拒绝。",
-        "",
-    ]
-    lines.extend(_undergrad_policy_help_lines(settings))
-    lines.extend(
+def _format_help_policy() -> str:
+    return "\n".join(
         [
+            f"NJU QQ Audit {PLUGIN_VERSION} · 本科路由策略指令",
             "",
-            "示例配置（占位，请替换为实际群号）：",
-            "undergrad_exclusive_groups_enabled=true",
-            "undergrad_exclusive_action=auto_reject",
-            "undergrad_exclusive_reject_reason=不可加入多个群",
+            "查看当前策略：",
+            "/audit policy",
             "",
-            "undergrad_overflow_enabled=true",
-            "undergrad_overflow_source_group_id=<SOURCE_GROUP_ID>",
-            "undergrad_overflow_redirect_group_id=<REDIRECT_GROUP_ID>",
-            "undergrad_overflow_threshold=1950",
-            "undergrad_overflow_reject_reason_template=当前群人数较多，请申请加入 {redirect_group_id} 群",
+            "切换多群互斥处理方式：",
+            "/audit policy exclusive manual confirm",
+            "/audit policy exclusive auto-reject confirm",
+            "",
+            "说明：",
+            "- manual：命中「已在其他本科目标群」时转人工，不自动拒绝。",
+            "- auto-reject：命中「已在其他本科目标群」时，实时申请自动拒绝。",
+            "- release/catchup 不会批量拒绝，只会跳过并转人工确认。",
+            "- 黑名单优先级最高。",
+            "- 研究生不受本科策略影响。",
+            "",
+            "满员引导：",
+            "- 是否开启、源群、备用群、阈值来自插件配置。",
+            "- /audit policy 可查看当前状态；本指令不做 overflow 阈值在线修改。",
         ]
     )
-    return "\n".join(lines)
 
 
 def _format_help_blacklist() -> str:
@@ -291,13 +221,7 @@ def _format_help_batch(
         "",
     ]
     lines.extend(_undergrad_batch_policy_lines())
-    lines.append("- 详情：/audit help policy")
-    if settings is not None and (
-        settings.undergrad_exclusive_groups_enabled
-        or settings.undergrad_overflow_enabled
-    ):
-        lines.append("")
-        lines.extend(_undergrad_policy_status_lines(settings))
+    lines.append("- 指令帮助：/audit help policy")
     lines.extend(
         _help_context(
             effective_mode=effective_mode,
@@ -394,13 +318,7 @@ def _format_help_advanced(
         ]
     )
     lines.extend(_undergrad_batch_policy_lines())
-    lines.append("- 详情：/audit help policy")
-    if settings is not None and (
-        settings.undergrad_exclusive_groups_enabled
-        or settings.undergrad_overflow_enabled
-    ):
-        lines.append("")
-        lines.extend(_undergrad_policy_status_lines(settings))
+    lines.append("- 指令帮助：/audit help policy")
     lines.extend(
         [
             "",
@@ -436,6 +354,12 @@ def _format_help_advanced(
             "/audit manual               每条需人工处理",
             "/audit auto confirm         自动通过强匹配申请（本科/研究生都会生效）",
             "/audit off confirm          完全停用且不记录（慎用）",
+            "",
+            "本科路由策略：",
+            "/audit policy               查看多群互斥/满员引导状态",
+            "/audit policy exclusive manual confirm",
+            "/audit policy exclusive auto-reject confirm",
+            "/audit help policy          策略指令帮助",
             "",
             "自动通过规则：",
             "- 本科：强匹配且通过 26 级检查",

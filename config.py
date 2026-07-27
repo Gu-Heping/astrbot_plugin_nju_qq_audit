@@ -479,6 +479,21 @@ def get_effective_mode(settings: PluginSettings, runtime_mode: str | None) -> tu
     return settings.mode, "plugin_config"
 
 
+def get_effective_undergrad_exclusive_action(
+    settings: PluginSettings, runtime_override: str | None
+) -> tuple[str, str]:
+    if runtime_override:
+        action = _normalize_undergrad_exclusive_action(runtime_override)
+        if action in UNDERGRAD_EXCLUSIVE_ACTIONS:
+            return action, "runtime"
+    config_action = _normalize_undergrad_exclusive_action(
+        settings.undergrad_exclusive_action
+    )
+    if config_action in UNDERGRAD_EXCLUSIVE_ACTIONS:
+        return config_action, "plugin_config"
+    return "manual_review", "default"
+
+
 def sanitize_config_for_display(settings: PluginSettings) -> dict[str, Any]:
     result: dict[str, Any] = {
         "mode": settings.mode,
