@@ -106,7 +106,7 @@ async def test_release_preflight_stale_external_refresh_ambiguous_and_saturated(
 
     async def get_group_member_info(group_id, user_id, *, no_cache=True):
         if user_id == "222":
-            return ActionResult(ok=True, data={"user_id": user_id})
+            return ActionResult(ok=True, data={"user_id": user_id, "role": "member"})
         return ActionResult(ok=False, message="not found")
 
     actions.get_group_system_msg = AsyncMock(side_effect=get_group_system_msg)

@@ -67,7 +67,7 @@ async def test_stale_not_found_member_present_marks_external(tmp_path):
         )
     )
     actions.get_group_member_info = AsyncMock(
-        return_value=ActionResult(ok=True, retcode=0, message="ok", data={"user_id": "261820094"})
+        return_value=ActionResult(ok=True, retcode=0, message="ok", data={"user_id": "261820094", "role": "member"})
     )
     notifier = MagicMock()
     notifier.notify_external_handled = AsyncMock()

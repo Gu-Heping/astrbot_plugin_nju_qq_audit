@@ -19,7 +19,7 @@ from core.pipeline import AuditPipeline
 from core.undergrad_exclusive import check_undergrad_exclusive_membership
 from data_source.student_cache import StudentCache
 from data_source.students import ActionResult, PendingRequest, Student
-from onebot.member_info import inspect_user_in_group
+from onebot.member_info import format_member_probe_report, inspect_user_in_group
 from storage.audit_log import AuditLog
 from storage.requests_store import RequestsStore
 from storage.runtime_store import RuntimeStore
@@ -54,13 +54,165 @@ def _result(**kwargs) -> ActionResult:
     return ActionResult(**defaults)
 
 
-def test_member_present_when_user_id_matches():
-    result = _result(data={"user_id": USER_ID, "nickname": "测试"})
+def test_member_present_when_user_id_matches_with_evidence():
+    result = _result(data={"user_id": USER_ID, "role": "member"})
     check = inspect_user_in_group(
         result, expected_group_id=GROUP_A, expected_user_id=USER_ID
     )
     assert check.present is True
     assert check.result_status == "present"
+
+
+def test_member_ambiguous_when_echo_only_ids():
+    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A})
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is None
+    assert check.ambiguity_reason == "missing_member_evidence"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"card_changeable": False},
+        {"unfriendly": False},
+        {"shut_up_timestamp": 0},
+        {"title_expire_time": 0},
+    ],
+)
+def test_member_ambiguous_when_only_default_fields(extra):
+    data = {"user_id": USER_ID, "group_id": GROUP_A, **extra}
+    check = inspect_user_in_group(
+        _result(data=data),
+        expected_group_id=GROUP_A,
+        expected_user_id=USER_ID,
+    )
+    assert check.present is None
+    assert check.ambiguity_reason == "missing_member_evidence"
+
+
+def test_member_present_when_role_member():
+    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "role": "member"})
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is True
+
+
+def test_member_present_when_join_time_positive():
+    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "join_time": 123})
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is True
+
+
+def test_member_present_when_card_present():
+    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "card": "xxx"})
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is True
+
+
+@pytest.mark.asyncio
+async def test_default_fields_member_check_does_not_hit_exclusive(tmp_path):
+    settings = _settings()
+
+    async def member_info(group_id, user_id, *, no_cache=True):
+        if group_id == GROUP_A:
+            return _result(
+                data={
+                    "user_id": user_id,
+                    "group_id": group_id,
+                    "shut_up_timestamp": 0,
+                }
+            )
+        return ActionResult(ok=False, message="not found")
+
+    actions = MagicMock()
+    actions.get_group_member_info = AsyncMock(side_effect=member_info)
+    audit = AuditLog(tmp_path / "audit.jsonl", settings)
+    hit = await check_undergrad_exclusive_membership(
+        actions,
+        settings,
+        current_group_id=GROUP_B,
+        user_id=USER_ID,
+        audit_log=audit,
+        audit_context={"source": "test"},
+    )
+    assert hit.hit is False
+    assert GROUP_A in hit.failed_group_ids
+
+
+def test_member_present_when_join_time_evidence():
+    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "join_time": 123456})
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is True
+
+
+def test_member_ambiguous_when_nickname_only_with_ids():
+    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "nickname": "测试"})
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is None
+    assert check.ambiguity_reason == "missing_member_evidence"
+
+
+def test_member_probe_report_echo_only():
+    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "flag": "secret"})
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    text = format_member_probe_report(
+        group_id=GROUP_A,
+        user_id=USER_ID,
+        check=check,
+        data=result.data,
+    )
+    assert "结果：无法确认" in text
+    assert "备注：missing_member_evidence" in text
+    assert "返回字段：" in text
+    assert f"user_id={USER_ID}" in text
+    assert f"group_id={GROUP_A}" in text
+    assert "成员证据：无" in text
+    assert "flag" not in text
+    assert "raw_event" not in text
+    assert "token" not in text
+
+
+@pytest.mark.asyncio
+async def test_echo_only_member_check_does_not_hit_exclusive(tmp_path):
+    settings = _settings()
+
+    async def member_info(group_id, user_id, *, no_cache=True):
+        if group_id == GROUP_A:
+            return _result(data={"user_id": user_id, "group_id": group_id})
+        return ActionResult(ok=False, message="not found")
+
+    actions = MagicMock()
+    actions.get_group_member_info = AsyncMock(side_effect=member_info)
+    audit = AuditLog(tmp_path / "audit.jsonl", settings)
+    hit = await check_undergrad_exclusive_membership(
+        actions,
+        settings,
+        current_group_id=GROUP_B,
+        user_id=USER_ID,
+        audit_log=audit,
+        audit_context={"source": "test"},
+    )
+    assert hit.hit is False
+    assert GROUP_A in hit.failed_group_ids
+    assert any(
+        row.get("type") == "undergrad_exclusive_member_check"
+        and row.get("result_status") == "ambiguous"
+        and row.get("ambiguity_reason") == "missing_member_evidence"
+        for row in audit.read_all()
+    )
 
 
 def test_member_ambiguous_when_user_id_mismatch():
@@ -72,13 +224,13 @@ def test_member_ambiguous_when_user_id_mismatch():
     assert check.ambiguity_reason == "identity_mismatch"
 
 
-def test_member_ambiguous_when_only_nickname():
+def test_member_not_found_when_only_nickname():
     result = _result(data={"nickname": "测试"})
     check = inspect_user_in_group(
         result, expected_group_id=GROUP_A, expected_user_id=USER_ID
     )
-    assert check.present is None
-    assert check.ambiguity_reason == "missing_user_id"
+    assert check.present is False
+    assert check.result_status == "not_found"
 
 
 def test_member_ambiguous_when_group_id_mismatch():
@@ -105,7 +257,7 @@ async def test_ambiguous_member_check_does_not_hit_exclusive(tmp_path):
 
     async def member_info(group_id, user_id, *, no_cache=True):
         if group_id == GROUP_A:
-            return _result(data={"nickname": "仅昵称"})
+            return _result(data={"card": "仅群名片"})
         return ActionResult(ok=False, message="not found")
 
     actions = MagicMock()
