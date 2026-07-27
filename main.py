@@ -590,15 +590,20 @@ class NjuQqAuditPlugin(Star):
         if not resolved.ok:
             yield event.plain_result(resolved.message)
             return
-        group_label, user_label = await resolve_one_item_labels(
-            getattr(self.ctx, "display", None), resolved.request
+        group_labels, user_labels = await resolve_display_labels(
+            getattr(self.ctx, "display", None), [resolved.request]
         )
+        gid = str(getattr(resolved.request, "group_id", "") or "")
+        uid = str(getattr(resolved.request, "user_id", "") or "")
+        group_label = group_labels.get(gid) or f"群 {gid}"
+        user_label = user_labels.get(f"{gid}:{uid}") or uid
         yield event.plain_result(
             format_view(
                 resolved.request,
                 resolved.index,
                 group_label=group_label,
                 user_label=user_label,
+                group_labels=group_labels,
             )
         )
 
@@ -1759,6 +1764,68 @@ class NjuQqAuditPlugin(Star):
                 "message": f"action_backend={self._settings().onebot_action_backend}",
             }
         yield event.plain_result(format_probe_api(probe))
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @audit_probe.command("member")
+    async def audit_probe_member(
+        self,
+        event: AstrMessageEvent,
+        arg1: str = "",
+        arg2: str = "",
+    ):
+        allowed, message = can_run_command(self._settings(), "probe", event)
+        if not allowed:
+            yield event.plain_result(message)
+            return
+        await self._record_admin_session(event)
+        parts = [p for p in (event.message_str or "").strip().split() if p]
+        group_id = (arg1 or "").strip()
+        user_id = (arg2 or "").strip()
+        try:
+            idx = parts.index("member")
+            tail = parts[idx + 1 :]
+            if len(tail) >= 2:
+                group_id = tail[0]
+                user_id = tail[1]
+        except ValueError:
+            pass
+        if not group_id or not user_id:
+            yield event.plain_result(
+                "用法：/audit probe member <group_id> <user_id>"
+            )
+            return
+        from onebot.member_info import format_member_probe_report, inspect_user_in_group
+
+        try:
+            result = await self.ctx.actions.get_group_member_info(
+                group_id, user_id, no_cache=True
+            )
+        except Exception as exc:
+            yield event.plain_result(
+                "\n".join(
+                    [
+                        "get_group_member_info 检查结果",
+                        "",
+                        f"群：{group_id}",
+                        f"QQ：{user_id}",
+                        "结果：无法确认",
+                        f"message：{exc}",
+                    ]
+                )
+            )
+            return
+        check = inspect_user_in_group(
+            result,
+            expected_group_id=group_id,
+            expected_user_id=user_id,
+        )
+        yield event.plain_result(
+            format_member_probe_report(
+                group_id=group_id,
+                user_id=user_id,
+                check=check,
+            )
+        )
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit_probe.command("raw")

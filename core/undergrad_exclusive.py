@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from config import UNDERGRAD_EXCLUSIVE_ACTIONS, PluginSettings, parse_numeric_ids
 from data_source.students import PendingRequest
-from onebot.member_info import is_user_in_group
+from onebot.member_info import inspect_user_in_group
 from storage.audit_log import utc_now_iso
 
 UNDERGRAD_EXCLUSIVE_SUGGESTION = "该 QQ 已在其他本科目标群，请管理员人工确认"
@@ -73,12 +74,49 @@ def resolve_undergrad_exclusive_group_ids(settings: PluginSettings) -> frozenset
     return settings.target_group_ids
 
 
+async def _log_member_check(
+    audit_log,
+    *,
+    checked_group_id: str,
+    user_id: str,
+    check,
+    audit_context: dict[str, Any] | None = None,
+) -> None:
+    if audit_log is None:
+        return
+    record = {
+        "type": "undergrad_exclusive_member_check",
+        "checked_group_id": checked_group_id,
+        "user_id": user_id,
+        "result_status": check.result_status,
+        "retcode": check.retcode,
+        "message": check.message,
+        "returned_user_id": check.returned_user_id,
+        "returned_group_id": check.returned_group_id,
+    }
+    if check.ambiguity_reason:
+        record["ambiguity_reason"] = check.ambiguity_reason
+    if audit_context:
+        record.update(audit_context)
+    await audit_log.append(record)
+
+
+def exclusive_hit_group_ids_from_parsed(parsed: dict | None) -> list[str]:
+    return [
+        str(group_id)
+        for group_id in (parsed or {}).get("_undergrad_exclusive_group_ids") or []
+        if group_id
+    ]
+
+
 async def check_undergrad_exclusive_membership(
     actions,
     settings: PluginSettings,
     *,
     current_group_id: str,
     user_id: str,
+    audit_log=None,
+    audit_context: dict[str, Any] | None = None,
 ) -> UndergradExclusiveHit:
     if not settings.undergrad_exclusive_groups_enabled:
         return UndergradExclusiveHit(
@@ -107,14 +145,36 @@ async def check_undergrad_exclusive_membership(
             result = await actions.get_group_member_info(
                 group_id, user_id, no_cache=True
             )
-        except Exception:
+        except Exception as exc:
             failed_groups.append(group_id)
+            if audit_log is not None:
+                await audit_log.append(
+                    {
+                        "type": "undergrad_exclusive_member_check",
+                        "checked_group_id": group_id,
+                        "user_id": user_id,
+                        "result_status": "error",
+                        "message": _short_error(exc),
+                        **(audit_context or {}),
+                    }
+                )
             continue
 
-        present = is_user_in_group(result)
-        if present is True:
+        check = inspect_user_in_group(
+            result,
+            expected_group_id=group_id,
+            expected_user_id=user_id,
+        )
+        await _log_member_check(
+            audit_log,
+            checked_group_id=group_id,
+            user_id=user_id,
+            check=check,
+            audit_context=audit_context,
+        )
+        if check.present is True:
             hit_groups.append(group_id)
-        elif present is False:
+        elif check.present is False:
             pass
         else:
             failed_groups.append(group_id)
@@ -145,6 +205,13 @@ async def check_undergrad_exclusive_membership(
         failed_group_ids=failed_groups,
         message="not_in_other_groups",
     )
+
+
+def _short_error(exc: Exception) -> str:
+    text = str(exc).strip()
+    if len(text) > 120:
+        return text[:117] + "..."
+    return text or exc.__class__.__name__
 
 
 def apply_undergrad_exclusive_hit(
@@ -201,6 +268,12 @@ async def filter_releasable_for_undergrad_exclusive(
             settings,
             current_group_id=req.group_id,
             user_id=req.user_id,
+            audit_log=log,
+            audit_context={
+                "request_id": req.id,
+                "group_id": req.group_id,
+                "source": "release_preflight",
+            },
         )
         if hit.hit:
             blocked += 1

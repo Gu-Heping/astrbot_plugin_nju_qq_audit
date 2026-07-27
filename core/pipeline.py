@@ -23,6 +23,7 @@ from core.undergrad_exclusive import (
     apply_undergrad_exclusive_hit,
     build_undergrad_exclusive_qq_reject_reason,
     check_undergrad_exclusive_membership,
+    exclusive_hit_group_ids_from_parsed,
     is_undergrad_exclusive_auto_reject,
     is_undergrad_exclusive_decision,
 )
@@ -340,6 +341,12 @@ class AuditPipeline:
             self.settings,
             current_group_id=group_id,
             user_id=user_id,
+            audit_log=self.audit,
+            audit_context={
+                "group_id": group_id,
+                "user_id": user_id,
+                "source": "realtime",
+            },
         )
         if hit.hit:
             override = self.runtime.get_undergrad_exclusive_action_override()
@@ -481,6 +488,9 @@ class AuditPipeline:
                     action_message=action_result.message,
                     parsed=strip_internal_parsed_keys(pending.parsed or {}),
                     final_status=final_status,
+                    exclusive_hit_group_ids=exclusive_hit_group_ids_from_parsed(
+                        pending.parsed
+                    ),
                 )
             except Exception:
                 logger.exception(
@@ -1714,6 +1724,9 @@ class AuditPipeline:
                         comment=event.comment,
                         parsed=notify_parsed,
                         reason=decision.reason,
+                        exclusive_hit_group_ids=exclusive_hit_group_ids_from_parsed(
+                            pending.parsed
+                        ),
                     )
                 except Exception:
                     logger.exception(
@@ -1737,6 +1750,9 @@ class AuditPipeline:
                             comment=event.comment,
                             parsed=notify_parsed,
                             reason=decision.reason,
+                            exclusive_hit_group_ids=exclusive_hit_group_ids_from_parsed(
+                                pending.parsed
+                            ),
                         )
                     except Exception:
                         logger.exception(
@@ -1771,6 +1787,9 @@ class AuditPipeline:
                             comment=event.comment,
                             parsed=notify_parsed,
                             reason=decision.reason,
+                            exclusive_hit_group_ids=exclusive_hit_group_ids_from_parsed(
+                                pending.parsed
+                            ),
                         )
                     except Exception:
                         logger.exception(
@@ -1809,6 +1828,9 @@ class AuditPipeline:
                         comment=event.comment,
                         parsed=notify_parsed,
                         reason=decision.reason,
+                        exclusive_hit_group_ids=exclusive_hit_group_ids_from_parsed(
+                            pending.parsed
+                        ),
                     )
                 except Exception:
                     logger.exception(
@@ -2061,7 +2083,11 @@ class AuditPipeline:
             member_result = await self.actions.get_group_member_info(
                 req.group_id, req.user_id
             )
-            member_present = is_user_in_group(member_result)
+            member_present = is_user_in_group(
+                member_result,
+                expected_group_id=req.group_id,
+                expected_user_id=req.user_id,
+            )
         except Exception:
             logger.warning(
                 "[audit] stale member check failed request=%s",
@@ -2786,7 +2812,11 @@ class AuditPipeline:
                     member_result = await self.actions.get_group_member_info(
                         pending.group_id, pending.user_id
                     )
-                    member_present = is_user_in_group(member_result)
+                    member_present = is_user_in_group(
+                        member_result,
+                        expected_group_id=pending.group_id,
+                        expected_user_id=pending.user_id,
+                    )
 
                 action = classify_disappearance(
                     pending=pending,

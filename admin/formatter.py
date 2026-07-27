@@ -238,6 +238,7 @@ def _format_help_debug() -> str:
             f"NJU QQ Audit {PLUGIN_VERSION} · 排查",
             "",
             "/audit probe api            测试审批接口",
+            "/audit probe member <群号> <QQ>  检查成员是否在群",
             "/audit probe last           最近原始入群事件",
             "/audit debug                技术状态",
             "/audit lookup <姓名> <学号/通知书/考生号>  校对表查询",

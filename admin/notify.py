@@ -99,6 +99,29 @@ class AdminNotifier:
             logger.debug("[audit] resolve user_label failed", exc_info=True)
         return group_label, user_label
 
+    async def _resolve_hit_group_labels(
+        self,
+        parsed: dict | None,
+        *,
+        hit_group_ids: list[str] | None = None,
+    ) -> dict[str, str]:
+        parsed = parsed or {}
+        ids = hit_group_ids or [
+            str(g)
+            for g in (parsed.get("_undergrad_exclusive_group_ids") or [])
+            if g
+        ]
+        if not ids or self.display is None:
+            return {gid: f"群 {gid}" for gid in ids}
+        labels: dict[str, str] = {}
+        for gid in ids:
+            labels[gid] = f"群 {gid}"
+            try:
+                labels[gid] = await self.display.get_group_label(gid)
+            except Exception:
+                logger.debug("[audit] resolve hit group_label failed", exc_info=True)
+        return labels
+
     async def notify_manual_review(
         self,
         *,
@@ -111,6 +134,7 @@ class AdminNotifier:
         summary: str | None = None,
         group_label: str | None = None,
         user_label: str | None = None,
+        exclusive_hit_group_ids: list[str] | None = None,
     ) -> None:
         if not self.settings.admin_notify:
             logger.debug("[audit] manual_review notify skipped: admin_notify=false")
@@ -127,6 +151,9 @@ class AdminNotifier:
             parsed=parsed,
             group_label=group_label,
             user_label=user_label,
+        )
+        hit_group_labels = await self._resolve_hit_group_labels(
+            parsed, hit_group_ids=exclusive_hit_group_ids
         )
         sent_count = 0
         logger.info(
@@ -149,6 +176,7 @@ class AdminNotifier:
                 summary=summary,
                 group_label=group_label,
                 user_label=user_label,
+                group_labels=hit_group_labels,
             )
             if await self._send_to_admin(admin_id, message):
                 sent_count += 1
@@ -326,6 +354,7 @@ class AdminNotifier:
         user_label: str | None = None,
         parsed: dict | None = None,
         final_status: str | None = None,
+        exclusive_hit_group_ids: list[str] | None = None,
     ) -> None:
         if not self.settings.admin_notify:
             return
@@ -337,6 +366,9 @@ class AdminNotifier:
             parsed=parsed,
             group_label=group_label,
             user_label=user_label,
+        )
+        hit_group_labels = await self._resolve_hit_group_labels(
+            parsed, hit_group_ids=exclusive_hit_group_ids
         )
         message = format_policy_reject_notice(
             title=title,
@@ -350,6 +382,8 @@ class AdminNotifier:
             comment=comment or "",
             action_message=action_message,
             final_status=final_status or "",
+            parsed=parsed,
+            group_labels=hit_group_labels,
         )
         await self._notify_admins(message, exclude_user_id=user_id)
 
