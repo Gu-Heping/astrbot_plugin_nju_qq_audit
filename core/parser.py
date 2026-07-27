@@ -245,7 +245,101 @@ def _find_student_id_in_text(text: str) -> str | None:
         if is_exam_no_shape(candidate):
             continue
         return candidate
+    compact_sid, _ = _match_compact_student_id_prefix(text.strip())
+    if compact_sid:
+        return compact_sid
     return None
+
+
+def _match_compact_student_id_prefix(token: str) -> tuple[str | None, str]:
+    """If token starts with 261xxxxxx (+ optional suffix), return (student_id, suffix).
+
+    Only accepts 8/9-digit undergrad IDs; does not take a prefix of a 14-digit exam_no.
+    """
+    text = (token or "").strip()
+    if not text or not text[0].isdigit():
+        return None, text
+
+    digits = re.sub(r"\D", "", text)
+    if len(digits) >= 14 and is_exam_no_shape(digits[:14]):
+        if text.startswith(digits[:14]):
+            return None, text
+        for length in (9, 8):
+            if len(text) >= length and text[:length].isdigit():
+                prefix_digits = text[:length]
+                if (
+                    digits.startswith(prefix_digits)
+                    and len(digits) >= 14
+                    and is_exam_no_shape(digits[:14])
+                ):
+                    return None, text
+
+    for pattern in (
+        r"^(261\d{6})(.*)$",
+        r"^(261\d{5})(?!\d)(.*)$",
+        r"^(2[0-9]1\d{6})(.*)$",
+    ):
+        match = re.match(pattern, text)
+        if not match:
+            continue
+        candidate = match.group(1)
+        suffix = match.group(2)
+        if is_exam_no_shape(candidate):
+            continue
+        normalized = normalize_student_id(candidate)
+        if not normalized or is_exam_no_shape(normalized):
+            continue
+        if suffix and suffix[0].isdigit():
+            combined = re.sub(r"\D", "", text)
+            if len(combined) >= 14 and is_exam_no_shape(combined[:14]):
+                continue
+        return normalized, suffix
+    return None, text
+
+
+def _major_looks_glued_with_sid(major: str | None, student_id: str | None) -> bool:
+    if not major or not student_id:
+        return False
+    compact = major.replace(" ", "").replace("　", "")
+    return student_id in compact
+
+
+def _split_sid_name_major(token: str) -> dict[str, str]:
+    """Parse <SID><NAME><MAJOR> or <SID><MAJOR> compact token."""
+    sid, suffix = _match_compact_student_id_prefix(token)
+    if not sid:
+        return {}
+    if not suffix:
+        return {"student_id": sid}
+    if not re.search(r"[\u4e00-\u9fa5]", suffix):
+        return {"student_id": sid}
+
+    suffix = suffix.strip()
+    if is_known_major_token(suffix):
+        return {"student_id": sid, "major": suffix}
+
+    name, major = _split_name_major_prefix(suffix)
+    if name and major:
+        return {"student_id": sid, "name": name, "major": major}
+
+    for nlen in (3, 2, 4):
+        if len(suffix) <= nlen:
+            continue
+        name_part = suffix[:nlen]
+        major_part = suffix[nlen:]
+        if not _looks_like_person_name(name_part):
+            continue
+        if len(major_part) >= 2:
+            out: dict[str, str] = {
+                "student_id": sid,
+                "name": normalize_name(name_part),
+                "major": major_part,
+            }
+            return out
+
+    if len(suffix) >= 2:
+        return {"student_id": sid, "major": suffix}
+    return {"student_id": sid}
 
 
 def _looks_like_person_name(value: str | None) -> bool:
@@ -452,6 +546,10 @@ def _alias_keys_for_split() -> list[str]:
 
 
 def _split_mixed_token(token: str) -> dict[str, str]:
+    sid_name_major = _split_sid_name_major(token)
+    if sid_name_major:
+        return sid_name_major
+
     # 姓名 + 专业 + 学号 连写（优先于短姓名+学号，避免吃掉专业尾字当姓名）
     name_major_sid = re.match(
         r"^([\u4e00-\u9fa5·]{2,30})(2[0-9]1\d{5,6})$",
@@ -536,10 +634,27 @@ def _parse_by_tokens(text: str, result: ParsedApplication) -> None:
             _assign_exam_no(result, split["exam_no"])
         if split.get("notice_no") and not result.notice_no:
             _add_notice_candidate(result, split["notice_no"])
-        if split.get("major") and not result.major:
-            result.major = split["major"]
+        if split.get("major"):
+            major_val = split["major"]
+            if not result.major or _major_looks_glued_with_sid(
+                result.major, result.student_id or split.get("student_id")
+            ):
+                result.major = major_val
         if split.get("name"):
             names.append(split["name"])
+            continue
+
+        compact_sid, compact_suffix = _match_compact_student_id_prefix(token)
+        if compact_sid:
+            if not result.student_id:
+                _assign_student_id(result, compact_sid)
+            if compact_suffix and re.search(r"[\u4e00-\u9fa5]", compact_suffix):
+                major_suffix = compact_suffix.strip()
+                if len(major_suffix) >= 2 and (
+                    not result.major
+                    or _major_looks_glued_with_sid(result.major, compact_sid)
+                ):
+                    result.major = major_suffix
             continue
 
         # Credential priority: student_id → exam_no → notice_no → name → major

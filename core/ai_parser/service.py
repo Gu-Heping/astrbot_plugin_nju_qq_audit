@@ -99,6 +99,8 @@ def is_template_misparsed_major(major: str | None, raw: str | None) -> bool:
         return True
     if re.search(r"[+＋]", major) and re.search(r"\d{6,}", major):
         return True
+    if re.match(r"^261\d{5,6}[\u4e00-\u9fa5]", major.replace(" ", "")):
+        return True
     return False
 
 
@@ -264,6 +266,19 @@ def grad_parse_incomplete(parsed: GraduateParsedApplication) -> bool:
     return False
 
 
+def _append_ai_validator_markers(
+    parsed: ParsedApplication, ai_fields: AiParsedFields
+) -> None:
+    for warning in ai_fields.warnings or []:
+        if warning.startswith("drop:"):
+            parts = warning.split(":", 2)
+            if len(parts) == 3:
+                _append_marker(
+                    parsed.parse_errors,
+                    f"ai_parse_drop_{parts[1]}:{parts[2]}",
+                )
+
+
 def merge_ai_fields_into_undergrad_parsed(
     parsed: ParsedApplication,
     ai_fields: AiParsedFields,
@@ -338,6 +353,7 @@ def merge_ai_fields_into_undergrad_parsed(
         "academy": parsed.academy,
     }
     _append_marker(parsed.parse_errors, "ai_parse_used")
+    _append_ai_validator_markers(parsed, ai_fields)
     if before != after:
         _append_marker(parsed.parse_errors, "ai_parse_merged")
     else:
