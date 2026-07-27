@@ -21,7 +21,16 @@ from core.matcher import MatchResult, match_student
 from core.parser import parse_application_comment
 from core.undergrad_exclusive import (
     apply_undergrad_exclusive_hit,
+    build_undergrad_exclusive_qq_reject_reason,
     check_undergrad_exclusive_membership,
+    is_undergrad_exclusive_auto_reject,
+    is_undergrad_exclusive_decision,
+)
+from core.undergrad_overflow import (
+    apply_undergrad_overflow_hit,
+    check_undergrad_overflow,
+    is_undergrad_overflow_decision,
+    overflow_reject_reason_from_parsed,
 )
 from core.parsed_store import (
     ai_parse_already_attempted,
@@ -336,13 +345,19 @@ class AuditPipeline:
             parsed_dict = apply_undergrad_exclusive_hit(
                 decision, parsed_dict, hit, self.settings
             )
+            audit_type = (
+                "undergrad_exclusive_policy_hit"
+                if parsed_dict.get("_undergrad_exclusive_action") == "auto_reject"
+                else "undergrad_exclusive_manual_review"
+            )
             await self.audit.append(
                 {
-                    "type": "undergrad_exclusive_manual_review",
+                    "type": audit_type,
                     "group_id": group_id,
                     "user_id": user_id,
                     "hit_group_ids": hit.group_ids,
                     "checked_group_ids": hit.checked_group_ids,
+                    "action": parsed_dict.get("_undergrad_exclusive_action"),
                 }
             )
             return parsed_dict
@@ -358,6 +373,111 @@ class AuditPipeline:
                 }
             )
         return parsed_dict
+
+    async def _apply_undergrad_overflow_guard(
+        self,
+        *,
+        group_id: str,
+        profile: str,
+        decision,
+        parsed_dict: dict,
+    ) -> dict:
+        if profile != "undergraduate":
+            return parsed_dict
+        if _is_blacklist_decision(decision) or parsed_dict.get("_blacklist_hit"):
+            return parsed_dict
+        if is_undergrad_exclusive_decision(decision) or parsed_dict.get(
+            "_undergrad_exclusive_hit"
+        ):
+            return parsed_dict
+
+        hit = await check_undergrad_overflow(
+            self.actions,
+            self.settings,
+            current_group_id=group_id,
+        )
+        if hit.hit:
+            parsed_dict = apply_undergrad_overflow_hit(
+                decision, parsed_dict, hit, self.settings
+            )
+            await self.audit.append(
+                {
+                    "type": "undergrad_overflow_policy_hit",
+                    "group_id": group_id,
+                    "member_count": hit.member_count,
+                    "threshold": hit.threshold,
+                    "redirect_group_id": hit.redirect_group_id,
+                }
+            )
+            return parsed_dict
+
+        if hit.failed:
+            await self.audit.append(
+                {
+                    "type": "undergrad_overflow_check_failed",
+                    "group_id": group_id,
+                    "message": hit.message,
+                }
+            )
+        return parsed_dict
+
+    async def _reject_for_policy(
+        self,
+        pending: PendingRequest,
+        event: GroupJoinRequest,
+        decision,
+        *,
+        policy_name: str,
+        reject_reason: str,
+        notify_title: str,
+    ) -> None:
+        req_id = pending.id
+        action_result = await self.actions.set_group_add_request(
+            event.flag,
+            event.sub_type,
+            False,
+            reject_reason,
+        )
+        final_status = await self._record_action_outcome(
+            pending,
+            action_result,
+            admin_user_id=None,
+            admin_command=policy_name,
+            reject_decision="reject",
+        )
+        await self.audit.append(
+            {
+                "type": f"{policy_name}_rejected",
+                "request_id": req_id,
+                "group_id": event.group_id,
+                "user_id": event.user_id,
+                "ok": action_result.ok,
+                "final_status": final_status,
+                "reason": decision.reason,
+            }
+        )
+        if self.settings.admin_notify:
+            try:
+                await self.notifier.notify_policy_reject_result(
+                    title=notify_title,
+                    request_id=req_id,
+                    group_id=event.group_id,
+                    user_id=event.user_id,
+                    ok=action_result.ok,
+                    reason=decision.reason,
+                    reject_reason=reject_reason,
+                    summary=applicant_summary(pending),
+                    comment=pending.comment or event.comment or "",
+                    action_message=action_result.message,
+                    parsed=strip_internal_parsed_keys(pending.parsed or {}),
+                    final_status=final_status,
+                )
+            except Exception:
+                logger.exception(
+                    "[audit] policy reject notify failed request=%s policy=%s",
+                    req_id,
+                    policy_name,
+                )
 
     def _effective_mode(self) -> tuple[str, str]:
         return get_effective_mode(self.settings, self.runtime.get_mode_override())
@@ -962,6 +1082,12 @@ class AuditPipeline:
             decision=decision,
             parsed_dict=new_parsed,
         )
+        new_parsed = await self._apply_undergrad_overflow_guard(
+            group_id=req.group_id,
+            profile=profile,
+            decision=decision,
+            parsed_dict=new_parsed,
+        )
 
         errors = new_parsed.get("parse_errors") or []
         ai_invoked = any(
@@ -1076,6 +1202,12 @@ class AuditPipeline:
             new_parsed = await self._apply_undergrad_exclusive_guard(
                 group_id=req.group_id,
                 user_id=req.user_id,
+                profile=req_profile,
+                decision=decision,
+                parsed_dict=new_parsed,
+            )
+            new_parsed = await self._apply_undergrad_overflow_guard(
+                group_id=req.group_id,
                 profile=req_profile,
                 decision=decision,
                 parsed_dict=new_parsed,
@@ -1206,6 +1338,12 @@ class AuditPipeline:
         parsed_dict = await self._apply_undergrad_exclusive_guard(
             group_id=event.group_id,
             user_id=event.user_id,
+            profile=profile,
+            decision=decision,
+            parsed_dict=parsed_dict,
+        )
+        parsed_dict = await self._apply_undergrad_overflow_guard(
+            group_id=event.group_id,
             profile=profile,
             decision=decision,
             parsed_dict=parsed_dict,
@@ -1380,6 +1518,12 @@ class AuditPipeline:
         parsed_dict = await self._apply_undergrad_exclusive_guard(
             group_id=event.group_id,
             user_id=event.user_id,
+            profile=resolved_profile,
+            decision=decision,
+            parsed_dict=parsed_dict,
+        )
+        parsed_dict = await self._apply_undergrad_overflow_guard(
+            group_id=event.group_id,
             profile=resolved_profile,
             decision=decision,
             parsed_dict=parsed_dict,
@@ -1562,6 +1706,74 @@ class AuditPipeline:
                         "[audit] blacklist manual notify failed request=%s",
                         req_id,
                     )
+            return
+
+        if is_undergrad_exclusive_auto_reject(decision, pending):
+            if event.sub_type != "add":
+                if self.settings.admin_notify:
+                    try:
+                        notify_parsed = strip_internal_parsed_keys(pending.parsed or {})
+                        notify_parsed["_profile"] = (
+                            getattr(pending, "profile", None) or "undergraduate"
+                        )
+                        await self.notifier.notify_manual_review(
+                            request_id=req_id,
+                            group_id=event.group_id,
+                            user_id=event.user_id,
+                            comment=event.comment,
+                            parsed=notify_parsed,
+                            reason=decision.reason,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "[audit] exclusive policy manual notify failed request=%s",
+                            req_id,
+                        )
+                return
+            await self._reject_for_policy(
+                pending,
+                event,
+                decision,
+                policy_name="undergrad_exclusive_reject",
+                reject_reason=build_undergrad_exclusive_qq_reject_reason(
+                    self.settings
+                ),
+                notify_title="本科多群互斥自动拒绝 🚫",
+            )
+            return
+
+        if is_undergrad_overflow_decision(decision, pending):
+            if event.sub_type != "add":
+                if self.settings.admin_notify:
+                    try:
+                        notify_parsed = strip_internal_parsed_keys(pending.parsed or {})
+                        notify_parsed["_profile"] = (
+                            getattr(pending, "profile", None) or "undergraduate"
+                        )
+                        await self.notifier.notify_manual_review(
+                            request_id=req_id,
+                            group_id=event.group_id,
+                            user_id=event.user_id,
+                            comment=event.comment,
+                            parsed=notify_parsed,
+                            reason=decision.reason,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "[audit] overflow policy manual notify failed request=%s",
+                            req_id,
+                        )
+                return
+            await self._reject_for_policy(
+                pending,
+                event,
+                decision,
+                policy_name="undergrad_overflow_reject",
+                reject_reason=overflow_reject_reason_from_parsed(
+                    pending.parsed, self.settings
+                ),
+                notify_title="本科群满员引导自动拒绝 🚦",
+            )
             return
 
         if mode in {"manual", "record-only"} or decision.decision == "manual_review":

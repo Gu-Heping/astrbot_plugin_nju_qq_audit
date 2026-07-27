@@ -205,10 +205,19 @@ def normalize_reject_reason(reason: str) -> str:
 def parse_no_command_reason(message_str: str, ref: str) -> str:
     text = (message_str or "").strip()
     prefix = f"/audit no {ref}".strip()
-    if text.startswith(prefix):
-        rest = text[len(prefix) :].strip()
-        return normalize_reject_reason(rest)
-    return DEFAULT_REJECT_REASON
+    if not text.startswith(prefix):
+        return DEFAULT_REJECT_REASON
+    rest = text[len(prefix) :].strip()
+    if not rest:
+        return DEFAULT_REJECT_REASON
+    lower = rest.lower()
+    if lower == "confirm":
+        return DEFAULT_REJECT_REASON
+    if lower.startswith("confirm "):
+        return normalize_reject_reason(rest[len("confirm") :].strip())
+    if lower.endswith(" confirm"):
+        return normalize_reject_reason(rest[: -len(" confirm")].strip())
+    return normalize_reject_reason(rest)
 
 
 def parse_dismiss_command(message_str: str, ref: str) -> tuple[bool, str]:

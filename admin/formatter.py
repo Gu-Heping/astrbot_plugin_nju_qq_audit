@@ -176,6 +176,8 @@ def _format_help_batch(
         "- 本科 release/catchup 只处理本科；研究生用 release/catchup grad",
         "- 别名：/audit batch strong N confirm、/audit temp N confirm",
         "- 本科多群互斥开启时，已在其他本科目标群的 QQ 不进入 release/catchup，会转人工确认",
+        "- 本科多群互斥可配置为转人工（manual_review）或自动拒绝（auto_reject）",
+        "- 本科 overflow 开启时，指定群达到阈值后会自动拒绝并提示备用群",
     ]
     lines.extend(
         _help_context(
@@ -270,6 +272,7 @@ def _format_help_advanced(
             "      /audit temp N confirm",
             "      /audit process strong confirm（兼容）",
             "- 本科多群互斥开启时，已在其他本科目标群的 QQ 不进入 release/catchup，会转人工确认",
+            "- 本科多群互斥可配置为转人工或自动拒绝；overflow 满员时自动引导备用群",
             "",
             "研究生分批放人（不改变 mode）：",
             "/audit release grad preview      预览研究生强匹配",

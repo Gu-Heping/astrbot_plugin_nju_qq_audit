@@ -8,6 +8,7 @@ from typing import Any, Mapping
 logger = logging.getLogger(__name__)
 
 VALID_MODES = frozenset({"off", "record-only", "manual", "auto"})
+UNDERGRAD_EXCLUSIVE_ACTIONS = frozenset({"manual_review", "auto_reject"})
 VALID_STUDENT_SOURCES = frozenset({"mock", "nju_table"})
 VALID_ACTION_BACKENDS = frozenset({"astrbot_adapter", "http"})
 DEFAULT_MODE = "record-only"
@@ -119,6 +120,14 @@ class PluginSettings:
     undergrad_exclusive_groups_enabled: bool = False
     undergrad_exclusive_group_ids: str = ""
     undergrad_exclusive_reject_reason: str = "不可加入多个群"
+    undergrad_exclusive_action: str = "manual_review"
+    undergrad_overflow_enabled: bool = False
+    undergrad_overflow_source_group_id: str = ""
+    undergrad_overflow_redirect_group_id: str = ""
+    undergrad_overflow_threshold: int = 1950
+    undergrad_overflow_reject_reason_template: str = (
+        "当前群人数较多，请申请加入 {redirect_group_id} 群"
+    )
 
     def __repr__(self) -> str:
         return (
@@ -189,6 +198,17 @@ def _normalize_mode(value: Any) -> str:
         logger.warning("Invalid mode %r, fallback to %s", mode, DEFAULT_MODE)
         return DEFAULT_MODE
     return mode
+
+
+def _normalize_undergrad_exclusive_action(value: Any) -> str:
+    action = str(value or "manual_review").strip().lower()
+    if action not in UNDERGRAD_EXCLUSIVE_ACTIONS:
+        logger.warning(
+            "Invalid undergrad_exclusive_action %r, fallback to manual_review",
+            value,
+        )
+        return "manual_review"
+    return action
 
 
 def _normalize_student_source(value: Any) -> str:
@@ -388,6 +408,26 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
             config.get("undergrad_exclusive_reject_reason", "不可加入多个群")
         ).strip()
         or "不可加入多个群",
+        undergrad_exclusive_action=_normalize_undergrad_exclusive_action(
+            config.get("undergrad_exclusive_action", "manual_review")
+        ),
+        undergrad_overflow_enabled=bool(config.get("undergrad_overflow_enabled", False)),
+        undergrad_overflow_source_group_id=str(
+            config.get("undergrad_overflow_source_group_id", "")
+        ).strip(),
+        undergrad_overflow_redirect_group_id=str(
+            config.get("undergrad_overflow_redirect_group_id", "")
+        ).strip(),
+        undergrad_overflow_threshold=_clamp_int(
+            config.get("undergrad_overflow_threshold"), 1950, minimum=0, maximum=100000
+        ),
+        undergrad_overflow_reject_reason_template=str(
+            config.get(
+                "undergrad_overflow_reject_reason_template",
+                "当前群人数较多，请申请加入 {redirect_group_id} 群",
+            )
+        ).strip()
+        or "当前群人数较多，请申请加入 {redirect_group_id} 群",
     )
 
 
@@ -411,6 +451,25 @@ def validate_settings(settings: PluginSettings) -> list[str]:
         warnings.append("grad_enabled=true 但未配置 grad_njutable_api_token")
     if settings.grad_enabled and not settings.grad_njutable_table_name:
         warnings.append("grad_enabled=true 但未配置 grad_njutable_table_name")
+    if (
+        settings.undergrad_overflow_enabled
+        and settings.undergrad_overflow_threshold <= 0
+    ):
+        warnings.append(
+            "undergrad_overflow_enabled=true 但 threshold<=0，overflow 检查不会生效"
+        )
+    if settings.undergrad_overflow_enabled:
+        source = (settings.undergrad_overflow_source_group_id or "").strip()
+        redirect = (settings.undergrad_overflow_redirect_group_id or "").strip()
+        if not source or not redirect:
+            warnings.append(
+                "undergrad_overflow_enabled=true 但未配置 source/redirect 群号，"
+                "overflow 检查将 fail-open"
+            )
+        elif source == redirect:
+            warnings.append(
+                "undergrad_overflow source 与 redirect 群号相同，overflow 检查将 fail-open"
+            )
     return warnings
 
 

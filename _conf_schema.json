@@ -332,8 +332,38 @@
     "default": ""
   },
   "undergrad_exclusive_reject_reason": {
-    "description": "管理员确认不可加入多个群时，建议用于 /audit no 的拒绝理由",
+    "description": "多群互斥 auto_reject 时发给申请人的拒绝理由，或 manual_review 时建议用于 /audit no",
     "type": "string",
     "default": "不可加入多个群"
+  },
+  "undergrad_exclusive_action": {
+    "description": "本科多群互斥命中后的处理方式：manual_review（转人工）或 auto_reject（自动拒绝）",
+    "type": "string",
+    "default": "manual_review"
+  },
+  "undergrad_overflow_enabled": {
+    "description": "本科群接近满员时自动拒绝并引导备用群（默认关闭）",
+    "type": "bool",
+    "default": false
+  },
+  "undergrad_overflow_source_group_id": {
+    "description": "overflow 源群号（例如 2601 群）",
+    "type": "string",
+    "default": ""
+  },
+  "undergrad_overflow_redirect_group_id": {
+    "description": "overflow 引导目标群号（例如 2602 群）",
+    "type": "string",
+    "default": ""
+  },
+  "undergrad_overflow_threshold": {
+    "description": "overflow 触发阈值：member_count >= threshold 时拒绝（不用 max_member_count）",
+    "type": "int",
+    "default": 1950
+  },
+  "undergrad_overflow_reject_reason_template": {
+    "description": "overflow 自动拒绝发给申请人的理由模板，可用 {redirect_group_id} 等占位符",
+    "type": "string",
+    "default": "当前群人数较多，请申请加入 {redirect_group_id} 群"
   }
 }
