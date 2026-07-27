@@ -418,43 +418,89 @@ def format_release_help(count: int, settings: PluginSettings) -> str:
         "- 不改变当前运行模式（不是长期自动审核）",
         "- 建议先发欢迎消息，再分批执行",
         "- 校对表更新后优先使用 /audit catchup preview",
+        "",
+        "本科路由策略（release/catchup）：",
+        "- 多群互斥命中：不会在批量流程里自动拒绝，只移出放行队列并转人工确认。",
+        "- 满员引导命中：不会在批量流程里自动拒绝，只移出放行队列并转人工确认。",
+        "- 自动拒绝只发生在「实时新申请」路径，并且必须显式开启对应策略。",
     ]
     if settings.undergrad_exclusive_groups_enabled:
-        lines.append(
-            "- 本科多群互斥开启时，已在其他本科目标群的 QQ 不进入 release/catchup，会转人工确认"
-        )
+        if settings.undergrad_exclusive_action == "auto_reject":
+            lines.append(
+                "- 多群互斥 auto_reject 已开启：实时申请会自动拒绝"
+                f"（理由：{settings.undergrad_exclusive_reject_reason}）；"
+                "release/catchup 不自动拒绝。"
+            )
+        else:
+            lines.append(
+                "- 多群互斥已开启（manual_review）：实时申请转人工，不自动拒绝；"
+                "release/catchup 只跳过并转人工。"
+            )
     if settings.undergrad_overflow_enabled:
+        source = (
+            (settings.undergrad_overflow_source_group_id or "").strip() or "未配置"
+        )
+        redirect = (
+            (settings.undergrad_overflow_redirect_group_id or "").strip() or "未配置"
+        )
         lines.append(
-            "- 本科 overflow 开启时，指定群达到阈值后会自动拒绝并提示备用群"
+            f"- 满员引导已开启：源群 {source} 达到阈值 {settings.undergrad_overflow_threshold} 后，"
+            f"实时申请自动拒绝并提示备用群 {redirect}；release/catchup 不自动拒绝。"
         )
     return "\n".join(lines)
 
 
 def format_catchup_help(settings: PluginSettings) -> str:
     interval_sec = settings.batch_approve_interval_ms / 1000
-    return "\n".join(
-        [
-            "补放：同步名单 → 重算待处理 → 补放强匹配",
-            "",
-            f"单次上限：{settings.batch_approve_max_count} 条",
-            f"间隔：{interval_sec:g} 秒",
-            "",
-            "命令：",
-            "/audit catchup preview        同步 + 重算 + 预览（不放人）",
-            "/audit catchup confirm        同步 + 重算 + 放行最多上限条",
-            "/audit catchup 10 confirm     同步 + 重算 + 放行最多 10 条",
-            "",
-            "筛选条件（须同时满足）：",
-            "- 本科申请",
-            "- 系统强匹配",
-            "- 学号/考生号判断为 26 级",
-            "- 仍在待处理队列中",
-            "",
-            "说明：",
-            "- 同步失败时不会重算或放行",
-            "- 不改变当前运行模式",
-        ]
-    )
+    lines = [
+        "补放：同步名单 → 重算待处理 → 补放强匹配",
+        "",
+        f"单次上限：{settings.batch_approve_max_count} 条",
+        f"间隔：{interval_sec:g} 秒",
+        "",
+        "命令：",
+        "/audit catchup preview        同步 + 重算 + 预览（不放人）",
+        "/audit catchup confirm        同步 + 重算 + 放行最多上限条",
+        "/audit catchup 10 confirm     同步 + 重算 + 放行最多 10 条",
+        "",
+        "筛选条件（须同时满足）：",
+        "- 本科申请",
+        "- 系统强匹配",
+        "- 学号/考生号判断为 26 级",
+        "- 仍在待处理队列中",
+        "",
+        "说明：",
+        "- 同步失败时不会重算或放行",
+        "- 不改变当前运行模式",
+        "",
+        "本科路由策略（release/catchup）：",
+        "- 多群互斥命中：不会在批量流程里自动拒绝，只移出放行队列并转人工确认。",
+        "- 满员引导命中：不会在批量流程里自动拒绝，只移出放行队列并转人工确认。",
+        "- 自动拒绝只发生在「实时新申请」路径，并且必须显式开启对应策略。",
+    ]
+    if settings.undergrad_exclusive_groups_enabled:
+        if settings.undergrad_exclusive_action == "auto_reject":
+            lines.append(
+                "- 多群互斥 auto_reject 已开启：实时申请会自动拒绝；"
+                "release/catchup 不自动拒绝。"
+            )
+        else:
+            lines.append(
+                "- 多群互斥已开启（manual_review）：实时申请转人工；"
+                "release/catchup 只跳过并转人工。"
+            )
+    if settings.undergrad_overflow_enabled:
+        source = (
+            (settings.undergrad_overflow_source_group_id or "").strip() or "未配置"
+        )
+        redirect = (
+            (settings.undergrad_overflow_redirect_group_id or "").strip() or "未配置"
+        )
+        lines.append(
+            f"- 满员引导已开启：源群 {source} 达到阈值 {settings.undergrad_overflow_threshold} 后，"
+            f"实时申请自动拒绝并提示备用群 {redirect}；release/catchup 不自动拒绝。"
+        )
+    return "\n".join(lines)
 
 
 def format_release_preview(preview: ReleasePreview, settings: PluginSettings) -> str:
