@@ -22,6 +22,11 @@ NAME_D = "钱十一"
 SID_D = "261880003"
 MAJOR_D = "汉语言文学"
 
+NAME_E = "孙十二"
+SID_9 = "261880001"
+EXTRA_DIGIT = "1"
+MAJOR_E = "计算机类"
+
 QUESTION = "问题：姓名 学号/录取号 专业"
 
 
@@ -39,6 +44,14 @@ def test_sid_name_major_glued():
     assert parsed.student_id == SID_B
     assert parsed.name == NAME_B
     assert parsed.major == MAJOR_B
+
+
+def test_sid_followed_by_digit_not_truncated():
+    raw = f"{QUESTION}\n答案：{NAME_E} {SID_9}{EXTRA_DIGIT}{MAJOR_E}"
+    parsed = parse_application_comment(raw)
+    assert parsed.student_id is None
+    assert parsed.name == NAME_E
+    assert parsed.major != f"{EXTRA_DIGIT}{MAJOR_E}"
 
 
 def test_fourteen_digit_exam_not_truncated_as_student_id():

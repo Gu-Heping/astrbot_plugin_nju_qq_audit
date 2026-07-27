@@ -275,9 +275,9 @@ def _match_compact_student_id_prefix(token: str) -> tuple[str | None, str]:
                     return None, text
 
     for pattern in (
-        r"^(261\d{6})(.*)$",
+        r"^(261\d{6})(?!\d)(.*)$",
         r"^(261\d{5})(?!\d)(.*)$",
-        r"^(2[0-9]1\d{6})(.*)$",
+        r"^(2[0-9]1\d{6})(?!\d)(.*)$",
     ):
         match = re.match(pattern, text)
         if not match:
@@ -289,10 +289,6 @@ def _match_compact_student_id_prefix(token: str) -> tuple[str | None, str]:
         normalized = normalize_student_id(candidate)
         if not normalized or is_exam_no_shape(normalized):
             continue
-        if suffix and suffix[0].isdigit():
-            combined = re.sub(r"\D", "", text)
-            if len(combined) >= 14 and is_exam_no_shape(combined[:14]):
-                continue
         return normalized, suffix
     return None, text
 
