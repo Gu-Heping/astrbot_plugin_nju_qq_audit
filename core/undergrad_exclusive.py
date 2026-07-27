@@ -111,14 +111,12 @@ async def check_undergrad_exclusive_membership(
             failed_groups.append(group_id)
             continue
 
-        if not getattr(result, "ok", False):
-            failed_groups.append(group_id)
-            continue
-
         present = is_user_in_group(result)
         if present is True:
             hit_groups.append(group_id)
-        elif present is None:
+        elif present is False:
+            pass
+        else:
             failed_groups.append(group_id)
 
     if hit_groups:

@@ -50,6 +50,7 @@ async def check_undergrad_overflow(
     settings: PluginSettings,
     *,
     current_group_id: str,
+    user_id: str | None = None,
 ) -> UndergradOverflowHit:
     source = (settings.undergrad_overflow_source_group_id or "").strip()
     redirect = (settings.undergrad_overflow_redirect_group_id or "").strip()
@@ -64,6 +65,17 @@ async def check_undergrad_overflow(
             threshold=threshold,
             failed=False,
             message="disabled_or_invalid_config",
+        )
+
+    if user_id and user_id in settings.admin_qq_ids:
+        return UndergradOverflowHit(
+            hit=False,
+            source_group_id=source,
+            redirect_group_id=redirect,
+            member_count=None,
+            threshold=threshold,
+            failed=False,
+            message="admin_exempt",
         )
 
     if current_group_id != source:
@@ -239,6 +251,7 @@ async def filter_releasable_for_undergrad_overflow(
             pipeline.actions,
             settings,
             current_group_id=req.group_id,
+            user_id=req.user_id,
         )
         if hit.hit:
             blocked += 1

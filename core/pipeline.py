@@ -378,6 +378,7 @@ class AuditPipeline:
         self,
         *,
         group_id: str,
+        user_id: str,
         profile: str,
         decision,
         parsed_dict: dict,
@@ -395,6 +396,7 @@ class AuditPipeline:
             self.actions,
             self.settings,
             current_group_id=group_id,
+            user_id=user_id,
         )
         if hit.hit:
             parsed_dict = apply_undergrad_overflow_hit(
@@ -1084,6 +1086,7 @@ class AuditPipeline:
         )
         new_parsed = await self._apply_undergrad_overflow_guard(
             group_id=req.group_id,
+            user_id=req.user_id,
             profile=profile,
             decision=decision,
             parsed_dict=new_parsed,
@@ -1208,6 +1211,7 @@ class AuditPipeline:
             )
             new_parsed = await self._apply_undergrad_overflow_guard(
                 group_id=req.group_id,
+                user_id=req.user_id,
                 profile=req_profile,
                 decision=decision,
                 parsed_dict=new_parsed,
@@ -1344,6 +1348,7 @@ class AuditPipeline:
         )
         parsed_dict = await self._apply_undergrad_overflow_guard(
             group_id=event.group_id,
+            user_id=event.user_id,
             profile=profile,
             decision=decision,
             parsed_dict=parsed_dict,
@@ -1524,6 +1529,7 @@ class AuditPipeline:
         )
         parsed_dict = await self._apply_undergrad_overflow_guard(
             group_id=event.group_id,
+            user_id=event.user_id,
             profile=resolved_profile,
             decision=decision,
             parsed_dict=parsed_dict,

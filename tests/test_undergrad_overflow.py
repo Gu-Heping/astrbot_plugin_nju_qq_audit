@@ -116,6 +116,39 @@ def _strong_pending(**kwargs) -> PendingRequest:
 
 
 @pytest.mark.asyncio
+async def test_overflow_skips_admin_user(tmp_path):
+    settings = _overflow_settings(admin_qq_ids=USER_ID, mode="record-only")
+    actions = MagicMock()
+    actions.get_group_member_info = AsyncMock(
+        return_value=ActionResult(ok=False, message="not found")
+    )
+    actions.get_group_info = AsyncMock(
+        return_value=ActionResult(ok=True, data={"member_count": 2000})
+    )
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(ok=True, retcode=0, message="ok")
+    )
+    pipe, requests, audit, actions = _pipeline(tmp_path, settings, actions)
+
+    event = GroupJoinRequest(
+        group_id=GROUP_2601,
+        user_id=USER_ID,
+        comment="吴九九 261880002",
+        flag="flag-overflow-admin",
+        sub_type="add",
+    )
+    req_id = await pipe._audit_and_act(event)
+    pending = await requests.get_by_id(req_id)
+
+    assert not pending.parsed.get("_undergrad_overflow_hit")
+    assert pending.decision == "approve"
+    actions.set_group_add_request.assert_not_awaited()
+    assert not any(
+        r.get("type") == "undergrad_overflow_policy_hit" for r in audit.read_all()
+    )
+
+
+@pytest.mark.asyncio
 async def test_overflow_at_threshold_auto_rejects_with_redirect(tmp_path):
     settings = _overflow_settings()
     actions = MagicMock()

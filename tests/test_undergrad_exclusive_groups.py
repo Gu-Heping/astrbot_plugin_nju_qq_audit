@@ -188,6 +188,41 @@ async def test_not_in_other_groups_keeps_strong_approve(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_exclusive_not_found_is_not_partial_failure(tmp_path):
+    settings = _exclusive_settings()
+
+    async def member_info(group_id, user_id, *, no_cache=True):
+        if group_id == GROUP_A and user_id == USER_ID:
+            return ActionResult(ok=False, message="not found")
+        return ActionResult(ok=False, message="not found")
+
+    actions = MagicMock()
+    actions.get_group_member_info = AsyncMock(side_effect=member_info)
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(ok=True, retcode=0, message="ok")
+    )
+    pipe, requests, audit, actions, _ = _pipeline(tmp_path, settings, actions)
+
+    event = GroupJoinRequest(
+        group_id=GROUP_B,
+        user_id=USER_ID,
+        comment="周七七 261880001",
+        flag="flag-not-found",
+        sub_type="add",
+    )
+    req_id = await pipe._audit_and_act(event)
+    pending = await requests.get_by_id(req_id)
+
+    assert not pending.parsed.get("_undergrad_exclusive_hit")
+    assert pending.decision == "approve"
+    assert pending.match_strength == "strong"
+    assert not any(
+        r.get("type") == "undergrad_exclusive_check_partial_failed"
+        for r in audit.read_all()
+    )
+
+
+@pytest.mark.asyncio
 async def test_api_failure_fail_open(tmp_path):
     settings = _exclusive_settings()
 
