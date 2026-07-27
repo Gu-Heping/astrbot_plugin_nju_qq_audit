@@ -72,6 +72,80 @@ def test_member_ambiguous_when_echo_only_ids():
     assert check.ambiguity_reason == "missing_member_evidence"
 
 
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"card_changeable": False},
+        {"unfriendly": False},
+        {"shut_up_timestamp": 0},
+        {"title_expire_time": 0},
+    ],
+)
+def test_member_ambiguous_when_only_default_fields(extra):
+    data = {"user_id": USER_ID, "group_id": GROUP_A, **extra}
+    check = inspect_user_in_group(
+        _result(data=data),
+        expected_group_id=GROUP_A,
+        expected_user_id=USER_ID,
+    )
+    assert check.present is None
+    assert check.ambiguity_reason == "missing_member_evidence"
+
+
+def test_member_present_when_role_member():
+    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "role": "member"})
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is True
+
+
+def test_member_present_when_join_time_positive():
+    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "join_time": 123})
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is True
+
+
+def test_member_present_when_card_present():
+    result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "card": "xxx"})
+    check = inspect_user_in_group(
+        result, expected_group_id=GROUP_A, expected_user_id=USER_ID
+    )
+    assert check.present is True
+
+
+@pytest.mark.asyncio
+async def test_default_fields_member_check_does_not_hit_exclusive(tmp_path):
+    settings = _settings()
+
+    async def member_info(group_id, user_id, *, no_cache=True):
+        if group_id == GROUP_A:
+            return _result(
+                data={
+                    "user_id": user_id,
+                    "group_id": group_id,
+                    "shut_up_timestamp": 0,
+                }
+            )
+        return ActionResult(ok=False, message="not found")
+
+    actions = MagicMock()
+    actions.get_group_member_info = AsyncMock(side_effect=member_info)
+    audit = AuditLog(tmp_path / "audit.jsonl", settings)
+    hit = await check_undergrad_exclusive_membership(
+        actions,
+        settings,
+        current_group_id=GROUP_B,
+        user_id=USER_ID,
+        audit_log=audit,
+        audit_context={"source": "test"},
+    )
+    assert hit.hit is False
+    assert GROUP_A in hit.failed_group_ids
+
+
 def test_member_present_when_join_time_evidence():
     result = _result(data={"user_id": USER_ID, "group_id": GROUP_A, "join_time": 123456})
     check = inspect_user_in_group(

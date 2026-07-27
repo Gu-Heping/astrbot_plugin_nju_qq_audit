@@ -14,19 +14,6 @@ _NOT_FOUND_MARKERS = (
     "not in",
 )
 
-_GROUP_MEMBER_EVIDENCE_FIELDS = (
-    "role",
-    "join_time",
-    "last_sent_time",
-    "level",
-    "card",
-    "title",
-    "title_expire_time",
-    "card_changeable",
-    "unfriendly",
-    "shut_up_timestamp",
-)
-
 _PROBE_DISPLAY_FIELDS = (
     "user_id",
     "group_id",
@@ -42,6 +29,10 @@ _PROBE_DISPLAY_FIELDS = (
     "unfriendly",
     "shut_up_timestamp",
 )
+
+_STRONG_MEMBER_ROLES = frozenset({"owner", "admin", "member"})
+_STRONG_MEMBER_TIME_FIELDS = ("join_time", "last_sent_time")
+_STRONG_MEMBER_TEXT_FIELDS = ("card", "title", "level")
 
 _PROBE_HIDDEN_FIELDS = frozenset(
     {
@@ -72,11 +63,47 @@ def _short_message(message: str | None) -> str | None:
     return text
 
 
+def _positive_time_value(value) -> int | None:
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, str) and value.isdigit() and int(value) > 0:
+        return int(value)
+    return None
+
+
 def _has_group_member_evidence(data: dict) -> bool:
-    for key in _GROUP_MEMBER_EVIDENCE_FIELDS:
-        if key in data and data.get(key) not in (None, ""):
+    role = str(data.get("role") or "").strip().lower()
+    if role in _STRONG_MEMBER_ROLES:
+        return True
+
+    for key in _STRONG_MEMBER_TIME_FIELDS:
+        if _positive_time_value(data.get(key)) is not None:
             return True
+
+    for key in _STRONG_MEMBER_TEXT_FIELDS:
+        if str(data.get(key) or "").strip():
+            return True
+
     return False
+
+
+def _collect_strong_member_evidence_parts(data: dict) -> list[str]:
+    parts: list[str] = []
+    role = str(data.get("role") or "").strip().lower()
+    if role in _STRONG_MEMBER_ROLES:
+        parts.append(f"role={data.get('role')}")
+
+    for key in _STRONG_MEMBER_TIME_FIELDS:
+        value = _positive_time_value(data.get(key))
+        if value is not None:
+            parts.append(f"{key}={value}")
+
+    for key in _STRONG_MEMBER_TEXT_FIELDS:
+        text = str(data.get(key) or "").strip()
+        if text:
+            parts.append(f"{key}={text}")
+
+    return parts
 
 
 def _format_returned_fields(data: dict | None) -> str:
@@ -95,11 +122,7 @@ def _format_returned_fields(data: dict | None) -> str:
 def _format_member_evidence(data: dict | None) -> str:
     if not isinstance(data, dict) or not data:
         return "无"
-    parts: list[str] = []
-    for key in _GROUP_MEMBER_EVIDENCE_FIELDS:
-        value = data.get(key)
-        if value not in (None, ""):
-            parts.append(f"{key}={value}")
+    parts = _collect_strong_member_evidence_parts(data)
     return " / ".join(parts) if parts else "无"
 
 
