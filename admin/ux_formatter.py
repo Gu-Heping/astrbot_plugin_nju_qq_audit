@@ -394,7 +394,10 @@ def format_view(
                 "",
             ]
         )
-    exclusive_lines = undergrad_exclusive_display_lines(parsed, group_labels=group_labels)
+    exclusive_lines = undergrad_exclusive_display_lines(
+        parsed,
+        group_labels=group_labels,
+    )
     if exclusive_lines:
         lines.extend(exclusive_lines)
         lines.append("")
@@ -823,6 +826,7 @@ def format_policy_reject_notice(
     final_status: str,
     parsed: dict | None = None,
     group_labels: dict[str, str] | None = None,
+    exclusive_hit_group_ids: list[str] | None = None,
 ) -> str:
     comment_line = (comment or "").strip()[:120]
     reason_text = (reason or "").strip() or "（无）"
@@ -839,7 +843,11 @@ def format_policy_reject_notice(
     if comment_line:
         lines.append(f"验证：{comment_line}")
     lines.extend(["", f"原因：{reason_text}"])
-    exclusive_lines = undergrad_exclusive_display_lines(parsed, group_labels=group_labels)
+    exclusive_lines = undergrad_exclusive_display_lines(
+        parsed,
+        group_labels=group_labels,
+        hit_group_ids=exclusive_hit_group_ids,
+    )
     if exclusive_lines:
         lines.extend([""] + exclusive_lines)
 
@@ -945,6 +953,7 @@ def format_manual_review_notice(
     group_label: str | None = None,
     user_label: str | None = None,
     group_labels: dict[str, str] | None = None,
+    exclusive_hit_group_ids: list[str] | None = None,
 ) -> str:
     parsed = parsed or {}
     ref = str(index) if index is not None else None
@@ -979,7 +988,11 @@ def format_manual_review_notice(
             "",
         ]
     )
-    exclusive_lines = undergrad_exclusive_display_lines(parsed, group_labels=group_labels)
+    exclusive_lines = undergrad_exclusive_display_lines(
+        parsed,
+        group_labels=group_labels,
+        hit_group_ids=exclusive_hit_group_ids,
+    )
     if exclusive_lines:
         lines.extend(exclusive_lines)
         lines.append("")

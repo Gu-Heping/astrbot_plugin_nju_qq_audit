@@ -177,6 +177,7 @@ class AdminNotifier:
                 group_label=group_label,
                 user_label=user_label,
                 group_labels=hit_group_labels,
+                exclusive_hit_group_ids=exclusive_hit_group_ids,
             )
             if await self._send_to_admin(admin_id, message):
                 sent_count += 1
@@ -384,6 +385,7 @@ class AdminNotifier:
             final_status=final_status or "",
             parsed=parsed,
             group_labels=hit_group_labels,
+            exclusive_hit_group_ids=exclusive_hit_group_ids,
         )
         await self._notify_admins(message, exclude_user_id=user_id)
 

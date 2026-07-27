@@ -11,9 +11,10 @@ sys.modules.setdefault("astrbot", MagicMock())
 sys.modules.setdefault("astrbot.api", MagicMock())
 sys.modules["astrbot.api"].logger = MagicMock()
 
-from admin.ux_formatter import format_manual_review_notice, format_view
+from admin.ux_formatter import format_manual_review_notice, format_policy_reject_notice, format_view
 from admin.release import ReleaseService
 from config import load_settings
+from core.parsed_store import strip_internal_parsed_keys
 from core.pipeline import AuditPipeline
 from core.undergrad_exclusive import check_undergrad_exclusive_membership
 from data_source.student_cache import StudentCache
@@ -186,6 +187,141 @@ def test_manual_review_notice_shows_exclusive_hit_groups():
     )
     assert "命中本科群" in text2
     assert GROUP_A in text2
+
+    stripped = strip_internal_parsed_keys(
+        {
+            "name": "周七七",
+            "_undergrad_exclusive_hit": True,
+            "_undergrad_exclusive_group_ids": [GROUP_A],
+        }
+    )
+    text3 = format_manual_review_notice(
+        index=1,
+        group_id=GROUP_B,
+        user_id=USER_ID,
+        comment="周七七 261880001",
+        judgement="申请人 QQ 已在本科新生群之一",
+        parsed=stripped,
+        group_labels={GROUP_A: f"测试群（{GROUP_A}）"},
+        exclusive_hit_group_ids=[GROUP_A],
+    )
+    assert "命中本科群" in text3
+    assert GROUP_A in text3
+    assert "_undergrad_exclusive_group_ids" not in text3
+
+
+def test_policy_reject_notice_shows_exclusive_hit_groups():
+    stripped = strip_internal_parsed_keys(
+        {
+            "name": "周七七",
+            "_undergrad_exclusive_hit": True,
+            "_undergrad_exclusive_group_ids": [GROUP_A],
+        }
+    )
+    text = format_policy_reject_notice(
+        title="本科多群互斥",
+        request_id="REQ-policy-1",
+        group_label=f"目标群（{GROUP_B}）",
+        user_label=USER_ID,
+        ok=True,
+        reason="申请人 QQ 已在本科新生群之一",
+        reject_reason="请勿重复申请",
+        summary="周七七",
+        comment="周七七 261880001",
+        action_message=None,
+        final_status="rejected",
+        parsed=stripped,
+        group_labels={GROUP_A: f"测试群（{GROUP_A}）"},
+        exclusive_hit_group_ids=[GROUP_A],
+    )
+    assert "命中本科群" in text
+    assert GROUP_A in text
+    assert "_undergrad_exclusive_group_ids" not in text
+
+
+@pytest.mark.asyncio
+async def test_notify_manual_review_shows_exclusive_hit_groups(tmp_path):
+    from admin.notify import AdminNotifier
+    from storage.admin_session_store import AdminSessionStore
+
+    settings = load_settings(
+        {
+            "admin_qq_ids": "111",
+            "admin_notify": True,
+            "onebot_http_url": "",
+        }
+    )
+    store = AdminSessionStore(tmp_path / "admin_sessions.json")
+    actions = MagicMock()
+    actions.send_private_msg_safe = AsyncMock(return_value=MagicMock(ok=True, message="ok"))
+    context = MagicMock()
+    context.send_message = AsyncMock(return_value=True)
+    notifier = AdminNotifier(settings, actions, context, store, lambda: None)
+    stripped = strip_internal_parsed_keys(
+        {
+            "name": "周七七",
+            "_undergrad_exclusive_hit": True,
+            "_undergrad_exclusive_group_ids": [GROUP_A],
+        }
+    )
+    await notifier.notify_manual_review(
+        request_id="REQ-notify-1",
+        group_id=GROUP_B,
+        user_id=USER_ID,
+        comment="周七七 261880001",
+        parsed=stripped,
+        reason="申请人 QQ 已在本科新生群之一",
+        exclusive_hit_group_ids=[GROUP_A],
+    )
+    message = actions.send_private_msg_safe.await_args.args[1]
+    assert "命中本科群" in message
+    assert GROUP_A in message
+    assert "_undergrad_exclusive_group_ids" not in message
+
+
+@pytest.mark.asyncio
+async def test_notify_policy_reject_shows_exclusive_hit_groups(tmp_path):
+    from admin.notify import AdminNotifier
+    from storage.admin_session_store import AdminSessionStore
+
+    settings = load_settings(
+        {
+            "admin_qq_ids": "111",
+            "admin_notify": True,
+            "onebot_http_url": "",
+        }
+    )
+    store = AdminSessionStore(tmp_path / "admin_sessions.json")
+    actions = MagicMock()
+    actions.send_private_msg_safe = AsyncMock(return_value=MagicMock(ok=True, message="ok"))
+    context = MagicMock()
+    context.send_message = AsyncMock(return_value=True)
+    notifier = AdminNotifier(settings, actions, context, store, lambda: None)
+    stripped = strip_internal_parsed_keys(
+        {
+            "name": "周七七",
+            "_undergrad_exclusive_hit": True,
+            "_undergrad_exclusive_group_ids": [GROUP_A],
+        }
+    )
+    await notifier.notify_policy_reject_result(
+        title="本科多群互斥",
+        request_id="REQ-notify-2",
+        group_id=GROUP_B,
+        user_id=USER_ID,
+        ok=True,
+        reason="申请人 QQ 已在本科新生群之一",
+        reject_reason="请勿重复申请",
+        summary="周七七",
+        comment="周七七 261880001",
+        parsed=stripped,
+        final_status="rejected",
+        exclusive_hit_group_ids=[GROUP_A],
+    )
+    message = actions.send_private_msg_safe.await_args.args[1]
+    assert "命中本科群" in message
+    assert GROUP_A in message
+    assert "_undergrad_exclusive_group_ids" not in message
 
 
 @pytest.mark.asyncio

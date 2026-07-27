@@ -38,11 +38,16 @@ def undergrad_exclusive_display_lines(
     parsed: dict | None,
     *,
     group_labels: dict[str, str] | None = None,
+    hit_group_ids: list[str] | None = None,
 ) -> list[str]:
     parsed = parsed or {}
-    if not parsed.get("_undergrad_exclusive_hit"):
+    explicit_ids = [str(x) for x in (hit_group_ids or []) if x]
+    parsed_hit = bool(parsed.get("_undergrad_exclusive_hit"))
+    hit_ids = explicit_ids or parsed.get("_undergrad_exclusive_group_ids") or []
+
+    if not parsed_hit and not hit_ids:
         return []
-    hit_ids = parsed.get("_undergrad_exclusive_group_ids") or []
+
     if not hit_ids:
         return ["多群互斥：命中"]
     labels: list[str] = []
