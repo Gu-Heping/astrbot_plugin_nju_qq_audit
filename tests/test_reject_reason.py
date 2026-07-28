@@ -7,7 +7,11 @@ from aiohttp import web
 from config import load_settings
 from onebot.astrbot_adapter_actions import AstrBotAdapterActionClient
 from onebot.http_actions import HttpActionClient
-from onebot.reject_reason import normalize_qq_reject_reason, resolve_qq_reject_reason
+from onebot.reject_reason import (
+    log_reject_dispatch,
+    normalize_qq_reject_reason,
+    resolve_qq_reject_reason,
+)
 from admin.labels import DEFAULT_REJECT_REASON
 
 
@@ -184,6 +188,16 @@ def test_resolve_qq_reject_reason_falls_back_when_empty():
     assert resolve_qq_reject_reason("") == DEFAULT_REJECT_REASON
     assert resolve_qq_reject_reason('""') == DEFAULT_REJECT_REASON
     assert resolve_qq_reject_reason("测试") == "测试"
+    assert resolve_qq_reject_reason(None) == DEFAULT_REJECT_REASON
+    assert isinstance(resolve_qq_reject_reason(None), str)
+
+
+def test_parse_no_command_explicit_reason_matches_manual_reject():
+    from admin.command_resolver import parse_no_command_reason
+
+    reason = parse_no_command_reason("/audit no 1 测试", "1")
+    assert reason == "测试"
+    assert resolve_qq_reject_reason(reason) == "测试"
 
 
 @pytest.mark.asyncio
@@ -466,3 +480,22 @@ async def test_auto_reject_zero_delay_skips_sleep(tmp_path):
             req, reason="测试", source="undergrad_exclusive_reject", decision="reject"
         )
         sleep_mock.assert_not_awaited()
+
+
+def test_log_reject_dispatch_includes_source_group_and_delay(caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="onebot.reject_reason")
+    log_reject_dispatch(
+        source="blacklist",
+        group_id="796836121",
+        user_id="12345",
+        flag="flag-test",
+        reason="测试理由",
+        delay=2.0,
+        sub_type="add",
+    )
+    assert (
+        "[reject dispatch] source=blacklist group=796836121 user=12345 "
+        "flag=flag-test reason='测试理由' delay=2.0"
+    ) in caplog.text

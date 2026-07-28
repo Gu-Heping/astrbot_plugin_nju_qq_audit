@@ -458,6 +458,7 @@ class AuditPipeline:
     ) -> tuple[ActionResult, str]:
         effective_reason = resolve_qq_reject_reason(reason)
         log_reject_reason_generated(effective_reason, source=source)
+        delay = 0.0
         if source != "manual":
             delay = float(self.settings.auto_reject_delay_sec or 0)
             if delay > 0:
@@ -469,13 +470,14 @@ class AuditPipeline:
                 )
                 await asyncio.sleep(delay)
         log_reject_dispatch(
-            flag=req.flag,
-            sub_type=req.sub_type,
-            approve=False,
-            reason=effective_reason,
             source=source,
             group_id=req.group_id,
             user_id=req.user_id,
+            flag=req.flag,
+            reason=effective_reason,
+            delay=delay,
+            sub_type=req.sub_type,
+            approve=False,
             decision=decision,
         )
         result = await self.actions.set_group_add_request(

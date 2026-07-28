@@ -58,10 +58,10 @@ def resolve_qq_reject_reason(reason: str | None, *, fallback: str | None = None)
     """Normalize and ensure a non-empty QQ-facing reject reason."""
     text = normalize_qq_reject_reason(reason)
     if text:
-        return text
+        return str(text)
     backup = normalize_qq_reject_reason(fallback)
     if backup:
-        return backup
+        return str(backup)
     return DEFAULT_REJECT_REASON
 
 
@@ -83,31 +83,39 @@ def log_reject_delay(
 
 def log_reject_dispatch(
     *,
+    source: str,
+    group_id: str,
+    user_id: str,
     flag: str,
-    sub_type: str,
-    approve: bool,
     reason: str,
-    source: str | None = None,
-    group_id: str | None = None,
-    user_id: str | None = None,
+    delay: float,
+    sub_type: str | None = None,
+    approve: bool = False,
     decision: str | None = None,
 ) -> None:
     logger.info(
-        "[reject dispatch] flag=%s sub_type=%s approve=%s reason=%r",
+        "[reject dispatch] source=%s group=%s user=%s flag=%s reason=%r delay=%s",
+        source,
+        group_id,
+        user_id,
         flag,
-        sub_type,
-        approve,
         reason,
+        delay,
     )
+    if sub_type is not None:
+        logger.debug(
+            "[reject dispatch] sub_type=%s approve=%s",
+            sub_type,
+            approve,
+        )
     if source == "manual":
         return
-    if not source:
-        return
     logger.warning(
-        "[auto reject debug] flag=%s group=%s decision=%s reason=%r type=%s",
+        "[auto reject debug] flag=%s group=%s decision=%s reason=%r type=%s delay=%s",
         flag,
-        group_id or "",
+        group_id,
         decision or source,
         reason,
         type(reason).__name__,
+        delay,
     )
