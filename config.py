@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from onebot.reject_reason import normalize_qq_reject_reason
+
 logger = logging.getLogger(__name__)
 
 VALID_MODES = frozenset({"off", "record-only", "manual", "auto"})
@@ -391,12 +393,14 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         ai_parse_log_raw=bool(config.get("ai_parse_log_raw", False)),
         blacklist_enabled=bool(config.get("blacklist_enabled", True)),
         blacklist_auto_reject=bool(config.get("blacklist_auto_reject", True)),
-        blacklist_reject_reason=str(
-            config.get(
-                "blacklist_reject_reason",
-                "请使用本人账号并按要求填写验证信息",
+        blacklist_reject_reason=normalize_qq_reject_reason(
+            str(
+                config.get(
+                    "blacklist_reject_reason",
+                    "请使用本人账号并按要求填写验证信息",
+                )
             )
-        ).strip()
+        )
         or "请使用本人账号并按要求填写验证信息",
         undergrad_exclusive_groups_enabled=bool(
             config.get("undergrad_exclusive_groups_enabled", False)
@@ -404,9 +408,9 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         undergrad_exclusive_group_ids=str(
             config.get("undergrad_exclusive_group_ids", "")
         ).strip(),
-        undergrad_exclusive_reject_reason=str(
-            config.get("undergrad_exclusive_reject_reason", "不可加入多个群")
-        ).strip()
+        undergrad_exclusive_reject_reason=normalize_qq_reject_reason(
+            str(config.get("undergrad_exclusive_reject_reason", "不可加入多个群"))
+        )
         or "不可加入多个群",
         undergrad_exclusive_action=_normalize_undergrad_exclusive_action(
             config.get("undergrad_exclusive_action", "manual_review")
@@ -421,12 +425,14 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         undergrad_overflow_threshold=_clamp_int(
             config.get("undergrad_overflow_threshold"), 1950, minimum=0, maximum=100000
         ),
-        undergrad_overflow_reject_reason_template=str(
-            config.get(
-                "undergrad_overflow_reject_reason_template",
-                "当前群人数较多，请申请加入 {redirect_group_id} 群",
+        undergrad_overflow_reject_reason_template=normalize_qq_reject_reason(
+            str(
+                config.get(
+                    "undergrad_overflow_reject_reason_template",
+                    "当前群人数较多，请申请加入 {redirect_group_id} 群",
+                )
             )
-        ).strip()
+        )
         or "当前群人数较多，请申请加入 {redirect_group_id} 群",
     )
 

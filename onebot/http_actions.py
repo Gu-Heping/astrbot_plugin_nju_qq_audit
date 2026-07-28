@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 import aiohttp
 
 from config import PluginSettings, redact_tokens_in_string
 from data_source.students import ActionResult
+from onebot.reject_reason import normalize_qq_reject_reason
+
+logger = logging.getLogger(__name__)
 
 
 def build_action_url(base_url: str, action: str) -> str:
@@ -132,6 +136,12 @@ class HttpActionClient:
         approve: bool,
         reason: str = "",
     ) -> ActionResult:
+        reason = normalize_qq_reject_reason(reason)
+        logger.debug(
+            "[audit] set_group_add_request approve=%s reason=%r",
+            approve,
+            reason,
+        )
         return await self.call_action(
             "set_group_add_request",
             {
