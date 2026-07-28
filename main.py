@@ -75,6 +75,10 @@ from admin.grad_release import (
     format_grad_release_result,
     list_grad_releasable,
 )
+from admin.overflow_cleanup import (
+    format_overflow_cleanup_preview,
+    format_overflow_cleanup_result,
+)
 from admin.blacklist import (
     check_blacklist_query,
     format_blacklist_entry,
@@ -1087,14 +1091,50 @@ class NjuQqAuditPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("cleanup")
-    async def audit_cleanup(self, event: AstrMessageEvent, kind: str = ""):
+    async def audit_cleanup(
+        self, event: AstrMessageEvent, kind: str = "", action: str = ""
+    ):
         allowed, message = can_run_command(self._settings(), "cleanup", event)
         if not allowed:
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
+        if kind == "overflow":
+            settings = self._settings()
+            if action == "preview":
+                preview = await self.ctx.overflow_cleanup_service.preview(
+                    self.ctx.requests,
+                    settings,
+                )
+                yield event.plain_result(format_overflow_cleanup_preview(preview))
+                return
+            if action == "confirm":
+                if self.ctx.overflow_cleanup_service.is_running:
+                    yield event.plain_result(
+                        "overflow cleanup 正在执行，请勿重复触发。"
+                    )
+                    return
+                result = await self.ctx.overflow_cleanup_service.confirm(
+                    requests_store=self.ctx.requests,
+                    pipeline=self.ctx.pipeline,
+                    settings=settings,
+                    admin_user_id=event.get_sender_id(),
+                    audit_log=self.ctx.audit,
+                    list_cache=self.ctx.list_cache,
+                )
+                yield event.plain_result(format_overflow_cleanup_result(result))
+                return
+            yield event.plain_result(
+                "用法：/audit cleanup overflow preview\n"
+                "      /audit cleanup overflow confirm"
+            )
+            return
         if kind != "failed":
-            yield event.plain_result("用法：/audit cleanup failed")
+            yield event.plain_result(
+                "用法：/audit cleanup failed\n"
+                "      /audit cleanup overflow preview\n"
+                "      /audit cleanup overflow confirm"
+            )
             return
         items = await self.ctx.requests.list_retryable_failures(limit=20)
         if not items:
