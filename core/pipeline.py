@@ -67,7 +67,11 @@ from onebot.group_system_msg import (
     snapshot_index,
 )
 from onebot.member_info import is_user_in_group
-from onebot.reject_reason import log_reject_reason_generated
+from onebot.reject_reason import (
+    log_reject_dispatch,
+    log_reject_reason_generated,
+    resolve_qq_reject_reason,
+)
 from core.version import (
     RECONCILE_LOGIC_VERSION,
     is_permanent_terminal,
@@ -439,6 +443,44 @@ class AuditPipeline:
             )
         return parsed_dict
 
+    async def _dispatch_reject(
+        self,
+        req: PendingRequest,
+        *,
+        reason: str,
+        source: str,
+        admin_user_id: str | None = None,
+        admin_command: str | None = None,
+        reject_decision: str = "reject",
+        list_cache: AdminListCacheStore | None = None,
+        decision: str | None = None,
+    ) -> tuple[ActionResult, str]:
+        effective_reason = resolve_qq_reject_reason(reason)
+        log_reject_reason_generated(effective_reason, source=source)
+        log_reject_dispatch(
+            source=source,
+            group_id=req.group_id,
+            user_id=req.user_id,
+            flag=req.flag,
+            reason=effective_reason,
+            decision=decision,
+        )
+        result = await self.actions.set_group_add_request(
+            req.flag,
+            req.sub_type,
+            False,
+            effective_reason,
+        )
+        final_status = await self._record_action_outcome(
+            req,
+            result,
+            admin_user_id=admin_user_id,
+            admin_command=admin_command or source,
+            reject_decision=reject_decision,
+            list_cache=list_cache,
+        )
+        return result, final_status
+
     async def _reject_for_policy(
         self,
         pending: PendingRequest,
@@ -450,19 +492,12 @@ class AuditPipeline:
         notify_title: str,
     ) -> None:
         req_id = pending.id
-        log_reject_reason_generated(reject_reason, source=policy_name)
-        action_result = await self.actions.set_group_add_request(
-            event.flag,
-            event.sub_type,
-            False,
-            reject_reason,
-        )
-        final_status = await self._record_action_outcome(
+        action_result, final_status = await self._dispatch_reject(
             pending,
-            action_result,
-            admin_user_id=None,
+            reason=reject_reason,
+            source=policy_name,
             admin_command=policy_name,
-            reject_decision="reject",
+            decision=getattr(decision, "decision", None),
         )
         await self.audit.append(
             {
@@ -1668,22 +1703,12 @@ class AuditPipeline:
                 and self.settings.blacklist_auto_reject
                 and event.sub_type == "add"
             ):
-                reject_reason = self.settings.blacklist_reject_reason
-                log_reject_reason_generated(
-                    reject_reason, source="blacklist_auto_reject"
-                )
-                action_result = await self.actions.set_group_add_request(
-                    event.flag,
-                    event.sub_type,
-                    False,
-                    reject_reason,
-                )
-                final_status = await self._record_action_outcome(
+                action_result, final_status = await self._dispatch_reject(
                     pending,
-                    action_result,
-                    admin_user_id=None,
+                    reason=self.settings.blacklist_reject_reason,
+                    source="blacklist",
                     admin_command="blacklist_reject",
-                    reject_decision="reject",
+                    decision=decision.decision,
                 )
                 await self.audit.append(
                     {
@@ -1808,7 +1833,8 @@ class AuditPipeline:
                 event,
                 decision,
                 policy_name="undergrad_overflow_reject",
-                reject_reason=overflow_reject_reason_from_parsed(
+                reject_reason=decision.reason
+                or overflow_reject_reason_from_parsed(
                     pending.parsed, self.settings
                 ),
                 notify_title="本科群满员引导自动拒绝 🚦",
@@ -2296,15 +2322,12 @@ class AuditPipeline:
         *,
         list_cache: AdminListCacheStore | None = None,
     ) -> ActionResult:
-        result = await self.actions.set_group_add_request(
-            req.flag, req.sub_type, False, reason
-        )
-        await self._record_action_outcome(
+        result, _final_status = await self._dispatch_reject(
             req,
-            result,
+            reason=reason,
+            source="manual",
             admin_user_id=admin_user_id,
             admin_command="reject",
-            reject_decision="reject",
             list_cache=list_cache,
         )
         await self.audit.append(

@@ -7,7 +7,8 @@ from aiohttp import web
 from config import load_settings
 from onebot.astrbot_adapter_actions import AstrBotAdapterActionClient
 from onebot.http_actions import HttpActionClient
-from onebot.reject_reason import normalize_qq_reject_reason
+from onebot.reject_reason import normalize_qq_reject_reason, resolve_qq_reject_reason
+from admin.labels import DEFAULT_REJECT_REASON
 
 
 class DummyConfig(dict):
@@ -177,3 +178,171 @@ async def test_blacklist_auto_reject_sends_unquoted_config_reason(tmp_path):
     assert call.args[2] is False
     assert call.args[3] == "你好"
     assert call.args[3] != '"你好"'
+
+
+def test_resolve_qq_reject_reason_falls_back_when_empty():
+    assert resolve_qq_reject_reason("") == DEFAULT_REJECT_REASON
+    assert resolve_qq_reject_reason('""') == DEFAULT_REJECT_REASON
+    assert resolve_qq_reject_reason("测试") == "测试"
+
+
+@pytest.mark.asyncio
+async def test_blacklist_auto_reject_uses_dispatch_fallback_when_config_reason_empty(
+    tmp_path,
+):
+    import sys
+    from unittest.mock import MagicMock
+
+    sys.modules.setdefault("astrbot", MagicMock())
+    sys.modules.setdefault("astrbot.api", MagicMock())
+    sys.modules["astrbot.api"].logger = MagicMock()
+
+    from core.pipeline import AuditPipeline
+    from data_source.student_cache import StudentCache
+    from data_source.students import ActionResult, Student
+    from onebot.event_extract import GroupJoinRequest
+    from storage.audit_log import AuditLog
+    from storage.blacklist_store import BlacklistStore
+    from storage.requests_store import RequestsStore
+    from storage.runtime_store import RuntimeStore
+
+    group = "796836121"
+    settings = load_settings(
+        DummyConfig(
+            {
+                "target_group_ids": group,
+                "mode": "auto",
+                "admin_notify": False,
+                "student_source": "mock",
+                "blacklist_enabled": True,
+                "blacklist_auto_reject": True,
+            }
+        )
+    )
+    settings.blacklist_reject_reason = ""
+    requests = RequestsStore(tmp_path / "requests.json")
+    audit = AuditLog(tmp_path / "audit.jsonl", settings)
+    runtime = RuntimeStore(tmp_path / "runtime.json")
+    cache = StudentCache(tmp_path)
+    cache.save_students(
+        [
+            Student(
+                key="261880001",
+                name="测试",
+                student_id="261880001",
+                notice_no="20260001",
+                major="计算机类",
+                status="已确认",
+                updated_at="2026-07-22T00:00:00+00:00",
+            )
+        ]
+    )
+    blacklist = BlacklistStore(tmp_path / "blacklist.json")
+    await blacklist.add(
+        kind="user_id",
+        value="12345",
+        reason="测试",
+        created_by="admin",
+    )
+    actions = MagicMock()
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(ok=True, retcode=0, message="ok")
+    )
+    pipe = AuditPipeline(
+        settings,
+        requests,
+        audit,
+        runtime,
+        cache,
+        actions,
+        MagicMock(),
+        blacklist_store=blacklist,
+    )
+    event = GroupJoinRequest(
+        group_id=group,
+        user_id="12345",
+        comment="测试 261880001",
+        flag="flag-bl-empty-reason",
+        sub_type="add",
+    )
+    await pipe._audit_and_act(event)
+    call = actions.set_group_add_request.await_args
+    assert call.args[2] is False
+    assert call.args[3] == DEFAULT_REJECT_REASON
+    assert call.args[3] != ""
+
+
+@pytest.mark.asyncio
+async def test_admin_reject_and_auto_reject_share_reason_resolution(tmp_path):
+    import sys
+    from unittest.mock import MagicMock
+
+    sys.modules.setdefault("astrbot", MagicMock())
+    sys.modules.setdefault("astrbot.api", MagicMock())
+    sys.modules["astrbot.api"].logger = MagicMock()
+
+    from core.pipeline import AuditPipeline
+    from data_source.students import ActionResult, PendingRequest
+    from storage.audit_log import AuditLog
+    from storage.requests_store import RequestsStore
+    from storage.runtime_store import RuntimeStore
+    from data_source.student_cache import StudentCache
+
+    settings = load_settings(DummyConfig({"target_group_ids": "796836121"}))
+    requests = RequestsStore(tmp_path / "requests2.json")
+    audit = AuditLog(tmp_path / "audit2.jsonl", settings)
+    runtime = RuntimeStore(tmp_path / "runtime2.json")
+    cache = StudentCache(tmp_path / "cache2")
+    actions = MagicMock()
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(ok=True, retcode=0, message="ok")
+    )
+    pipe = AuditPipeline(
+        settings,
+        requests,
+        audit,
+        runtime,
+        cache,
+        actions,
+        MagicMock(),
+    )
+    req = PendingRequest(
+        id="req-1",
+        group_id="796836121",
+        user_id="12345",
+        comment="test",
+        flag="flag-manual",
+        sub_type="add",
+        parsed={},
+        match={},
+        decision="manual_review",
+        confidence=0,
+        reason="",
+        mode="manual",
+        status="pending",
+        created_at="2026-07-22T00:00:00+00:00",
+    )
+    await requests.insert_attempt(req)
+    await pipe.admin_reject(req, "admin", "")
+    manual_call = actions.set_group_add_request.await_args
+    assert manual_call.args[3] == DEFAULT_REJECT_REASON
+
+    req2 = PendingRequest(
+        id="req-2",
+        group_id="796836121",
+        user_id="67890",
+        comment="test",
+        flag="flag-auto",
+        sub_type="add",
+        parsed={},
+        match={},
+        decision="reject",
+        confidence=0,
+        reason="",
+        mode="auto",
+        status="pending",
+        created_at="2026-07-22T00:00:00+00:00",
+    )
+    await pipe._dispatch_reject(req2, reason="", source="blacklist", decision="reject")
+    auto_call = actions.set_group_add_request.await_args
+    assert auto_call.args[3] == DEFAULT_REJECT_REASON
