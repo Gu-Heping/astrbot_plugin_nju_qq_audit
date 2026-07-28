@@ -5,7 +5,10 @@ from typing import Any
 
 from config import PluginSettings, redact_tokens_in_string
 from data_source.students import ActionResult
-from onebot.reject_reason import normalize_qq_reject_reason
+from onebot.reject_reason import (
+    log_reject_reason_before_send,
+    normalize_qq_reject_reason,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -169,12 +172,21 @@ class AstrBotAdapterActionClient:
         reason: str = "",
         event: Any | None = None,
     ) -> ActionResult:
+        raw_reason = reason
         reason = normalize_qq_reject_reason(reason)
-        logger.debug(
-            "[audit] set_group_add_request approve=%s reason=%r",
-            approve,
-            reason,
-        )
+        if not approve:
+            if raw_reason != reason:
+                logger.debug(
+                    "[reject debug] normalized at send boundary raw=%r normalized=%r",
+                    raw_reason,
+                    reason,
+                )
+            log_reject_reason_before_send(
+                reason,
+                flag=flag,
+                sub_type=sub_type,
+                approve=approve,
+            )
         return await self.call_action(
             "set_group_add_request",
             {

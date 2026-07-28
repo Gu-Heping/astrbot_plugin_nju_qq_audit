@@ -92,3 +92,88 @@ def test_http_set_group_add_request_sends_unquoted_reason():
             await runner.cleanup()
 
     asyncio.run(_run())
+
+
+@pytest.mark.asyncio
+async def test_blacklist_auto_reject_sends_unquoted_config_reason(tmp_path):
+    import sys
+    from unittest.mock import MagicMock
+
+    sys.modules.setdefault("astrbot", MagicMock())
+    sys.modules.setdefault("astrbot.api", MagicMock())
+    sys.modules["astrbot.api"].logger = MagicMock()
+
+    from config import load_settings
+    from core.pipeline import AuditPipeline
+    from data_source.student_cache import StudentCache
+    from data_source.students import ActionResult, Student
+    from onebot.event_extract import GroupJoinRequest
+    from storage.audit_log import AuditLog
+    from storage.blacklist_store import BlacklistStore
+    from storage.requests_store import RequestsStore
+    from storage.runtime_store import RuntimeStore
+
+    group = "796836121"
+    settings = load_settings(
+        DummyConfig(
+            {
+                "target_group_ids": group,
+                "mode": "record-only",
+                "admin_notify": False,
+                "student_source": "mock",
+                "blacklist_enabled": True,
+                "blacklist_auto_reject": True,
+                "blacklist_reject_reason": '"你好"',
+            }
+        )
+    )
+    requests = RequestsStore(tmp_path / "requests.json")
+    audit = AuditLog(tmp_path / "audit.jsonl", settings)
+    runtime = RuntimeStore(tmp_path / "runtime.json")
+    cache = StudentCache(tmp_path)
+    cache.save_students(
+        [
+            Student(
+                key="261880001",
+                name="测试",
+                student_id="261880001",
+                notice_no="20260001",
+                major="计算机类",
+                status="已确认",
+                updated_at="2026-07-22T00:00:00+00:00",
+            )
+        ]
+    )
+    blacklist = BlacklistStore(tmp_path / "blacklist.json")
+    await blacklist.add(
+        kind="user_id",
+        value="12345",
+        reason="测试",
+        created_by="admin",
+    )
+    actions = MagicMock()
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(ok=True, retcode=0, message="ok")
+    )
+    pipe = AuditPipeline(
+        settings,
+        requests,
+        audit,
+        runtime,
+        cache,
+        actions,
+        MagicMock(),
+        blacklist_store=blacklist,
+    )
+    event = GroupJoinRequest(
+        group_id=group,
+        user_id="12345",
+        comment="测试 261880001",
+        flag="flag-bl-quoted",
+        sub_type="add",
+    )
+    await pipe._audit_and_act(event)
+    call = actions.set_group_add_request.await_args
+    assert call.args[2] is False
+    assert call.args[3] == "你好"
+    assert call.args[3] != '"你好"'

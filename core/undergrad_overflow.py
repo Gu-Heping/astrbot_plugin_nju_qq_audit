@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from config import PluginSettings
+from onebot.reject_reason import log_reject_reason_generated, normalize_qq_reject_reason
 from data_source.students import PendingRequest
 from storage.audit_log import utc_now_iso
 
@@ -168,14 +169,17 @@ def build_undergrad_overflow_reject_reason(
     ).strip() or "当前群人数较多，请申请加入 {redirect_group_id} 群"
     redirect = hit.redirect_group_id or settings.undergrad_overflow_redirect_group_id
     try:
-        return template.format(
+        reason = template.format(
             source_group_id=hit.source_group_id,
             redirect_group_id=redirect,
             member_count=hit.member_count if hit.member_count is not None else "",
             threshold=hit.threshold,
         )
     except Exception:
-        return f"当前群人数较多，请申请加入 {redirect} 群"
+        reason = f"当前群人数较多，请申请加入 {redirect} 群"
+    reason = normalize_qq_reject_reason(reason)
+    log_reject_reason_generated(reason, source="undergrad_overflow_template")
+    return reason
 
 
 def apply_undergrad_overflow_hit(

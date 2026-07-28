@@ -6,6 +6,7 @@ from typing import Literal
 from admin.labels import DEFAULT_REJECT_REASON
 from data_source.students import TERMINAL_REQUEST_STATUSES
 from data_source.students import PendingRequest
+from onebot.reject_reason import normalize_qq_reject_reason
 from storage.list_cache import AdminListCacheStore
 from storage.requests_store import RequestsStore
 
@@ -198,7 +199,7 @@ async def resolve_request_ref(
 
 
 def normalize_reject_reason(reason: str) -> str:
-    reason = (reason or "").strip()
+    reason = normalize_qq_reject_reason(reason)
     return reason or DEFAULT_REJECT_REASON
 
 

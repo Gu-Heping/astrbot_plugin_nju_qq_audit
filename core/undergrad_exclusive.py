@@ -6,6 +6,7 @@ from typing import Any
 from config import UNDERGRAD_EXCLUSIVE_ACTIONS, PluginSettings, parse_numeric_ids
 from data_source.students import PendingRequest
 from onebot.member_info import inspect_user_in_group
+from onebot.reject_reason import log_reject_reason_generated, normalize_qq_reject_reason
 from storage.audit_log import utc_now_iso
 
 UNDERGRAD_EXCLUSIVE_SUGGESTION = "该 QQ 已在其他本科目标群，请管理员人工确认"
@@ -22,10 +23,12 @@ def normalize_undergrad_exclusive_action(value: str) -> str:
 
 
 def build_undergrad_exclusive_qq_reject_reason(settings: PluginSettings) -> str:
-    return (
+    reason = normalize_qq_reject_reason(
         (settings.undergrad_exclusive_reject_reason or "").strip()
         or "不可加入多个群"
     )
+    log_reject_reason_generated(reason, source="undergrad_exclusive_config")
+    return reason
 
 
 def build_undergrad_exclusive_reason(settings: PluginSettings) -> str:

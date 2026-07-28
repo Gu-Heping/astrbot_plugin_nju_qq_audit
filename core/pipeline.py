@@ -67,6 +67,7 @@ from onebot.group_system_msg import (
     snapshot_index,
 )
 from onebot.member_info import is_user_in_group
+from onebot.reject_reason import log_reject_reason_generated
 from core.version import (
     RECONCILE_LOGIC_VERSION,
     is_permanent_terminal,
@@ -449,6 +450,7 @@ class AuditPipeline:
         notify_title: str,
     ) -> None:
         req_id = pending.id
+        log_reject_reason_generated(reject_reason, source=policy_name)
         action_result = await self.actions.set_group_add_request(
             event.flag,
             event.sub_type,
@@ -1666,11 +1668,15 @@ class AuditPipeline:
                 and self.settings.blacklist_auto_reject
                 and event.sub_type == "add"
             ):
+                reject_reason = self.settings.blacklist_reject_reason
+                log_reject_reason_generated(
+                    reject_reason, source="blacklist_auto_reject"
+                )
                 action_result = await self.actions.set_group_add_request(
                     event.flag,
                     event.sub_type,
                     False,
-                    self.settings.blacklist_reject_reason,
+                    reject_reason,
                 )
                 final_status = await self._record_action_outcome(
                     pending,
