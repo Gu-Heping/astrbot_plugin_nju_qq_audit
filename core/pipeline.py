@@ -53,6 +53,7 @@ from core.event_fingerprint import (
     parse_iso_datetime,
 )
 from core.reconcile import ReconcileResult
+from core.reject_executor import execute_qq_reject
 from core.pending_reconcile import (
     GroupSnapshotFetch,
     PendingReconcileSummary,
@@ -67,13 +68,6 @@ from onebot.group_system_msg import (
     snapshot_index,
 )
 from onebot.member_info import is_user_in_group
-from onebot.reject_reason import (
-    log_reject_delay,
-    log_reject_dispatch,
-    log_reject_final_payload,
-    log_reject_reason_generated,
-    resolve_qq_reject_reason,
-)
 from core.version import (
     RECONCILE_LOGIC_VERSION,
     is_permanent_terminal,
@@ -457,46 +451,13 @@ class AuditPipeline:
         list_cache: AdminListCacheStore | None = None,
         decision: str | None = None,
     ) -> tuple[ActionResult, str]:
-        effective_reason = resolve_qq_reject_reason(reason)
-        log_reject_reason_generated(effective_reason, source=source)
-        delay = 0.0
-        if source != "manual":
-            delay = float(self.settings.auto_reject_delay_sec or 0)
-            if delay > 0:
-                log_reject_delay(
-                    source=source,
-                    flag=req.flag,
-                    group_id=req.group_id,
-                    delay=delay,
-                )
-                await asyncio.sleep(delay)
-        log_reject_dispatch(
+        result = await execute_qq_reject(
+            self.actions,
+            self.settings,
+            req,
+            reason=reason,
             source=source,
-            group_id=req.group_id,
-            user_id=req.user_id,
-            flag=req.flag,
-            reason=effective_reason,
-            delay=delay,
-            sub_type=req.sub_type,
-            approve=False,
             decision=decision,
-        )
-        log_reject_final_payload(
-            source=source,
-            flag=req.flag,
-            sub_type=req.sub_type,
-            approve=False,
-            reason=effective_reason,
-            request_id=req.id,
-        )
-        result = await self.actions.set_group_add_request(
-            req.flag,
-            req.sub_type,
-            False,
-            effective_reason,
-            request_id=req.id,
-            reject_source=source,
-            request_time=req.created_at,
         )
         final_status = await self._record_action_outcome(
             req,
@@ -517,13 +478,14 @@ class AuditPipeline:
         policy_name: str,
         reject_reason: str,
         notify_title: str,
+        admin_command: str | None = None,
     ) -> None:
         req_id = pending.id
         action_result, final_status = await self._dispatch_reject(
             pending,
             reason=reject_reason,
             source=policy_name,
-            admin_command=policy_name,
+            admin_command=admin_command or policy_name,
             decision=getattr(decision, "decision", None),
         )
         await self.audit.append(
@@ -539,23 +501,38 @@ class AuditPipeline:
         )
         if self.settings.admin_notify:
             try:
-                await self.notifier.notify_policy_reject_result(
-                    title=notify_title,
-                    request_id=req_id,
-                    group_id=event.group_id,
-                    user_id=event.user_id,
-                    ok=action_result.ok,
-                    reason=decision.reason,
-                    reject_reason=reject_reason,
-                    summary=applicant_summary(pending),
-                    comment=pending.comment or event.comment or "",
-                    action_message=action_result.message,
-                    parsed=strip_internal_parsed_keys(pending.parsed or {}),
-                    final_status=final_status,
-                    exclusive_hit_group_ids=exclusive_hit_group_ids_from_parsed(
-                        pending.parsed
-                    ),
-                )
+                if policy_name == "blacklist":
+                    await self.notifier.notify_blacklist_reject_result(
+                        request_id=req_id,
+                        group_id=event.group_id,
+                        user_id=event.user_id,
+                        ok=action_result.ok,
+                        reason=decision.reason,
+                        reject_reason=reject_reason,
+                        summary=applicant_summary(pending),
+                        comment=pending.comment or event.comment or "",
+                        action_message=action_result.message,
+                        parsed=strip_internal_parsed_keys(pending.parsed or {}),
+                        final_status=final_status,
+                    )
+                else:
+                    await self.notifier.notify_policy_reject_result(
+                        title=notify_title,
+                        request_id=req_id,
+                        group_id=event.group_id,
+                        user_id=event.user_id,
+                        ok=action_result.ok,
+                        reason=decision.reason,
+                        reject_reason=reject_reason,
+                        summary=applicant_summary(pending),
+                        comment=pending.comment or event.comment or "",
+                        action_message=action_result.message,
+                        parsed=strip_internal_parsed_keys(pending.parsed or {}),
+                        final_status=final_status,
+                        exclusive_hit_group_ids=exclusive_hit_group_ids_from_parsed(
+                            pending.parsed
+                        ),
+                    )
             except Exception:
                 logger.exception(
                     "[audit] policy reject notify failed request=%s policy=%s",
@@ -1730,44 +1707,15 @@ class AuditPipeline:
                 and self.settings.blacklist_auto_reject
                 and event.sub_type == "add"
             ):
-                action_result, final_status = await self._dispatch_reject(
+                await self._reject_for_policy(
                     pending,
-                    reason=self.settings.blacklist_reject_reason,
-                    source="blacklist",
+                    event,
+                    decision,
+                    policy_name="blacklist",
+                    reject_reason=self.settings.blacklist_reject_reason,
+                    notify_title="",
                     admin_command="blacklist_reject",
-                    decision=decision.decision,
                 )
-                await self.audit.append(
-                    {
-                        "type": "blacklist_rejected",
-                        "request_id": req_id,
-                        "group_id": event.group_id,
-                        "user_id": event.user_id,
-                        "ok": action_result.ok,
-                        "final_status": final_status,
-                        "reason": decision.reason,
-                    }
-                )
-                if self.settings.admin_notify:
-                    try:
-                        await self.notifier.notify_blacklist_reject_result(
-                            request_id=req_id,
-                            group_id=event.group_id,
-                            user_id=event.user_id,
-                            ok=action_result.ok,
-                            reason=decision.reason,
-                            reject_reason=self.settings.blacklist_reject_reason,
-                            summary=applicant_summary(pending),
-                            comment=pending.comment or event.comment or "",
-                            action_message=action_result.message,
-                            parsed=strip_internal_parsed_keys(pending.parsed or {}),
-                            final_status=final_status,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "[audit] blacklist reject notify failed request=%s",
-                            req_id,
-                        )
                 return
             logger.warning(
                 "[auto reject skipped] source=blacklist request=%s flag=%r sub_type=%r "
