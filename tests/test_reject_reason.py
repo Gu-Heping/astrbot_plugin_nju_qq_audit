@@ -346,3 +346,123 @@ async def test_admin_reject_and_auto_reject_share_reason_resolution(tmp_path):
     await pipe._dispatch_reject(req2, reason="", source="blacklist", decision="reject")
     auto_call = actions.set_group_add_request.await_args
     assert auto_call.args[3] == DEFAULT_REJECT_REASON
+
+
+@pytest.mark.asyncio
+async def test_auto_reject_delay_applied_only_for_auto_dispatch(tmp_path):
+    import sys
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    sys.modules.setdefault("astrbot", MagicMock())
+    sys.modules.setdefault("astrbot.api", MagicMock())
+    sys.modules["astrbot.api"].logger = MagicMock()
+
+    from core.pipeline import AuditPipeline
+    from data_source.students import ActionResult, PendingRequest
+    from storage.audit_log import AuditLog
+    from storage.requests_store import RequestsStore
+    from storage.runtime_store import RuntimeStore
+    from data_source.student_cache import StudentCache
+
+    settings = load_settings(
+        DummyConfig({"target_group_ids": "796836121", "auto_reject_delay_sec": 2})
+    )
+    requests = RequestsStore(tmp_path / "delay.json")
+    audit = AuditLog(tmp_path / "delay.jsonl", settings)
+    runtime = RuntimeStore(tmp_path / "delay_runtime.json")
+    cache = StudentCache(tmp_path / "delay_cache")
+    actions = MagicMock()
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(ok=True, retcode=0, message="ok")
+    )
+    pipe = AuditPipeline(
+        settings,
+        requests,
+        audit,
+        runtime,
+        cache,
+        actions,
+        MagicMock(),
+    )
+    req = PendingRequest(
+        id="req-delay",
+        group_id="796836121",
+        user_id="12345",
+        comment="test",
+        flag="flag-delay",
+        sub_type="add",
+        parsed={},
+        match={},
+        decision="reject",
+        confidence=0,
+        reason="",
+        mode="auto",
+        status="pending",
+        created_at="2026-07-22T00:00:00+00:00",
+    )
+    with patch("core.pipeline.asyncio.sleep", new_callable=AsyncMock) as sleep_mock:
+        await pipe._dispatch_reject(
+            req, reason="自动拒绝测试", source="blacklist", decision="reject"
+        )
+        sleep_mock.assert_awaited_once_with(2.0)
+
+    await pipe.admin_reject(req, "admin", "手动拒绝")
+    assert actions.set_group_add_request.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_auto_reject_zero_delay_skips_sleep(tmp_path):
+    import sys
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    sys.modules.setdefault("astrbot", MagicMock())
+    sys.modules.setdefault("astrbot.api", MagicMock())
+    sys.modules["astrbot.api"].logger = MagicMock()
+
+    from core.pipeline import AuditPipeline
+    from data_source.students import ActionResult, PendingRequest
+    from storage.audit_log import AuditLog
+    from storage.requests_store import RequestsStore
+    from storage.runtime_store import RuntimeStore
+    from data_source.student_cache import StudentCache
+
+    settings = load_settings(DummyConfig({"target_group_ids": "796836121"}))
+    assert settings.auto_reject_delay_sec == 0
+    requests = RequestsStore(tmp_path / "delay0.json")
+    audit = AuditLog(tmp_path / "delay0.jsonl", settings)
+    runtime = RuntimeStore(tmp_path / "delay0_runtime.json")
+    cache = StudentCache(tmp_path / "delay0_cache")
+    actions = MagicMock()
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(ok=True, retcode=0, message="ok")
+    )
+    pipe = AuditPipeline(
+        settings,
+        requests,
+        audit,
+        runtime,
+        cache,
+        actions,
+        MagicMock(),
+    )
+    req = PendingRequest(
+        id="req-delay0",
+        group_id="796836121",
+        user_id="12345",
+        comment="test",
+        flag="flag-delay0",
+        sub_type="add",
+        parsed={},
+        match={},
+        decision="reject",
+        confidence=0,
+        reason="",
+        mode="auto",
+        status="pending",
+        created_at="2026-07-22T00:00:00+00:00",
+    )
+    with patch("core.pipeline.asyncio.sleep", new_callable=AsyncMock) as sleep_mock:
+        await pipe._dispatch_reject(
+            req, reason="测试", source="undergrad_exclusive_reject", decision="reject"
+        )
+        sleep_mock.assert_not_awaited()

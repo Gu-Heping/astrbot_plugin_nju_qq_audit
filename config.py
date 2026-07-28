@@ -118,6 +118,7 @@ class PluginSettings:
     ai_parse_log_raw: bool = False
     blacklist_enabled: bool = True
     blacklist_auto_reject: bool = True
+    auto_reject_delay_sec: int = 0
     blacklist_reject_reason: str = "请使用本人账号并按要求填写验证信息"
     undergrad_exclusive_groups_enabled: bool = False
     undergrad_exclusive_group_ids: str = ""
@@ -393,6 +394,9 @@ def load_settings(config: Mapping[str, Any]) -> PluginSettings:
         ai_parse_log_raw=bool(config.get("ai_parse_log_raw", False)),
         blacklist_enabled=bool(config.get("blacklist_enabled", True)),
         blacklist_auto_reject=bool(config.get("blacklist_auto_reject", True)),
+        auto_reject_delay_sec=_clamp_int(
+            config.get("auto_reject_delay_sec"), 0, minimum=0, maximum=300
+        ),
         blacklist_reject_reason=normalize_qq_reject_reason(
             str(
                 config.get(

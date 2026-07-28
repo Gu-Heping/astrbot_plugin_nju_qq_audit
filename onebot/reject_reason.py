@@ -65,29 +65,48 @@ def resolve_qq_reject_reason(reason: str | None, *, fallback: str | None = None)
     return DEFAULT_REJECT_REASON
 
 
-def log_reject_dispatch(
+def log_reject_delay(
     *,
     source: str,
-    group_id: str,
-    user_id: str,
     flag: str,
+    group_id: str,
+    delay: float,
+) -> None:
+    logger.info(
+        "[reject delay] source=%s flag=%s group_id=%s delay=%s",
+        source,
+        flag,
+        group_id,
+        delay,
+    )
+
+
+def log_reject_dispatch(
+    *,
+    flag: str,
+    sub_type: str,
+    approve: bool,
     reason: str,
+    source: str | None = None,
+    group_id: str | None = None,
+    user_id: str | None = None,
     decision: str | None = None,
 ) -> None:
     logger.info(
-        "[reject dispatch] source=%s group=%s user=%s flag=%s reason=%r",
-        source,
-        group_id,
-        user_id,
+        "[reject dispatch] flag=%s sub_type=%s approve=%s reason=%r",
         flag,
+        sub_type,
+        approve,
         reason,
     )
     if source == "manual":
         return
+    if not source:
+        return
     logger.warning(
         "[auto reject debug] flag=%s group=%s decision=%s reason=%r type=%s",
         flag,
-        group_id,
+        group_id or "",
         decision or source,
         reason,
         type(reason).__name__,

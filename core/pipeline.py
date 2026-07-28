@@ -68,6 +68,7 @@ from onebot.group_system_msg import (
 )
 from onebot.member_info import is_user_in_group
 from onebot.reject_reason import (
+    log_reject_delay,
     log_reject_dispatch,
     log_reject_reason_generated,
     resolve_qq_reject_reason,
@@ -457,12 +458,24 @@ class AuditPipeline:
     ) -> tuple[ActionResult, str]:
         effective_reason = resolve_qq_reject_reason(reason)
         log_reject_reason_generated(effective_reason, source=source)
+        if source != "manual":
+            delay = float(self.settings.auto_reject_delay_sec or 0)
+            if delay > 0:
+                log_reject_delay(
+                    source=source,
+                    flag=req.flag,
+                    group_id=req.group_id,
+                    delay=delay,
+                )
+                await asyncio.sleep(delay)
         log_reject_dispatch(
+            flag=req.flag,
+            sub_type=req.sub_type,
+            approve=False,
+            reason=effective_reason,
             source=source,
             group_id=req.group_id,
             user_id=req.user_id,
-            flag=req.flag,
-            reason=effective_reason,
             decision=decision,
         )
         result = await self.actions.set_group_add_request(
