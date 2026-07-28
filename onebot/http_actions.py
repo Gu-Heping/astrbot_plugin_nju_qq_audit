@@ -10,6 +10,8 @@ from config import PluginSettings, redact_tokens_in_string
 from data_source.students import ActionResult
 from onebot.reject_reason import (
     log_reject_reason_before_send,
+    log_snowluma_reject_result,
+    log_snowluma_reject_wire,
     normalize_qq_reject_reason,
 )
 
@@ -101,12 +103,14 @@ class HttpActionClient:
                     return ActionResult(
                         ok=True,
                         retcode=retcode,
+                        status=status or "ok",
                         message=msg or "ok",
                         data=data,
                     )
                 return ActionResult(
                     ok=False,
                     retcode=retcode if retcode >= 0 else http_status,
+                    status=status or "failed",
                     message=msg or redact_tokens_in_string(f"HTTP {http_status} action failed", self.settings),
                 )
         except asyncio.TimeoutError:
@@ -138,6 +142,10 @@ class HttpActionClient:
         sub_type: str,
         approve: bool,
         reason: str = "",
+        *,
+        request_id: str | None = None,
+        reject_source: str | None = None,
+        request_time: str | None = None,
     ) -> ActionResult:
         raw_reason = reason
         reason = normalize_qq_reject_reason(reason)
@@ -154,7 +162,17 @@ class HttpActionClient:
                 sub_type=sub_type,
                 approve=approve,
             )
-        return await self.call_action(
+            log_snowluma_reject_wire(
+                backend="onebot_http",
+                flag=flag,
+                sub_type=sub_type,
+                approve=approve,
+                reason=reason,
+                request_id=request_id,
+                reject_source=reject_source,
+                request_time=request_time,
+            )
+        result = await self.call_action(
             "set_group_add_request",
             {
                 "flag": flag,
@@ -163,6 +181,18 @@ class HttpActionClient:
                 "reason": reason,
             },
         )
+        if not approve:
+            log_snowluma_reject_result(
+                flag=flag,
+                reject_source=reject_source,
+                request_id=request_id,
+                retcode=result.retcode,
+                status=result.status or ("ok" if result.ok else "failed"),
+                message=result.message,
+                request_time=request_time,
+                reason_len=len(reason),
+            )
+        return result
 
     async def get_login_info(self) -> ActionResult:
         return await self.call_action("get_login_info", {})

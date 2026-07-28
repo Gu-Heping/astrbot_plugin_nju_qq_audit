@@ -101,6 +101,7 @@ class Student:
 class ActionResult:
     ok: bool
     retcode: int | None = None
+    status: str | None = None
     message: str | None = None
     data: Any | None = None
 

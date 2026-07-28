@@ -22,6 +22,10 @@ class ActionClient(Protocol):
         sub_type: str,
         approve: bool,
         reason: str = "",
+        *,
+        request_id: str | None = None,
+        reject_source: str | None = None,
+        request_time: str | None = None,
     ) -> ActionResult: ...
 
     async def get_login_info(self) -> ActionResult: ...

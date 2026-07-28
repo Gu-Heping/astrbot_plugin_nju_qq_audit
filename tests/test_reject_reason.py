@@ -43,6 +43,45 @@ def test_load_settings_normalizes_quoted_blacklist_reason():
 
 
 @pytest.mark.asyncio
+async def test_adapter_set_group_add_request_logs_wire_and_result(caplog):
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="onebot.reject_reason")
+    from onebot.reject_reason import reset_reject_wire_call_counts_for_tests
+
+    reset_reject_wire_call_counts_for_tests()
+    context = MagicMock()
+    settings = load_settings(DummyConfig())
+    client = AstrBotAdapterActionClient(context, settings)
+    bot = MagicMock()
+    bot.api.call_action = AsyncMock(
+        return_value={"status": "ok", "retcode": 0, "message": "success", "data": {}}
+    )
+
+    async def fake_get_bot(event=None):
+        return bot
+
+    client._get_bot_client = fake_get_bot
+    await client.set_group_add_request(
+        "flag123",
+        "add",
+        False,
+        "你好",
+        request_id="REQ-1",
+        reject_source="blacklist",
+        request_time="2026-07-28T08:00:00+00:00",
+    )
+    assert "[snowluma reject wire]" in caplog.text
+    assert "[snowluma reject result]" in caplog.text
+    assert "reject_source=blacklist" in caplog.text
+    assert "request_id=REQ-1" in caplog.text
+    assert "status=ok" in caplog.text
+    assert "retcode=0" in caplog.text
+    assert "reason_len=2" in caplog.text
+    assert "reject_elapsed_sec=" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_adapter_set_group_add_request_sends_unquoted_reason():
     context = MagicMock()
     settings = load_settings(DummyConfig())
@@ -480,6 +519,111 @@ async def test_auto_reject_zero_delay_skips_sleep(tmp_path):
             req, reason="测试", source="undergrad_exclusive_reject", decision="reject"
         )
         sleep_mock.assert_not_awaited()
+
+
+def test_log_reject_final_payload_format(caplog):
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="onebot.reject_reason")
+    from onebot.reject_reason import log_reject_final_payload, reset_reject_wire_call_counts_for_tests
+
+    reset_reject_wire_call_counts_for_tests()
+    log_reject_final_payload(
+        source="manual",
+        flag="slreq:abc",
+        sub_type="add",
+        approve=False,
+        reason="测试",
+        request_id="REQ-123",
+    )
+    assert "source=manual" in caplog.text
+    assert "request_id=REQ-123" in caplog.text
+    assert "flag='slreq:abc'" in caplog.text
+    assert "sub_type='add'" in caplog.text
+    assert "approve=False" in caplog.text
+    assert "reason='测试'" in caplog.text
+
+
+def test_snowluma_reject_wire_tracks_duplicate_flag_calls(caplog):
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="onebot.reject_reason")
+    from onebot.reject_reason import log_snowluma_reject_wire, reset_reject_wire_call_counts_for_tests
+
+    reset_reject_wire_call_counts_for_tests()
+    log_snowluma_reject_wire(
+        backend="onebot_adapter",
+        flag="slreq:dup",
+        sub_type="add",
+        approve=False,
+        reason="",
+        request_id="REQ-1",
+        reject_source="blacklist",
+        request_time="2026-07-28T08:00:00+00:00",
+    )
+    log_snowluma_reject_wire(
+        backend="onebot_adapter",
+        flag="slreq:dup",
+        sub_type="add",
+        approve=False,
+        reason="手动理由",
+        request_id="REQ-1",
+        reject_source="manual",
+        request_time="2026-07-28T08:00:00+00:00",
+    )
+    assert caplog.text.count("[snowluma reject wire]") == 2
+    assert "[snowluma reject duplicate]" in caplog.text
+    assert "call_index=1" in caplog.text
+    assert "flag='slreq:dup'" in caplog.text
+    assert "call_index=2" in caplog.text
+    assert "reject_source=blacklist" in caplog.text
+    assert "reject_source=manual" in caplog.text
+    assert "reason=''" in caplog.text
+    assert "reason_len=0" in caplog.text
+    assert "reason_len=4" in caplog.text
+    assert "request_time=2026-07-28T08:00:00+00:00" in caplog.text
+    assert "reject_elapsed_sec=" in caplog.text
+
+
+def test_snowluma_reject_result_logs_response_fields(caplog):
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="onebot.reject_reason")
+    from onebot.reject_reason import log_snowluma_reject_result, reset_reject_wire_call_counts_for_tests
+
+    reset_reject_wire_call_counts_for_tests()
+    log_snowluma_reject_result(
+        flag="slreq:abc",
+        reject_source="blacklist",
+        request_id="REQ-99",
+        retcode=0,
+        status="ok",
+        message="ok",
+        call_index=1,
+        request_time="2026-07-28T08:00:00+00:00",
+        reason_len=12,
+    )
+    assert "[snowluma reject result]" in caplog.text
+    assert "flag='slreq:abc'" in caplog.text
+    assert "reject_source=blacklist" in caplog.text
+    assert "request_id=REQ-99" in caplog.text
+    assert "call_index=1" in caplog.text
+    assert "retcode=0" in caplog.text
+    assert "status=ok" in caplog.text
+    assert "message='ok'" in caplog.text
+    assert "request_time=2026-07-28T08:00:00+00:00" in caplog.text
+    assert "reject_elapsed_sec=" in caplog.text
+    assert "reason_len=12" in caplog.text
+
+
+def test_reject_elapsed_sec_from_request_time():
+    from onebot.reject_reason import _reject_elapsed_sec
+    from datetime import datetime, timezone
+
+    reject_at = datetime(2026, 7, 28, 8, 0, 5, tzinfo=timezone.utc)
+    assert _reject_elapsed_sec("2026-07-28T08:00:00+00:00", reject_at) == "5.000"
+    assert _reject_elapsed_sec(None, reject_at) == "-"
+    assert _reject_elapsed_sec("invalid", reject_at) == "-"
 
 
 def test_log_reject_dispatch_includes_source_group_and_delay(caplog):

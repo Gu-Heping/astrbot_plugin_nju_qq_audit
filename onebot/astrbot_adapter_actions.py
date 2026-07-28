@@ -7,6 +7,8 @@ from config import PluginSettings, redact_tokens_in_string
 from data_source.students import ActionResult
 from onebot.reject_reason import (
     log_reject_reason_before_send,
+    log_snowluma_reject_result,
+    log_snowluma_reject_wire,
     normalize_qq_reject_reason,
 )
 
@@ -131,12 +133,14 @@ class AstrBotAdapterActionClient:
                 return ActionResult(
                     ok=True,
                     retcode=int(retcode) if retcode is not None else 0,
+                    status=status or "ok",
                     message=redact_tokens_in_string(detail, self.settings),
                     data=data,
                 )
             return ActionResult(
                 ok=False,
                 retcode=int(retcode) if retcode is not None else None,
+                status=status or "failed",
                 message=redact_tokens_in_string(
                     str(message or f"{action} failed"), self.settings
                 ),
@@ -144,7 +148,7 @@ class AstrBotAdapterActionClient:
             )
         # aiocqhttp may already unwrap and return action data directly
         # (e.g. SnowLuma get_group_system_msg → list).
-        return ActionResult(ok=True, retcode=0, message="ok", data=response)
+        return ActionResult(ok=True, retcode=0, status="ok", message="ok", data=response)
 
     async def call_action(
         self, action: str, params: dict[str, Any], event: Any | None = None
@@ -171,6 +175,10 @@ class AstrBotAdapterActionClient:
         approve: bool,
         reason: str = "",
         event: Any | None = None,
+        *,
+        request_id: str | None = None,
+        reject_source: str | None = None,
+        request_time: str | None = None,
     ) -> ActionResult:
         raw_reason = reason
         reason = normalize_qq_reject_reason(reason)
@@ -187,7 +195,17 @@ class AstrBotAdapterActionClient:
                 sub_type=sub_type,
                 approve=approve,
             )
-        return await self.call_action(
+            log_snowluma_reject_wire(
+                backend="onebot_adapter",
+                flag=flag,
+                sub_type=sub_type,
+                approve=approve,
+                reason=reason,
+                request_id=request_id,
+                reject_source=reject_source,
+                request_time=request_time,
+            )
+        result = await self.call_action(
             "set_group_add_request",
             {
                 "flag": flag,
@@ -197,6 +215,18 @@ class AstrBotAdapterActionClient:
             },
             event=event,
         )
+        if not approve:
+            log_snowluma_reject_result(
+                flag=flag,
+                reject_source=reject_source,
+                request_id=request_id,
+                retcode=result.retcode,
+                status=result.status or ("ok" if result.ok else "failed"),
+                message=result.message,
+                request_time=request_time,
+                reason_len=len(reason),
+            )
+        return result
 
     async def get_login_info(self, event: Any | None = None) -> ActionResult:
         return await self.call_action("get_login_info", {}, event=event)

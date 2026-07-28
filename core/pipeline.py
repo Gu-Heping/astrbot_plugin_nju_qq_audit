@@ -70,6 +70,7 @@ from onebot.member_info import is_user_in_group
 from onebot.reject_reason import (
     log_reject_delay,
     log_reject_dispatch,
+    log_reject_final_payload,
     log_reject_reason_generated,
     resolve_qq_reject_reason,
 )
@@ -480,11 +481,22 @@ class AuditPipeline:
             approve=False,
             decision=decision,
         )
+        log_reject_final_payload(
+            source=source,
+            flag=req.flag,
+            sub_type=req.sub_type,
+            approve=False,
+            reason=effective_reason,
+            request_id=req.id,
+        )
         result = await self.actions.set_group_add_request(
             req.flag,
             req.sub_type,
             False,
             effective_reason,
+            request_id=req.id,
+            reject_source=source,
+            request_time=req.created_at,
         )
         final_status = await self._record_action_outcome(
             req,
@@ -1757,6 +1769,16 @@ class AuditPipeline:
                             req_id,
                         )
                 return
+            logger.warning(
+                "[auto reject skipped] source=blacklist request=%s flag=%r sub_type=%r "
+                "decision=%r auto_reject=%s reason=%r",
+                req_id,
+                event.flag,
+                event.sub_type,
+                decision.decision,
+                self.settings.blacklist_auto_reject,
+                decision.reason,
+            )
             if self.settings.admin_notify:
                 try:
                     notify_parsed = strip_internal_parsed_keys(pending.parsed or {})
@@ -1805,6 +1827,15 @@ class AuditPipeline:
                             "[audit] exclusive policy manual notify failed request=%s",
                             req_id,
                         )
+                logger.warning(
+                    "[auto reject skipped] source=undergrad_exclusive_reject request=%s flag=%r "
+                    "sub_type=%r decision=%r reason=%r",
+                    req_id,
+                    event.flag,
+                    event.sub_type,
+                    decision.decision,
+                    decision.reason,
+                )
                 return
             await self._reject_for_policy(
                 pending,
@@ -1842,6 +1873,15 @@ class AuditPipeline:
                             "[audit] overflow policy manual notify failed request=%s",
                             req_id,
                         )
+                logger.warning(
+                    "[auto reject skipped] source=undergrad_overflow_reject request=%s flag=%r "
+                    "sub_type=%r decision=%r reason=%r",
+                    req_id,
+                    event.flag,
+                    event.sub_type,
+                    decision.decision,
+                    decision.reason,
+                )
                 return
             await self._reject_for_policy(
                 pending,
@@ -1923,6 +1963,18 @@ class AuditPipeline:
                     action_message=action_result.message,
                     parsed=strip_internal_parsed_keys(pending.parsed or {}),
                 )
+            return
+
+        if decision.decision == "reject":
+            logger.warning(
+                "[auto reject skipped] source=unhandled_reject request=%s flag=%r sub_type=%r "
+                "mode=%s reason=%r",
+                req_id,
+                event.flag,
+                event.sub_type,
+                mode,
+                decision.reason,
+            )
 
     async def _record_action_outcome(
         self,
