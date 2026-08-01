@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from typing import Any
 
 from config import redact_tokens_in_string
@@ -16,6 +17,12 @@ QQ_MAX_LEN = 12
 PARSED_QQ_KEYS = ("qq", "applicant_qq", "user_qq", "sender_id", "requester_id", "applicant_id")
 AUDIT_QQ_KEYS = ("user_id", "qq", "requester_id", "applicant_id", "sender_id")
 REJECT_AUDIT_SUFFIX = "_rejected"
+AUDIT_TIME_KEYS = ("time", "timestamp", "created_at", "event_time")
+AUDIT_PARSED_KEYS = ("name", "student_id", "major", "major_text", "profile", "_profile")
+AUDIT_PARSED_BLOCKED_KEYS = frozenset(
+    {"flag", "raw_event", "token", "cookie", "sanitized_raw", "event", "raw"}
+)
+_DATETIME_MIN_UTC = datetime.min.replace(tzinfo=timezone.utc)
 
 
 @dataclass
@@ -31,6 +38,7 @@ class LookupQqRecord:
     reason: str
     match_strength: str
     source: str
+    last_event_at: str = ""
     audit_types: list[str] = field(default_factory=list)
     admin_command: str | None = None
     blacklist_hit: bool = False
@@ -220,16 +228,133 @@ def _infer_audit_display_hints(events: list[dict[str, Any]], audit_types: list[s
     return blacklist_hit, exclusive_ids
 
 
-def _event_time(record: dict[str, Any]) -> str:
-    for key in ("time", "timestamp", "created_at"):
+def _parse_audit_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _audit_record_datetime(record: dict[str, Any]) -> datetime | None:
+    for key in AUDIT_TIME_KEYS:
+        parsed = _parse_audit_datetime(record.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _extract_audit_time(record: dict[str, Any]) -> str | None:
+    for key in AUDIT_TIME_KEYS:
         value = record.get(key)
-        if value:
-            return str(value)
-    return ""
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        if _parse_audit_datetime(text) is None:
+            continue
+        return text
+    return None
+
+
+def _event_time(record: dict[str, Any]) -> str:
+    return _extract_audit_time(record) or ""
+
+
+def _parsed_from_audit_record(record: dict[str, Any]) -> dict[str, Any]:
+    parsed: dict[str, Any] = {}
+    raw_parsed = record.get("parsed")
+    if isinstance(raw_parsed, dict):
+        for key, value in raw_parsed.items():
+            if key in AUDIT_PARSED_BLOCKED_KEYS or key.startswith("_internal"):
+                continue
+            if key in AUDIT_PARSED_KEYS and value is not None and str(value).strip():
+                parsed[key] = value
+    for key in ("name", "student_id", "major", "major_text"):
+        if key not in parsed:
+            value = record.get(key)
+            if value is not None and str(value).strip():
+                parsed[key] = value
+    if "_profile" not in parsed and "profile" not in parsed:
+        profile = record.get("profile")
+        if profile is not None and str(profile).strip():
+            parsed["_profile"] = str(profile)
+    elif "profile" in parsed and "_profile" not in parsed:
+        parsed["_profile"] = parsed["profile"]
+    return parsed
+
+
+def _merge_parsed_from_audit_events(events: list[dict[str, Any]]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for record in _sort_events(events):
+        for key, value in _parsed_from_audit_record(record).items():
+            if key not in merged and value is not None and str(value).strip():
+                merged[key] = value
+    return merged
+
+
+def _is_terminal_audit_record(record: dict[str, Any]) -> bool:
+    audit_type = str(record.get("type") or "")
+    if audit_type.endswith(REJECT_AUDIT_SUFFIX) or audit_type == "blacklist_rejected":
+        return True
+    if audit_type == "action_called":
+        return record.get("action") == "approve" and bool(record.get("ok"))
+    if audit_type in {
+        "action_already_approved",
+        "action_already_refused",
+        "request_stale",
+        "request_stale_member_present",
+        "external_handled",
+        "external_approved",
+        "external_handled_unknown",
+        "external_rejected_inferred",
+    }:
+        return True
+    if audit_type == "admin_command":
+        return str(record.get("command") or record.get("action") or "") in {
+            "approve",
+            "reject",
+            "dismiss",
+        }
+    return False
+
+
+def _latest_audit_time(events: list[dict[str, Any]], *, terminal_only: bool) -> str | None:
+    latest_dt: datetime | None = None
+    latest_text: str | None = None
+    for record in _sort_events(events):
+        if terminal_only and not _is_terminal_audit_record(record):
+            continue
+        record_dt = _audit_record_datetime(record)
+        audit_time = _extract_audit_time(record)
+        if record_dt is None or not audit_time:
+            continue
+        if latest_dt is None or record_dt > latest_dt:
+            latest_dt = record_dt
+            latest_text = audit_time
+    return latest_text
+
+
+def _resolve_last_event_at(req: PendingRequest, events: list[dict[str, Any]]) -> str:
+    created_at = str(req.created_at or "")
+    if not events:
+        return created_at or utc_now_iso()
+    terminal_time = _latest_audit_time(events, terminal_only=True)
+    if terminal_time:
+        return terminal_time
+    audit_time = _latest_audit_time(events, terminal_only=False)
+    if audit_time:
+        return audit_time
+    return created_at or utc_now_iso()
 
 
 def _sort_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(events, key=_event_time)
+    return sorted(events, key=lambda record: _audit_record_datetime(record) or _DATETIME_MIN_UTC)
 
 
 def _latest_reason(events: list[dict[str, Any]]) -> str:
@@ -238,6 +363,13 @@ def _latest_reason(events: list[dict[str, Any]]) -> str:
         if reason:
             return str(reason)
     return ""
+
+
+def _resolve_lookup_reason(req: PendingRequest, events: list[dict[str, Any]]) -> str:
+    audit_reason = _latest_reason(events)
+    if audit_reason:
+        return audit_reason
+    return str(req.reason or "")
 
 
 def _apply_terminal_from_audit(
@@ -255,7 +387,8 @@ def _apply_terminal_from_audit(
         if audit_type.endswith(REJECT_AUDIT_SUFFIX) or audit_type == "blacklist_rejected":
             status = "processed"
             decision = "reject"
-            reason = str(record.get("reason") or reason)
+            if record.get("reason"):
+                reason = str(record.get("reason"))
             processed_at = processed_at or _event_time(record)
             continue
 
@@ -271,7 +404,8 @@ def _apply_terminal_from_audit(
             status = terminal_status if terminal_status in {"processed", "external"} else "processed"
             if status == "processed":
                 decision = "approve"
-            reason = str(record.get("reason") or reason)
+            if record.get("reason"):
+                reason = str(record.get("reason"))
             admin_command = str(record.get("admin_command") or admin_command or "")
             processed_at = processed_at or _event_time(record)
             continue
@@ -279,13 +413,15 @@ def _apply_terminal_from_audit(
         if audit_type == "action_already_refused":
             status = "dismissed"
             decision = "reject"
-            reason = str(record.get("reason") or reason)
+            if record.get("reason"):
+                reason = str(record.get("reason"))
             processed_at = processed_at or _event_time(record)
             continue
 
         if audit_type in {"request_stale", "request_stale_member_present"}:
             status = "external" if audit_type == "request_stale_member_present" else "stale"
-            reason = str(record.get("reason") or reason)
+            if record.get("reason"):
+                reason = str(record.get("reason"))
             processed_at = processed_at or _event_time(record)
             continue
 
@@ -296,7 +432,9 @@ def _apply_terminal_from_audit(
             "external_rejected_inferred",
         }:
             status = "external"
-            reason = str(record.get("message") or record.get("reason") or reason)
+            terminal_reason = record.get("message") or record.get("reason")
+            if terminal_reason:
+                reason = str(terminal_reason)
             processed_at = processed_at or _event_time(record)
             continue
 
@@ -314,38 +452,17 @@ def _apply_terminal_from_audit(
             elif command == "dismiss":
                 status = "dismissed"
                 decision = "reject"
-                reason = str(record.get("reason") or reason)
+                if record.get("reason"):
+                    reason = str(record.get("reason"))
                 processed_at = processed_at or _event_time(record)
 
-    if not reason:
-        reason = _latest_reason(events)
-
-    return PendingRequest(
-        id=req.id,
-        group_id=req.group_id,
-        user_id=req.user_id,
-        comment=req.comment,
-        flag=req.flag,
-        sub_type=req.sub_type,
-        parsed=req.parsed,
-        match=req.match,
-        decision=decision,
-        confidence=req.confidence,
-        reason=reason,
-        mode=req.mode,
+    return replace(
+        req,
         status=status,
-        created_at=req.created_at,
-        processed_at=processed_at,
-        action_result=req.action_result,
-        last_action_result=req.last_action_result,
-        last_action_at=req.last_action_at,
-        retry_count=req.retry_count,
-        admin_override=req.admin_override,
-        admin_user_id=req.admin_user_id,
+        decision=decision,
+        reason=reason,
         admin_command=admin_command,
-        match_strength=req.match_strength,
-        matched_student_key=req.matched_student_key,
-        profile=req.profile,
+        processed_at=processed_at,
     )
 
 
@@ -371,6 +488,9 @@ def _base_request_from_audit(req_id: str, events: list[dict[str, Any]]) -> Pendi
 
     profile = str(base.get("profile") or "undergraduate")
     match_strength = str(base.get("match_strength") or base.get("new_match_strength") or "none")
+    parsed = _merge_parsed_from_audit_events(events)
+    if "_profile" in parsed:
+        profile = str(parsed.get("_profile") or parsed.get("profile") or profile)
     return PendingRequest(
         id=req_id,
         group_id=_audit_group_id(base),
@@ -378,11 +498,11 @@ def _base_request_from_audit(req_id: str, events: list[dict[str, Any]]) -> Pendi
         comment=str(base.get("comment") or ""),
         flag="",
         sub_type="add",
-        parsed={},
+        parsed=parsed,
         match={"strength": match_strength},
         decision=str(base.get("decision") or base.get("new_decision") or "manual_review"),
         confidence=float(base.get("confidence") or 0),
-        reason=str(base.get("reason") or base.get("new_reason") or ""),
+        reason=str(base.get("reason") or base.get("new_reason") or base.get("message") or ""),
         mode=str(base.get("mode") or "record-only"),
         status=str(base.get("status") or "pending"),
         created_at=created_at or utc_now_iso(),
@@ -400,31 +520,42 @@ def _to_lookup_record(
 ) -> LookupQqRecord:
     types = _audit_types(events)
     blacklist_hit, exclusive_ids = _infer_audit_display_hints(events, types)
-    enriched = req
-    if events and (not req.reason or req.status == "pending"):
-        enriched = _apply_terminal_from_audit(req, events)
-    if not enriched.reason and events:
-        enriched = replace(enriched, reason=_latest_reason(events))
-    parsed = dict(enriched.parsed or {})
+
+    if events:
+        terminal = _apply_terminal_from_audit(req, events)
+        status = str(terminal.status or "pending")
+        decision = str(terminal.decision or "")
+        admin_command = terminal.admin_command
+        reason = _resolve_lookup_reason(req, events)
+    else:
+        status = str(req.status or "pending")
+        decision = str(req.decision or "")
+        admin_command = req.admin_command
+        reason = str(req.reason or "")
+
+    parsed = dict(req.parsed or {})
     if blacklist_hit:
         parsed.setdefault("_blacklist_hit", True)
     if exclusive_ids and not parsed.get("_undergrad_exclusive_group_ids"):
         parsed["_undergrad_exclusive_hit"] = True
         parsed["_undergrad_exclusive_group_ids"] = exclusive_ids
+    created_at = str(req.created_at or "")
+    last_event_at = _resolve_last_event_at(req, events)
     return LookupQqRecord(
-        request_id=enriched.id,
+        request_id=req.id,
         qq=qq,
-        group_id=str(enriched.group_id or ""),
-        created_at=str(enriched.created_at or ""),
-        profile=str(getattr(enriched, "profile", None) or parsed.get("_profile") or "undergraduate"),
+        group_id=str(req.group_id or ""),
+        created_at=created_at,
+        profile=str(getattr(req, "profile", None) or parsed.get("_profile") or "undergraduate"),
         parsed=parsed,
-        status=str(enriched.status or "pending"),
-        decision=str(enriched.decision or ""),
-        reason=str(enriched.reason or ""),
-        match_strength=str(enriched.match_strength or (enriched.match or {}).get("strength") or "none"),
+        status=status,
+        decision=decision,
+        reason=reason,
+        match_strength=str(req.match_strength or (req.match or {}).get("strength") or "none"),
         source=source,
+        last_event_at=last_event_at,
         audit_types=types,
-        admin_command=enriched.admin_command,
+        admin_command=admin_command,
         blacklist_hit=blacklist_hit or bool(parsed.get("_blacklist_hit")),
         exclusive_hit_group_ids=exclusive_ids or list(parsed.get("_undergrad_exclusive_group_ids") or []),
     )
@@ -460,7 +591,7 @@ def _collect_from_audit_log(
         if base is None:
             continue
         records[req_id] = _to_lookup_record(
-            _apply_terminal_from_audit(base, events),
+            base,
             events,
             source="audit",
             qq=qq,
@@ -468,8 +599,12 @@ def _collect_from_audit_log(
     return records
 
 
-def _sort_key(record: LookupQqRecord) -> str:
-    return record.created_at or ""
+def _record_sort_datetime(value: str) -> datetime:
+    return _parse_audit_datetime(value) or _DATETIME_MIN_UTC
+
+
+def _sort_key(record: LookupQqRecord) -> datetime:
+    return _record_sort_datetime(record.last_event_at or record.created_at or "")
 
 
 async def lookup_qq_records(

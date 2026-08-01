@@ -660,6 +660,18 @@ def format_lookup_qq_result(
                 "时间：",
                 _lookup_format_local_time(item.created_at),
                 "",
+            ]
+        )
+        if item.last_event_at and item.last_event_at != item.created_at:
+            lines.extend(
+                [
+                    "最后处理：",
+                    _lookup_format_local_time(item.last_event_at),
+                    "",
+                ]
+            )
+        lines.extend(
+            [
                 "群：",
                 group_text,
                 "",
