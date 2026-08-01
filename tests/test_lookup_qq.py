@@ -76,10 +76,10 @@ async def test_lookup_qq_pending_record(stores):
     await requests.upsert(_req("req-pending"))
     result = await lookup_qq_records(requests, audit, "123456789")
     text = format_lookup_qq_result(result, group_labels={"796836121": "测试群"})
-    assert "共 1 条" in text
+    assert "1条" in text
     assert "张三" in text
     assert "796836121" in text
-    assert "pending" in text
+    assert "待处理" in text
 
 
 @pytest.mark.asyncio
@@ -95,7 +95,7 @@ async def test_lookup_qq_approved_record(stores):
     )
     result = await lookup_qq_records(requests, audit, "123456789")
     text = format_lookup_qq_result(result)
-    assert "approved" in text
+    assert "已通过" in text
 
 
 @pytest.mark.asyncio
@@ -111,7 +111,7 @@ async def test_lookup_qq_rejected_record(stores):
     )
     result = await lookup_qq_records(requests, audit, "123456789")
     text = format_lookup_qq_result(result)
-    assert "rejected" in text
+    assert "已拒绝" in text
     assert "信息不完整" in text
 
 
@@ -134,7 +134,7 @@ async def test_lookup_qq_no_records(stores):
     settings, requests, audit = stores
     result = await lookup_qq_records(requests, audit, "123456789")
     text = format_lookup_qq_result(result)
-    assert "未找到历史申请记录" in text
+    assert "未找到" in text
     assert "123456789" in text
 
 
@@ -222,4 +222,4 @@ async def test_lookup_qq_truncates_to_recent_twenty(stores):
     assert len(result.records) == 20
     assert result.truncated is True
     text = format_lookup_qq_result(result)
-    assert "仅展示最近 20 条，共发现 25 条" in text
+    assert "（仅展示最近 20 条，共 25 条）" in text

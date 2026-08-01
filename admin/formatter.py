@@ -5,11 +5,19 @@ from config import PluginSettings, mask_http_url
 from data_source.student_cache import SyncState
 from admin.lookup_qq import (
     LookupQqResult,
-    infer_lookup_source,
     lookup_display_status,
     sanitize_lookup_output,
 )
-from admin.labels import undergrad_exclusive_display_lines
+from admin.labels import strength_label
+
+
+LOOKUP_STATUS_LABELS = {
+    "pending": "待处理",
+    "approved": "已通过",
+    "rejected": "已拒绝",
+    "external": "外部处理",
+    "stale": "已失效",
+}
 
 
 def _lookup_format_local_time(iso_text: str | None) -> str:
@@ -22,6 +30,105 @@ def _lookup_format_local_time(iso_text: str | None) -> str:
         return dt.astimezone().strftime("%Y-%m-%d %H:%M")
     except ValueError:
         return iso_text
+
+
+def _lookup_status_display(status: str, decision: str = "") -> str:
+    key = lookup_display_status(status, decision)
+    return LOOKUP_STATUS_LABELS.get(key, key)
+
+
+def _lookup_group_line(group_id: str, group_labels: dict[str, str] | None) -> str:
+    gid = str(group_id or "")
+    name = (group_labels or {}).get(gid) or gid
+    if name and name != gid:
+        return f"{name}({gid})"
+    return gid
+
+
+def _lookup_raw_application_summary(application_comment: str, parsed: dict) -> str:
+    if application_comment:
+        return application_comment
+    parsed = parsed or {}
+    name = str(parsed.get("name") or "").strip()
+    student_id = str(parsed.get("student_id") or "").strip()
+    major = str(parsed.get("major_text") or parsed.get("major") or "").strip()
+    degree = str(parsed.get("degree") or parsed.get("grad_degree") or "").strip()
+    profile = str(parsed.get("_profile") or parsed.get("profile") or "").strip()
+    if profile == "graduate" or degree:
+        parts = [part for part in (name, major, degree) if part]
+    else:
+        parts = [part for part in (name, student_id) if part]
+        if major and not student_id:
+            parts.append(major)
+    return " ".join(parts) if parts else "（无）"
+
+
+def _lookup_parsed_line(parsed: dict) -> str:
+    parsed = parsed or {}
+    name = str(parsed.get("name") or "").strip()
+    student_id = str(parsed.get("student_id") or "").strip()
+    major = str(parsed.get("major_text") or parsed.get("major") or "").strip()
+    if not any((name, student_id, major)):
+        return "未解析"
+    return f"{name or '—'}/{student_id or '—'}/{major or '—'}"
+
+
+def _lookup_simplify_reason(reason: str) -> str:
+    import re
+
+    from admin.action_error import classify_action_failure, user_message_for_failure
+
+    text = str(reason or "").strip()
+    if not text:
+        return "（无）"
+    lowered = text.lower()
+    if (
+        "retcode=" in lowered
+        or "retcode:" in lowered
+        or '{"status"' in text
+        or "'status'" in text
+        or "onebot" in lowered
+    ):
+        retcode_match = re.search(r"retcode[=:\s]+(-?\d+)", text, re.I)
+        retcode = int(retcode_match.group(1)) if retcode_match else None
+        classified = classify_action_failure(text, retcode)
+        if classified.kind != "UNKNOWN":
+            msg = user_message_for_failure(classified.kind)
+            first = msg.split("。")[0].strip()
+            return first or msg[:80]
+        return "接口调用异常"
+    if len(text) > 100:
+        return text[:97] + "..."
+    return text
+
+
+def _lookup_anomaly_line(item, parsed: dict, group_labels: dict[str, str] | None) -> str:
+    parsed = parsed or {}
+    parts: list[str] = []
+    hit_ids = item.exclusive_hit_group_ids or parsed.get("_undergrad_exclusive_group_ids") or []
+    if hit_ids or parsed.get("_undergrad_exclusive_hit"):
+        labels: list[str] = []
+        for gid in hit_ids:
+            gid_str = str(gid)
+            label = (group_labels or {}).get(gid_str) or gid_str
+            labels.append(label)
+        parts.append(f"多群互斥({','.join(labels) if labels else '命中'})")
+    if item.blacklist_hit or parsed.get("_blacklist_hit"):
+        parts.append("黑名单")
+    if any("overflow" in str(audit_type or "").lower() for audit_type in (item.audit_types or [])):
+        parts.append("overflow")
+    if parsed.get("_undergrad_overflow_hit") or parsed.get("_overflow_hit"):
+        parts.append("overflow")
+    return "；".join(parts)
+
+
+def _lookup_time_line(created_at: str, last_event_at: str) -> str:
+    start = _lookup_format_local_time(created_at)
+    if last_event_at and last_event_at != created_at:
+        end = _lookup_format_local_time(last_event_at)
+        if end != start:
+            return f"{start} → {end}"
+    return start
 
 
 def format_help(
@@ -619,109 +726,58 @@ def format_lookup_qq_result(
     if result.total == 0:
         text = "\n".join(
             [
-                "QQ 查询",
+                "QQ查询",
                 "",
                 "QQ：",
                 result.qq,
                 "",
-                "结果：",
-                "未找到历史申请记录",
+                "历史申请：",
+                "未找到",
             ]
         )
         return sanitize_lookup_output(text, settings)
 
     lines = [
-        "QQ 查询",
+        "QQ查询",
         "",
         "QQ：",
         result.qq,
         "",
-        "申请记录：",
-        f"共 {result.total} 条",
+        "历史申请：",
+        f"{result.total}条",
         "",
     ]
     if result.truncated:
-        lines.append(f"仅展示最近 {len(result.records)} 条，共发现 {result.total} 条。")
+        lines.append(f"（仅展示最近 {len(result.records)} 条，共 {result.total} 条）")
         lines.append("")
 
     for index, item in enumerate(result.records, start=1):
         parsed = item.parsed or {}
         profile = item.profile or parsed.get("_profile") or "undergraduate"
         profile_label = "研究生" if profile == "graduate" else "本科"
-        gid = str(item.group_id or "")
-        group_name = (group_labels or {}).get(gid) or gid
-        group_text = f"{group_name}（{gid}）" if group_name != gid else gid
-        strength = item.match_strength or "none"
-        source = infer_lookup_source(item.audit_types, admin_command=item.admin_command)
-        lines.extend(
-            [
-                f"[{index}]",
-                "",
-                "时间：",
-                _lookup_format_local_time(item.created_at),
-                "",
-            ]
-        )
-        if item.last_event_at and item.last_event_at != item.created_at:
-            lines.extend(
-                [
-                    "最后处理：",
-                    _lookup_format_local_time(item.last_event_at),
-                    "",
-                ]
-            )
-        lines.extend(
-            [
-                "群：",
-                group_text,
-                "",
-                "类型：",
-                profile_label,
-                "",
-                "姓名：",
-                str(parsed.get("name") or "（无）"),
-                "",
-                "学号：",
-                str(parsed.get("student_id") or "（无）"),
-                "",
-                "专业：",
-                str(parsed.get("major_text") or parsed.get("major") or "（无）"),
-                "",
-                "状态：",
-                lookup_display_status(item.status, item.decision),
-                "",
-                "判断：",
-                strength,
-                "",
-                "原因：",
-                str(item.reason or "（无）"),
-                "",
-                "来源：",
-                source,
-                "",
-                "记录来源：",
-                item.source,
-                "",
-            ]
-        )
-        exclusive_lines = undergrad_exclusive_display_lines(
-            parsed,
-            group_labels=group_labels,
-            hit_group_ids=item.exclusive_hit_group_ids or None,
-        )
-        if exclusive_lines:
-            lines.append("多群互斥：")
-            for line in exclusive_lines:
-                if line.startswith("命中本科群："):
-                    lines.append("命中群：")
-                    lines.append(line.replace("命中本科群：", "").strip())
-                elif line != "多群互斥：命中":
-                    lines.append(line)
+        group_text = _lookup_group_line(str(item.group_id or ""), group_labels)
+        status_text = _lookup_status_display(item.status, item.decision)
+        strength_text = strength_label(item.match_strength or "none")
+        raw_application = _lookup_raw_application_summary(item.application_comment, parsed)
+        parsed_line = _lookup_parsed_line(parsed)
+        reason_text = _lookup_simplify_reason(item.reason or "")
+        anomaly_text = _lookup_anomaly_line(item, parsed, group_labels)
+
+        lines.append(f"[{index}] {profile_label}｜{group_text}")
+        lines.append("")
+        lines.append("原始申请：")
+        lines.append(raw_application)
+        lines.append("")
+        lines.append(f"解析：{parsed_line}")
+        lines.append("")
+        lines.append(f"结果：{status_text}｜匹配:{strength_text}")
+        lines.append("")
+        lines.append(f"时间：{_lookup_time_line(item.created_at, item.last_event_at)}")
+        lines.append("")
+        lines.append(f"原因：{reason_text}")
+        if anomaly_text:
             lines.append("")
-        if item.blacklist_hit or parsed.get("_blacklist_hit"):
-            lines.append("黑名单：")
-            lines.append("命中")
-            lines.append("")
+            lines.append(f"异常：{anomaly_text}")
         lines.append("")
 
     while lines and lines[-1] == "":
