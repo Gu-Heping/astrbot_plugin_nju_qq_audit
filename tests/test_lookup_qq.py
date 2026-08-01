@@ -204,7 +204,7 @@ async def test_lookup_qq_matches_applicant_qq_field(stores):
     )
     result = await lookup_qq_records(requests, audit, "123456789")
     assert result.total == 1
-    assert result.records[0].request.id == "req-alt-field"
+    assert result.records[0].request_id == "req-alt-field"
 
 
 @pytest.mark.asyncio

@@ -646,7 +646,7 @@ class NjuQqAuditPlugin(Star):
                 self.ctx.audit,
                 message,
             )
-            group_ids = {item.request.group_id for item in result.records}
+            group_ids = {item.group_id for item in result.records}
             group_labels: dict[str, str] = {}
             display = getattr(self.ctx, "display", None)
             if display is not None:

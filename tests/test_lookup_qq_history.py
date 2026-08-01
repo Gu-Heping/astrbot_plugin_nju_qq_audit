@@ -1,0 +1,341 @@
+"""Tests for QQ lookup across pending store and audit history."""
+
+from __future__ import annotations
+
+import pytest
+
+from admin.formatter import format_lookup_qq_result
+from admin.lookup_qq import lookup_qq_records
+from data_source.students import PendingRequest
+from storage.audit_log import AuditLog
+from storage.requests_store import RequestsStore
+from tests.test_lookup_qq import _req, _settings
+
+
+async def _remove_from_store(requests: RequestsStore, req_id: str) -> None:
+    async with requests._lock:
+        store = requests._read_unlocked()
+        store["by_id"].pop(req_id, None)
+        requests._write(store)
+
+
+async def _append_decision(
+    audit: AuditLog,
+    req_id: str,
+    *,
+    user_id: str = "123456789",
+    group_id: str = "796836121",
+    decision: str = "manual_review",
+    reason: str = "弱匹配",
+    created_at: str = "2026-07-28T08:00:00+00:00",
+    match_strength: str = "weak",
+    comment: str = "张三 261220001",
+) -> None:
+    await audit.append(
+        {
+            "type": "decision_made",
+            "request_id": req_id,
+            "group_id": group_id,
+            "user_id": user_id,
+            "comment": comment,
+            "decision": decision,
+            "reason": reason,
+            "match_strength": match_strength,
+            "profile": "undergraduate",
+            "time": created_at,
+        }
+    )
+
+
+@pytest.fixture
+def stores(tmp_path):
+    settings = _settings()
+    requests = RequestsStore(tmp_path / "requests.json")
+    audit = AuditLog(tmp_path / "audit.jsonl", settings)
+    return settings, requests, audit
+
+
+@pytest.mark.asyncio
+async def test_lookup_qq_history_pending(stores):
+    _, requests, audit = stores
+    await requests.upsert(_req("req-pending"))
+    result = await lookup_qq_records(requests, audit, "123456789")
+    assert result.total == 1
+    assert result.records[0].source == "pending"
+    text = format_lookup_qq_result(result)
+    assert "pending" in text
+    assert "记录来源：" in text
+
+
+@pytest.mark.asyncio
+async def test_lookup_qq_history_approved_after_store_removal(stores):
+    _, requests, audit = stores
+    req_id = "req-approved"
+    await requests.upsert(
+        _req(
+            req_id,
+            status="processed",
+            decision="approve",
+            reason="强匹配，建议通过",
+        )
+    )
+    await _append_decision(
+        audit,
+        req_id,
+        decision="approve",
+        reason="强匹配，建议通过",
+        match_strength="strong",
+    )
+    await audit.append(
+        {
+            "type": "admin_command",
+            "command": "approve",
+            "affected_request_id": req_id,
+            "result": "ok",
+            "time": "2026-07-28T09:00:00+00:00",
+        }
+    )
+    await _remove_from_store(requests, req_id)
+
+    result = await lookup_qq_records(requests, audit, "123456789")
+    text = format_lookup_qq_result(result)
+    assert result.total == 1
+    assert result.records[0].source == "audit"
+    assert "approved" in text
+
+
+@pytest.mark.asyncio
+async def test_lookup_qq_history_rejected_after_store_removal(stores):
+    _, requests, audit = stores
+    req_id = "req-rejected"
+    await _append_decision(
+        audit,
+        req_id,
+        decision="reject",
+        reason="信息不完整",
+    )
+    await audit.append(
+        {
+            "type": "blacklist_rejected",
+            "request_id": req_id,
+            "group_id": "796836121",
+            "user_id": "123456789",
+            "reason": "信息不完整",
+            "final_status": "processed",
+            "time": "2026-07-28T09:00:00+00:00",
+        }
+    )
+
+    result = await lookup_qq_records(requests, audit, "123456789")
+    text = format_lookup_qq_result(result)
+    assert "rejected" in text
+    assert "信息不完整" in text
+    assert result.records[0].blacklist_hit is True
+
+
+@pytest.mark.asyncio
+async def test_lookup_qq_history_external_after_store_removal(stores):
+    _, requests, audit = stores
+    req_id = "req-external"
+    await _append_decision(audit, req_id)
+    await audit.append(
+        {
+            "type": "external_handled",
+            "request_id": req_id,
+            "group_id": "796836121",
+            "user_id": "123456789",
+            "message": "QQ 侧已处理",
+            "time": "2026-07-28T09:00:00+00:00",
+        }
+    )
+
+    result = await lookup_qq_records(requests, audit, "123456789")
+    text = format_lookup_qq_result(result)
+    assert "external" in text
+
+
+@pytest.mark.asyncio
+async def test_lookup_qq_history_stale_after_store_removal(stores):
+    _, requests, audit = stores
+    req_id = "req-stale"
+    await _append_decision(audit, req_id)
+    await audit.append(
+        {
+            "type": "request_stale",
+            "request_id": req_id,
+            "group_id": "796836121",
+            "user_id": "123456789",
+            "reason": "申请已过期",
+            "time": "2026-07-28T09:00:00+00:00",
+        }
+    )
+
+    result = await lookup_qq_records(requests, audit, "123456789")
+    text = format_lookup_qq_result(result)
+    assert "stale" in text
+    assert "申请已过期" in text
+
+
+@pytest.mark.asyncio
+async def test_lookup_qq_history_multiple_groups(stores):
+    _, requests, audit = stores
+    await _append_decision(
+        audit,
+        "req-a",
+        group_id="796836121",
+        created_at="2026-07-28T09:00:00+00:00",
+    )
+    await _append_decision(
+        audit,
+        "req-b",
+        group_id="2601",
+        created_at="2026-07-28T08:00:00+00:00",
+    )
+
+    result = await lookup_qq_records(requests, audit, "123456789")
+    assert result.total == 2
+    text = format_lookup_qq_result(result)
+    assert "796836121" in text
+    assert "2601" in text
+
+
+@pytest.mark.asyncio
+async def test_lookup_qq_history_audit_only_without_request(stores):
+    _, requests, audit = stores
+    req_id = "req-audit-only"
+    await _append_decision(
+        audit,
+        req_id,
+        reason="仅 audit 保留",
+        created_at="2026-07-28T10:00:00+00:00",
+    )
+
+    result = await lookup_qq_records(requests, audit, "123456789")
+    assert result.total == 1
+    assert result.records[0].request_id == req_id
+    assert result.records[0].source == "audit"
+    text = format_lookup_qq_result(result)
+    assert "仅 audit 保留" in text
+
+
+@pytest.mark.asyncio
+async def test_lookup_qq_history_qq_field_compatibility(stores):
+    _, requests, audit = stores
+
+    await requests.upsert(
+        _req("req-user-id", user_id="123456789", parsed={"name": "A"})
+    )
+    await audit.append(
+        {
+            "type": "decision_made",
+            "request_id": "req-event-user",
+            "target_group_id": "796836121",
+            "event": {"user_id": "123456789"},
+            "comment": "B 261220002",
+            "decision": "manual_review",
+            "reason": "弱匹配",
+            "time": "2026-07-28T07:00:00+00:00",
+        }
+    )
+    await audit.append(
+        {
+            "type": "decision_made",
+            "request_id": "req-sender-id",
+            "group_id": "796836121",
+            "sender_id": "123456789",
+            "comment": "D 261220004",
+            "decision": "manual_review",
+            "reason": "弱匹配",
+            "time": "2026-07-28T05:00:00+00:00",
+        }
+    )
+    await requests.upsert(
+        PendingRequest(
+            id="req-parsed-qq",
+            group_id="2601",
+            user_id="999999999",
+            comment="C 261220003",
+            flag="flag-parsed",
+            sub_type="add",
+            parsed={"qq": "123456789", "name": "C"},
+            match={"strength": "weak"},
+            decision="manual_review",
+            confidence=0.5,
+            reason="弱匹配",
+            mode="record-only",
+            status="pending",
+            created_at="2026-07-28T06:00:00+00:00",
+            match_strength="weak",
+        )
+    )
+
+    result = await lookup_qq_records(requests, audit, "123456789")
+    assert result.total == 4
+    ids = {item.request_id for item in result.records}
+    assert ids == {"req-user-id", "req-event-user", "req-sender-id", "req-parsed-qq"}
+
+
+@pytest.mark.asyncio
+async def test_lookup_qq_history_merges_pending_and_audit_by_request_id(stores):
+    _, requests, audit = stores
+    req_id = "req-merge"
+    await requests.upsert(_req(req_id, reason="store 原因"))
+    await _append_decision(audit, req_id, reason="audit 原因")
+    await audit.append(
+        {
+            "type": "admin_command",
+            "command": "approve",
+            "affected_request_id": req_id,
+            "result": "ok",
+            "time": "2026-07-28T09:00:00+00:00",
+        }
+    )
+
+    result = await lookup_qq_records(requests, audit, "123456789")
+    assert result.total == 1
+    assert result.records[0].request_id == req_id
+    assert result.records[0].source == "pending"
+    assert result.records[0].reason == "store 原因"
+
+
+@pytest.mark.asyncio
+async def test_lookup_qq_history_no_records(stores):
+    _, requests, audit = stores
+    result = await lookup_qq_records(requests, audit, "123456789")
+    text = format_lookup_qq_result(result)
+    assert "未找到历史申请记录" in text
+
+
+@pytest.mark.asyncio
+async def test_lookup_qq_history_output_safety(stores):
+    settings, requests, audit = stores
+    req_id = "req-safe"
+    await _append_decision(audit, req_id)
+    await audit.append(
+        {
+            "type": "pending_reparsed",
+            "request_id": req_id,
+            "user_id": "123456789",
+            "flag": "must-not-show",
+            "raw_event": {"token": "secret-token"},
+            "time": "2026-07-28T09:00:00+00:00",
+        }
+    )
+    await audit.append(
+        {
+            "type": "undergrad_exclusive_policy_hit",
+            "request_id": req_id,
+            "user_id": "123456789",
+            "hit_group_ids": ["2601"],
+            "time": "2026-07-28T09:01:00+00:00",
+        }
+    )
+
+    result = await lookup_qq_records(requests, audit, "123456789")
+    text = format_lookup_qq_result(result, settings=settings)
+    lowered = text.lower()
+    assert "must-not-show" not in text
+    assert "raw_event" not in lowered
+    assert "secret-token" not in text
+    assert "_internal" not in lowered
+    assert "多群互斥" in text

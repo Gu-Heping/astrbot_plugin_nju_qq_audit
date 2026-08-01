@@ -645,21 +645,20 @@ def format_lookup_qq_result(
         lines.append("")
 
     for index, item in enumerate(result.records, start=1):
-        req = item.request
-        parsed = req.parsed or {}
-        profile = getattr(req, "profile", None) or parsed.get("_profile") or "undergraduate"
+        parsed = item.parsed or {}
+        profile = item.profile or parsed.get("_profile") or "undergraduate"
         profile_label = "研究生" if profile == "graduate" else "本科"
-        gid = str(req.group_id or "")
+        gid = str(item.group_id or "")
         group_name = (group_labels or {}).get(gid) or gid
         group_text = f"{group_name}（{gid}）" if group_name != gid else gid
-        strength = req.match_strength or (req.match or {}).get("strength") or "none"
-        source = infer_lookup_source(req, item.audit_types)
+        strength = item.match_strength or "none"
+        source = infer_lookup_source(item.audit_types, admin_command=item.admin_command)
         lines.extend(
             [
                 f"[{index}]",
                 "",
                 "时间：",
-                _lookup_format_local_time(req.created_at),
+                _lookup_format_local_time(item.created_at),
                 "",
                 "群：",
                 group_text,
@@ -677,20 +676,27 @@ def format_lookup_qq_result(
                 str(parsed.get("major_text") or parsed.get("major") or "（无）"),
                 "",
                 "状态：",
-                lookup_display_status(req),
+                lookup_display_status(item.status, item.decision),
                 "",
                 "判断：",
                 strength,
                 "",
                 "原因：",
-                str(req.reason or "（无）"),
+                str(item.reason or "（无）"),
                 "",
                 "来源：",
                 source,
                 "",
+                "记录来源：",
+                item.source,
+                "",
             ]
         )
-        exclusive_lines = undergrad_exclusive_display_lines(parsed, group_labels=group_labels)
+        exclusive_lines = undergrad_exclusive_display_lines(
+            parsed,
+            group_labels=group_labels,
+            hit_group_ids=item.exclusive_hit_group_ids or None,
+        )
         if exclusive_lines:
             lines.append("多群互斥：")
             for line in exclusive_lines:
@@ -700,7 +706,7 @@ def format_lookup_qq_result(
                 elif line != "多群互斥：命中":
                     lines.append(line)
             lines.append("")
-        if parsed.get("_blacklist_hit"):
+        if item.blacklist_hit or parsed.get("_blacklist_hit"):
             lines.append("黑名单：")
             lines.append("命中")
             lines.append("")
