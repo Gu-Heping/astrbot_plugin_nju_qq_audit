@@ -72,8 +72,7 @@ def test_lookup_qq_format_shows_raw_application_and_parsed():
     result = LookupQqResult(qq="123456789", total=1, records=[record])
     text = format_lookup_qq_result(result, group_labels={"796836121": "测试群"})
 
-    assert "原始申请：" in text
-    assert "张三 261220001 计算机类" in text
+    assert "原始申请：张三 261220001 计算机类" in text
     assert "解析：张三/261220001/计算机类" in text
     assert "结果：待处理｜匹配:弱匹配" in text
     assert "[1] 本科｜测试群(796836121)" in text
@@ -99,7 +98,8 @@ def test_lookup_qq_format_fewer_lines_than_verbose_layout():
     text = format_lookup_qq_result(result)
 
     line_count = len(text.splitlines())
-    assert line_count <= 22
+    assert line_count <= 12
+    assert "\n\n\n" not in text
     assert "姓名：" not in text
     assert "学号：" not in text
     assert "记录来源：" not in text
@@ -175,3 +175,49 @@ def test_lookup_qq_format_simplifies_onebot_reason():
     assert "retcode" not in text.lower()
     assert "network error" not in text
     assert "原因：" in text
+
+
+def test_lookup_qq_format_avoids_duplicate_group_id_in_header():
+    record = LookupQqRecord(
+        request_id="req-1",
+        qq="1179350197",
+        group_id="826811581",
+        created_at="2026-07-28T08:00:00+00:00",
+        profile="undergraduate",
+        parsed={},
+        status="processed",
+        decision="approve",
+        reason="已通过",
+        match_strength="none",
+        source="audit",
+        application_comment="测试",
+    )
+    result = LookupQqResult(qq="1179350197", total=1, records=[record])
+    text = format_lookup_qq_result(
+        result,
+        group_labels={"826811581": "南哪2026级本科新生咨询①群（826811581）"},
+    )
+
+    assert "826811581）(826811581)" not in text
+    assert "[1] 本科｜南哪2026级本科新生咨询①群（826811581）" in text
+
+
+def test_lookup_qq_format_collapses_multiline_application():
+    record = LookupQqRecord(
+        request_id="req-1",
+        qq="1179350197",
+        group_id="826811581",
+        created_at="2026-07-28T08:00:00+00:00",
+        profile="undergraduate",
+        parsed={"major": "阈值自动拒绝测试"},
+        status="pending",
+        decision="manual_review",
+        reason="测试",
+        match_strength="none",
+        source="pending",
+        application_comment="问题：姓名 学号/录取号 专业\n答案：阈值自动拒绝测试",
+    )
+    result = LookupQqResult(qq="1179350197", total=1, records=[record])
+    text = format_lookup_qq_result(result)
+
+    assert "原始申请：问题：姓名 学号/录取号 专业 答案：阈值自动拒绝测试" in text

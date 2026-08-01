@@ -40,9 +40,15 @@ def _lookup_status_display(status: str, decision: str = "") -> str:
 def _lookup_group_line(group_id: str, group_labels: dict[str, str] | None) -> str:
     gid = str(group_id or "")
     name = (group_labels or {}).get(gid) or gid
-    if name and name != gid:
-        return f"{name}({gid})"
-    return gid
+    if not name or name == gid:
+        return gid
+    if gid and gid in name:
+        return name
+    return f"{name}({gid})"
+
+
+def _lookup_display_text(text: str) -> str:
+    return " ".join(line.strip() for line in str(text or "").splitlines() if line.strip())
 
 
 def _lookup_raw_application_summary(application_comment: str, parsed: dict) -> str:
@@ -728,11 +734,8 @@ def format_lookup_qq_result(
             [
                 "QQ查询",
                 "",
-                "QQ：",
-                result.qq,
-                "",
-                "历史申请：",
-                "未找到",
+                f"QQ：{result.qq}",
+                "历史申请：未找到",
             ]
         )
         return sanitize_lookup_output(text, settings)
@@ -740,16 +743,11 @@ def format_lookup_qq_result(
     lines = [
         "QQ查询",
         "",
-        "QQ：",
-        result.qq,
-        "",
-        "历史申请：",
-        f"{result.total}条",
-        "",
+        f"QQ：{result.qq}",
+        f"历史申请：{result.total}条",
     ]
     if result.truncated:
         lines.append(f"（仅展示最近 {len(result.records)} 条，共 {result.total} 条）")
-        lines.append("")
 
     for index, item in enumerate(result.records, start=1):
         parsed = item.parsed or {}
@@ -758,30 +756,24 @@ def format_lookup_qq_result(
         group_text = _lookup_group_line(str(item.group_id or ""), group_labels)
         status_text = _lookup_status_display(item.status, item.decision)
         strength_text = strength_label(item.match_strength or "none")
-        raw_application = _lookup_raw_application_summary(item.application_comment, parsed)
+        raw_application = _lookup_display_text(
+            _lookup_raw_application_summary(item.application_comment, parsed)
+        )
         parsed_line = _lookup_parsed_line(parsed)
         reason_text = _lookup_simplify_reason(item.reason or "")
         anomaly_text = _lookup_anomaly_line(item, parsed, group_labels)
 
+        if lines and lines[-1] != "":
+            lines.append("")
         lines.append(f"[{index}] {profile_label}｜{group_text}")
-        lines.append("")
-        lines.append("原始申请：")
-        lines.append(raw_application)
-        lines.append("")
+        lines.append(f"原始申请：{raw_application or '（无）'}")
         lines.append(f"解析：{parsed_line}")
-        lines.append("")
         lines.append(f"结果：{status_text}｜匹配:{strength_text}")
-        lines.append("")
         lines.append(f"时间：{_lookup_time_line(item.created_at, item.last_event_at)}")
-        lines.append("")
         lines.append(f"原因：{reason_text}")
         if anomaly_text:
-            lines.append("")
             lines.append(f"异常：{anomaly_text}")
-        lines.append("")
 
-    while lines and lines[-1] == "":
-        lines.pop()
     return sanitize_lookup_output("\n".join(lines), settings)
 
 
