@@ -57,6 +57,8 @@ from admin.lookup import (
     parse_lookup_args,
     run_lookup,
 )
+from admin.lookup_qq import lookup_qq_records, validate_lookup_qq
+from admin.formatter import format_lookup_qq_result
 from admin.release import (
     format_catchup_help,
     format_catchup_preview,
@@ -628,6 +630,40 @@ class NjuQqAuditPlugin(Star):
         else:
             # Framework may only pass split args when message_str unavailable
             payload = " ".join(p for p in (arg1, arg2, arg3) if p).strip()
+
+        qq_arg = ""
+        if arg1.lower() == "qq":
+            qq_arg = (arg2 or "").strip()
+        elif payload.lower().startswith("qq "):
+            qq_arg = payload[3:].strip().split()[0] if payload[3:].strip() else ""
+        if qq_arg or arg1.lower() == "qq" or payload.lower().startswith("qq"):
+            ok, message = validate_lookup_qq(qq_arg)
+            if not ok:
+                yield event.plain_result(message)
+                return
+            result = await lookup_qq_records(
+                self.ctx.requests,
+                self.ctx.audit,
+                message,
+            )
+            group_ids = {item.request.group_id for item in result.records}
+            group_labels: dict[str, str] = {}
+            display = getattr(self.ctx, "display", None)
+            if display is not None:
+                for gid in group_ids:
+                    try:
+                        group_labels[gid] = await display.get_group_label(gid)
+                    except Exception:
+                        group_labels[gid] = gid
+            yield event.plain_result(
+                format_lookup_qq_result(
+                    result,
+                    group_labels=group_labels,
+                    settings=self._settings(),
+                )
+            )
+            return
+
         if not payload:
             yield event.plain_result(format_lookup_help())
             return

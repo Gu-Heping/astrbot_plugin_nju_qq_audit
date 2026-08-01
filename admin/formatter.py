@@ -3,6 +3,25 @@ from __future__ import annotations
 from core.version import PLUGIN_VERSION
 from config import PluginSettings, mask_http_url
 from data_source.student_cache import SyncState
+from admin.lookup_qq import (
+    LookupQqResult,
+    infer_lookup_source,
+    lookup_display_status,
+    sanitize_lookup_output,
+)
+from admin.labels import undergrad_exclusive_display_lines
+
+
+def _lookup_format_local_time(iso_text: str | None) -> str:
+    if not iso_text:
+        return "(无)"
+    try:
+        from datetime import datetime
+
+        dt = datetime.fromisoformat(iso_text.replace("Z", "+00:00"))
+        return dt.astimezone().strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return iso_text
 
 
 def format_help(
@@ -242,6 +261,7 @@ def _format_help_debug() -> str:
             "/audit probe last           最近原始入群事件",
             "/audit debug                技术状态",
             "/audit lookup <姓名> <学号/通知书/考生号>  校对表查询",
+            "/audit lookup qq <QQ号>  查询 QQ 历史申请记录",
             "/audit sync status          定时同步状态",
             "/audit unknown [n]          近 7 天未识别汇总",
             "/audit blacklist list       查看黑名单",
@@ -293,6 +313,7 @@ def _format_help_advanced(
             "/audit list [n]             待处理列表",
             "/audit view <n>             查看详情",
             "/audit lookup <姓名> <学号/通知书/考生号> [专业]  校对表查询（诊断匹配）",
+            "/audit lookup qq <QQ号>  查询 QQ 历史申请记录",
             "/audit ok <n>               同意（无需 confirm）",
             "/audit no <n> [理由]        拒绝，可附理由",
             "/audit stale [n]            查看 QQ 侧已失效的申请",
@@ -587,6 +608,107 @@ def format_request_detail(item) -> str:
         f"status: {public['status']}",
     ]
     return "\n".join(lines)
+
+
+def format_lookup_qq_result(
+    result: LookupQqResult,
+    *,
+    group_labels: dict[str, str] | None = None,
+    settings: PluginSettings | None = None,
+) -> str:
+    if result.total == 0:
+        text = "\n".join(
+            [
+                "QQ 查询",
+                "",
+                "QQ：",
+                result.qq,
+                "",
+                "结果：",
+                "未找到历史申请记录",
+            ]
+        )
+        return sanitize_lookup_output(text, settings)
+
+    lines = [
+        "QQ 查询",
+        "",
+        "QQ：",
+        result.qq,
+        "",
+        "申请记录：",
+        f"共 {result.total} 条",
+        "",
+    ]
+    if result.truncated:
+        lines.append(f"仅展示最近 {len(result.records)} 条，共发现 {result.total} 条。")
+        lines.append("")
+
+    for index, item in enumerate(result.records, start=1):
+        req = item.request
+        parsed = req.parsed or {}
+        profile = getattr(req, "profile", None) or parsed.get("_profile") or "undergraduate"
+        profile_label = "研究生" if profile == "graduate" else "本科"
+        gid = str(req.group_id or "")
+        group_name = (group_labels or {}).get(gid) or gid
+        group_text = f"{group_name}（{gid}）" if group_name != gid else gid
+        strength = req.match_strength or (req.match or {}).get("strength") or "none"
+        source = infer_lookup_source(req, item.audit_types)
+        lines.extend(
+            [
+                f"[{index}]",
+                "",
+                "时间：",
+                _lookup_format_local_time(req.created_at),
+                "",
+                "群：",
+                group_text,
+                "",
+                "类型：",
+                profile_label,
+                "",
+                "姓名：",
+                str(parsed.get("name") or "（无）"),
+                "",
+                "学号：",
+                str(parsed.get("student_id") or "（无）"),
+                "",
+                "专业：",
+                str(parsed.get("major_text") or parsed.get("major") or "（无）"),
+                "",
+                "状态：",
+                lookup_display_status(req),
+                "",
+                "判断：",
+                strength,
+                "",
+                "原因：",
+                str(req.reason or "（无）"),
+                "",
+                "来源：",
+                source,
+                "",
+            ]
+        )
+        exclusive_lines = undergrad_exclusive_display_lines(parsed, group_labels=group_labels)
+        if exclusive_lines:
+            lines.append("多群互斥：")
+            for line in exclusive_lines:
+                if line.startswith("命中本科群："):
+                    lines.append("命中群：")
+                    lines.append(line.replace("命中本科群：", "").strip())
+                elif line != "多群互斥：命中":
+                    lines.append(line)
+            lines.append("")
+        if parsed.get("_blacklist_hit"):
+            lines.append("黑名单：")
+            lines.append("命中")
+            lines.append("")
+        lines.append("")
+
+    while lines and lines[-1] == "":
+        lines.pop()
+    return sanitize_lookup_output("\n".join(lines), settings)
 
 
 def format_stats(stats: dict[str, int]) -> str:

@@ -251,8 +251,9 @@ def format_lookup_result(result: LookupResult) -> str:
             "/audit lookup 张三 20260001",
             "/audit lookup 张三 26123456000001",
             "/audit lookup 张三 26123456000001 计算机科学与技术",
+            "/audit lookup qq <QQ号>  查询 QQ 历史申请记录",
             "",
-            "说明：支持姓名+学号 / 通知书编号 / 考生号；不修改任何申请。",
+            "说明：支持姓名+学号 / 通知书编号 / 考生号；lookup qq 查历史申请；不修改任何申请。",
         ]
     )
     return "\n".join(lines)
@@ -268,9 +269,11 @@ def format_lookup_help() -> str:
             "/audit lookup 张三 20260001",
             "/audit lookup 张三 26123456000001",
             "/audit lookup 张三 26123456000001 计算机科学与技术",
+            "/audit lookup qq <QQ号>  查询 QQ 历史申请记录",
             "",
             "说明：",
             "- 支持姓名+学号 / 通知书编号 / 考生号",
+            "- lookup qq 按 QQ 号查询本地历史申请（只读）",
             "- 用当前本地缓存比对，返回 strong/weak/none 与部分命中",
             "- 不调用 QQ，也不改 pending",
             "- 名单过旧请先 /audit sync",
