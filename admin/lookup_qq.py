@@ -240,6 +240,13 @@ def _latest_reason(events: list[dict[str, Any]]) -> str:
     return ""
 
 
+def _resolve_lookup_reason(req: PendingRequest, events: list[dict[str, Any]]) -> str:
+    audit_reason = _latest_reason(events)
+    if audit_reason:
+        return audit_reason
+    return str(req.reason or "")
+
+
 def _apply_terminal_from_audit(
     req: PendingRequest,
     events: list[dict[str, Any]],
@@ -255,7 +262,8 @@ def _apply_terminal_from_audit(
         if audit_type.endswith(REJECT_AUDIT_SUFFIX) or audit_type == "blacklist_rejected":
             status = "processed"
             decision = "reject"
-            reason = str(record.get("reason") or reason)
+            if record.get("reason"):
+                reason = str(record.get("reason"))
             processed_at = processed_at or _event_time(record)
             continue
 
@@ -271,7 +279,8 @@ def _apply_terminal_from_audit(
             status = terminal_status if terminal_status in {"processed", "external"} else "processed"
             if status == "processed":
                 decision = "approve"
-            reason = str(record.get("reason") or reason)
+            if record.get("reason"):
+                reason = str(record.get("reason"))
             admin_command = str(record.get("admin_command") or admin_command or "")
             processed_at = processed_at or _event_time(record)
             continue
@@ -279,13 +288,15 @@ def _apply_terminal_from_audit(
         if audit_type == "action_already_refused":
             status = "dismissed"
             decision = "reject"
-            reason = str(record.get("reason") or reason)
+            if record.get("reason"):
+                reason = str(record.get("reason"))
             processed_at = processed_at or _event_time(record)
             continue
 
         if audit_type in {"request_stale", "request_stale_member_present"}:
             status = "external" if audit_type == "request_stale_member_present" else "stale"
-            reason = str(record.get("reason") or reason)
+            if record.get("reason"):
+                reason = str(record.get("reason"))
             processed_at = processed_at or _event_time(record)
             continue
 
@@ -296,7 +307,9 @@ def _apply_terminal_from_audit(
             "external_rejected_inferred",
         }:
             status = "external"
-            reason = str(record.get("message") or record.get("reason") or reason)
+            terminal_reason = record.get("message") or record.get("reason")
+            if terminal_reason:
+                reason = str(terminal_reason)
             processed_at = processed_at or _event_time(record)
             continue
 
@@ -314,38 +327,17 @@ def _apply_terminal_from_audit(
             elif command == "dismiss":
                 status = "dismissed"
                 decision = "reject"
-                reason = str(record.get("reason") or reason)
+                if record.get("reason"):
+                    reason = str(record.get("reason"))
                 processed_at = processed_at or _event_time(record)
 
-    if not reason:
-        reason = _latest_reason(events)
-
-    return PendingRequest(
-        id=req.id,
-        group_id=req.group_id,
-        user_id=req.user_id,
-        comment=req.comment,
-        flag=req.flag,
-        sub_type=req.sub_type,
-        parsed=req.parsed,
-        match=req.match,
-        decision=decision,
-        confidence=req.confidence,
-        reason=reason,
-        mode=req.mode,
+    return replace(
+        req,
         status=status,
-        created_at=req.created_at,
-        processed_at=processed_at,
-        action_result=req.action_result,
-        last_action_result=req.last_action_result,
-        last_action_at=req.last_action_at,
-        retry_count=req.retry_count,
-        admin_override=req.admin_override,
-        admin_user_id=req.admin_user_id,
+        decision=decision,
+        reason=reason,
         admin_command=admin_command,
-        match_strength=req.match_strength,
-        matched_student_key=req.matched_student_key,
-        profile=req.profile,
+        processed_at=processed_at,
     )
 
 
@@ -382,7 +374,7 @@ def _base_request_from_audit(req_id: str, events: list[dict[str, Any]]) -> Pendi
         match={"strength": match_strength},
         decision=str(base.get("decision") or base.get("new_decision") or "manual_review"),
         confidence=float(base.get("confidence") or 0),
-        reason=str(base.get("reason") or base.get("new_reason") or ""),
+        reason=str(base.get("reason") or base.get("new_reason") or base.get("message") or ""),
         mode=str(base.get("mode") or "record-only"),
         status=str(base.get("status") or "pending"),
         created_at=created_at or utc_now_iso(),
@@ -400,31 +392,39 @@ def _to_lookup_record(
 ) -> LookupQqRecord:
     types = _audit_types(events)
     blacklist_hit, exclusive_ids = _infer_audit_display_hints(events, types)
-    enriched = req
-    if events and (not req.reason or req.status == "pending"):
-        enriched = _apply_terminal_from_audit(req, events)
-    if not enriched.reason and events:
-        enriched = replace(enriched, reason=_latest_reason(events))
-    parsed = dict(enriched.parsed or {})
+
+    if events:
+        terminal = _apply_terminal_from_audit(req, events)
+        status = str(terminal.status or "pending")
+        decision = str(terminal.decision or "")
+        admin_command = terminal.admin_command
+        reason = _resolve_lookup_reason(req, events)
+    else:
+        status = str(req.status or "pending")
+        decision = str(req.decision or "")
+        admin_command = req.admin_command
+        reason = str(req.reason or "")
+
+    parsed = dict(req.parsed or {})
     if blacklist_hit:
         parsed.setdefault("_blacklist_hit", True)
     if exclusive_ids and not parsed.get("_undergrad_exclusive_group_ids"):
         parsed["_undergrad_exclusive_hit"] = True
         parsed["_undergrad_exclusive_group_ids"] = exclusive_ids
     return LookupQqRecord(
-        request_id=enriched.id,
+        request_id=req.id,
         qq=qq,
-        group_id=str(enriched.group_id or ""),
-        created_at=str(enriched.created_at or ""),
-        profile=str(getattr(enriched, "profile", None) or parsed.get("_profile") or "undergraduate"),
+        group_id=str(req.group_id or ""),
+        created_at=str(req.created_at or ""),
+        profile=str(getattr(req, "profile", None) or parsed.get("_profile") or "undergraduate"),
         parsed=parsed,
-        status=str(enriched.status or "pending"),
-        decision=str(enriched.decision or ""),
-        reason=str(enriched.reason or ""),
-        match_strength=str(enriched.match_strength or (enriched.match or {}).get("strength") or "none"),
+        status=status,
+        decision=decision,
+        reason=reason,
+        match_strength=str(req.match_strength or (req.match or {}).get("strength") or "none"),
         source=source,
         audit_types=types,
-        admin_command=enriched.admin_command,
+        admin_command=admin_command,
         blacklist_hit=blacklist_hit or bool(parsed.get("_blacklist_hit")),
         exclusive_hit_group_ids=exclusive_ids or list(parsed.get("_undergrad_exclusive_group_ids") or []),
     )
@@ -460,7 +460,7 @@ def _collect_from_audit_log(
         if base is None:
             continue
         records[req_id] = _to_lookup_record(
-            _apply_terminal_from_audit(base, events),
+            base,
             events,
             source="audit",
             qq=qq,
