@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from typing import Any
 
 from config import redact_tokens_in_string
@@ -16,6 +17,12 @@ QQ_MAX_LEN = 12
 PARSED_QQ_KEYS = ("qq", "applicant_qq", "user_qq", "sender_id", "requester_id", "applicant_id")
 AUDIT_QQ_KEYS = ("user_id", "qq", "requester_id", "applicant_id", "sender_id")
 REJECT_AUDIT_SUFFIX = "_rejected"
+AUDIT_TIME_KEYS = ("time", "timestamp", "created_at", "event_time")
+AUDIT_PARSED_KEYS = ("name", "student_id", "major", "major_text", "profile", "_profile")
+AUDIT_PARSED_BLOCKED_KEYS = frozenset(
+    {"flag", "raw_event", "token", "cookie", "sanitized_raw", "event", "raw"}
+)
+_DATETIME_MIN_UTC = datetime.min.replace(tzinfo=timezone.utc)
 
 
 @dataclass
@@ -221,19 +228,35 @@ def _infer_audit_display_hints(events: list[dict[str, Any]], audit_types: list[s
     return blacklist_hit, exclusive_ids
 
 
-def _extract_audit_time(record: dict[str, Any]) -> str | None:
-    from datetime import datetime
+def _parse_audit_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
-    for key in ("time", "timestamp", "created_at", "event_time"):
+
+def _audit_record_datetime(record: dict[str, Any]) -> datetime | None:
+    for key in AUDIT_TIME_KEYS:
+        parsed = _parse_audit_datetime(record.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _extract_audit_time(record: dict[str, Any]) -> str | None:
+    for key in AUDIT_TIME_KEYS:
         value = record.get(key)
         if value is None:
             continue
         text = str(value).strip()
         if not text:
             continue
-        try:
-            datetime.fromisoformat(text.replace("Z", "+00:00"))
-        except ValueError:
+        if _parse_audit_datetime(text) is None:
             continue
         return text
     return None
@@ -241,6 +264,38 @@ def _extract_audit_time(record: dict[str, Any]) -> str | None:
 
 def _event_time(record: dict[str, Any]) -> str:
     return _extract_audit_time(record) or ""
+
+
+def _parsed_from_audit_record(record: dict[str, Any]) -> dict[str, Any]:
+    parsed: dict[str, Any] = {}
+    raw_parsed = record.get("parsed")
+    if isinstance(raw_parsed, dict):
+        for key, value in raw_parsed.items():
+            if key in AUDIT_PARSED_BLOCKED_KEYS or key.startswith("_internal"):
+                continue
+            if key in AUDIT_PARSED_KEYS and value is not None and str(value).strip():
+                parsed[key] = value
+    for key in ("name", "student_id", "major", "major_text"):
+        if key not in parsed:
+            value = record.get(key)
+            if value is not None and str(value).strip():
+                parsed[key] = value
+    if "_profile" not in parsed and "profile" not in parsed:
+        profile = record.get("profile")
+        if profile is not None and str(profile).strip():
+            parsed["_profile"] = str(profile)
+    elif "profile" in parsed and "_profile" not in parsed:
+        parsed["_profile"] = parsed["profile"]
+    return parsed
+
+
+def _merge_parsed_from_audit_events(events: list[dict[str, Any]]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for record in _sort_events(events):
+        for key, value in _parsed_from_audit_record(record).items():
+            if key not in merged and value is not None and str(value).strip():
+                merged[key] = value
+    return merged
 
 
 def _is_terminal_audit_record(record: dict[str, Any]) -> bool:
@@ -270,16 +325,19 @@ def _is_terminal_audit_record(record: dict[str, Any]) -> bool:
 
 
 def _latest_audit_time(events: list[dict[str, Any]], *, terminal_only: bool) -> str | None:
-    latest: str | None = None
+    latest_dt: datetime | None = None
+    latest_text: str | None = None
     for record in _sort_events(events):
         if terminal_only and not _is_terminal_audit_record(record):
             continue
+        record_dt = _audit_record_datetime(record)
         audit_time = _extract_audit_time(record)
-        if not audit_time:
+        if record_dt is None or not audit_time:
             continue
-        if latest is None or audit_time > latest:
-            latest = audit_time
-    return latest
+        if latest_dt is None or record_dt > latest_dt:
+            latest_dt = record_dt
+            latest_text = audit_time
+    return latest_text
 
 
 def _resolve_last_event_at(req: PendingRequest, events: list[dict[str, Any]]) -> str:
@@ -296,7 +354,7 @@ def _resolve_last_event_at(req: PendingRequest, events: list[dict[str, Any]]) ->
 
 
 def _sort_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(events, key=_event_time)
+    return sorted(events, key=lambda record: _audit_record_datetime(record) or _DATETIME_MIN_UTC)
 
 
 def _latest_reason(events: list[dict[str, Any]]) -> str:
@@ -430,6 +488,9 @@ def _base_request_from_audit(req_id: str, events: list[dict[str, Any]]) -> Pendi
 
     profile = str(base.get("profile") or "undergraduate")
     match_strength = str(base.get("match_strength") or base.get("new_match_strength") or "none")
+    parsed = _merge_parsed_from_audit_events(events)
+    if "_profile" in parsed:
+        profile = str(parsed.get("_profile") or parsed.get("profile") or profile)
     return PendingRequest(
         id=req_id,
         group_id=_audit_group_id(base),
@@ -437,7 +498,7 @@ def _base_request_from_audit(req_id: str, events: list[dict[str, Any]]) -> Pendi
         comment=str(base.get("comment") or ""),
         flag="",
         sub_type="add",
-        parsed={},
+        parsed=parsed,
         match={"strength": match_strength},
         decision=str(base.get("decision") or base.get("new_decision") or "manual_review"),
         confidence=float(base.get("confidence") or 0),
@@ -538,8 +599,12 @@ def _collect_from_audit_log(
     return records
 
 
-def _sort_key(record: LookupQqRecord) -> str:
-    return record.last_event_at or record.created_at or ""
+def _record_sort_datetime(value: str) -> datetime:
+    return _parse_audit_datetime(value) or _DATETIME_MIN_UTC
+
+
+def _sort_key(record: LookupQqRecord) -> datetime:
+    return _record_sort_datetime(record.last_event_at or record.created_at or "")
 
 
 async def lookup_qq_records(

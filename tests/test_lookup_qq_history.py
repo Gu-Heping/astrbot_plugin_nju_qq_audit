@@ -682,3 +682,114 @@ async def test_lookup_qq_invalid_audit_time_does_not_break_lookup(stores):
     result = await lookup_qq_records(requests, audit, "123456789")
     assert result.total == 1
     assert result.records[0].last_event_at.startswith("2026-07-18")
+
+
+def test_parse_audit_datetime_supports_z_and_offset():
+    from admin.lookup_qq import _parse_audit_datetime
+
+    z_time = _parse_audit_datetime("2026-07-28T10:00:00Z")
+    offset_time = _parse_audit_datetime("2026-07-28T10:00:00+00:00")
+    assert z_time == offset_time
+
+
+def test_latest_audit_time_sorts_z_before_earlier_offset():
+    from admin.lookup_qq import _latest_audit_time
+
+    events = [
+        {
+            "type": "admin_command",
+            "command": "approve",
+            "affected_request_id": "req-a",
+            "time": "2026-07-28T09:00:00+00:00",
+        },
+        {
+            "type": "admin_command",
+            "command": "reject",
+            "affected_request_id": "req-a",
+            "time": "2026-07-28T10:00:00Z",
+        },
+    ]
+    assert _latest_audit_time(events, terminal_only=True) == "2026-07-28T10:00:00Z"
+
+
+def test_latest_audit_time_sorts_timezone_equivalent_correctly():
+    from admin.lookup_qq import _latest_audit_time, _parse_audit_datetime
+
+    events = [
+        {
+            "type": "admin_command",
+            "command": "approve",
+            "affected_request_id": "req-a",
+            "time": "2026-07-28T09:00:00+00:00",
+        },
+        {
+            "type": "admin_command",
+            "command": "reject",
+            "affected_request_id": "req-a",
+            "time": "2026-07-28T18:00:00+08:00",
+        },
+    ]
+    latest = _latest_audit_time(events, terminal_only=True)
+    assert latest == "2026-07-28T18:00:00+08:00"
+    assert _parse_audit_datetime(latest) == _parse_audit_datetime("2026-07-28T10:00:00+00:00")
+
+
+@pytest.mark.asyncio
+async def test_lookup_qq_audit_only_restores_parsed_fields(stores):
+    _, requests, audit = stores
+    req_id = "req-audit-parsed"
+    await audit.append(
+        {
+            "type": "decision_made",
+            "request_id": req_id,
+            "group_id": "796836121",
+            "user_id": "123456789",
+            "parsed": {
+                "name": "张三",
+                "student_id": "261220001",
+                "major": "计算机类",
+            },
+            "decision": "manual_review",
+            "reason": "弱匹配",
+            "time": "2026-07-28T08:00:00+00:00",
+        }
+    )
+
+    result = await lookup_qq_records(requests, audit, "123456789")
+    text = format_lookup_qq_result(result)
+    assert "张三" in text
+    assert "261220001" in text
+    assert "计算机类" in text
+
+
+@pytest.mark.asyncio
+async def test_lookup_qq_audit_only_parsed_recovery_is_safe(stores):
+    settings, requests, audit = stores
+    req_id = "req-audit-parsed-safe"
+    await audit.append(
+        {
+            "type": "decision_made",
+            "request_id": req_id,
+            "group_id": "796836121",
+            "user_id": "123456789",
+            "parsed": {
+                "name": "李四",
+                "student_id": "261220002",
+                "major": "软件工程",
+                "flag": "must-not-show",
+                "raw_event": {"token": "secret-token"},
+            },
+            "flag": "outer-flag",
+            "decision": "manual_review",
+            "time": "2026-07-28T08:00:00+00:00",
+        }
+    )
+
+    result = await lookup_qq_records(requests, audit, "123456789")
+    text = format_lookup_qq_result(result, settings=settings)
+    lowered = text.lower()
+    assert "李四" in text
+    assert "must-not-show" not in text
+    assert "outer-flag" not in text
+    assert "raw_event" not in lowered
+    assert "secret-token" not in text
