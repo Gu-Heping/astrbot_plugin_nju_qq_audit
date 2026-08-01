@@ -47,8 +47,9 @@ def _lookup_group_line(group_id: str, group_labels: dict[str, str] | None) -> st
     return f"{name}({gid})"
 
 
-def _lookup_display_text(text: str) -> str:
-    return " ".join(line.strip() for line in str(text or "").splitlines() if line.strip())
+def _lookup_application_lines(text: str) -> list[str]:
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    return lines or ["（无）"]
 
 
 def _lookup_raw_application_summary(application_comment: str, parsed: dict) -> str:
@@ -756,9 +757,8 @@ def format_lookup_qq_result(
         group_text = _lookup_group_line(str(item.group_id or ""), group_labels)
         status_text = _lookup_status_display(item.status, item.decision)
         strength_text = strength_label(item.match_strength or "none")
-        raw_application = _lookup_display_text(
-            _lookup_raw_application_summary(item.application_comment, parsed)
-        )
+        raw_application = _lookup_raw_application_summary(item.application_comment, parsed)
+        application_lines = _lookup_application_lines(raw_application)
         parsed_line = _lookup_parsed_line(parsed)
         reason_text = _lookup_simplify_reason(item.reason or "")
         anomaly_text = _lookup_anomaly_line(item, parsed, group_labels)
@@ -766,7 +766,11 @@ def format_lookup_qq_result(
         if lines and lines[-1] != "":
             lines.append("")
         lines.append(f"[{index}] {profile_label}｜{group_text}")
-        lines.append(f"原始申请：{raw_application or '（无）'}")
+        if len(application_lines) == 1:
+            lines.append(f"原始申请：{application_lines[0]}")
+        else:
+            lines.append("原始申请：")
+            lines.extend(application_lines)
         lines.append(f"解析：{parsed_line}")
         lines.append(f"结果：{status_text}｜匹配:{strength_text}")
         lines.append(f"时间：{_lookup_time_line(item.created_at, item.last_event_at)}")

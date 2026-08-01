@@ -202,7 +202,7 @@ def test_lookup_qq_format_avoids_duplicate_group_id_in_header():
     assert "[1] 本科｜南哪2026级本科新生咨询①群（826811581）" in text
 
 
-def test_lookup_qq_format_collapses_multiline_application():
+def test_lookup_qq_format_preserves_multiline_application():
     record = LookupQqRecord(
         request_id="req-1",
         qq="1179350197",
@@ -220,4 +220,5 @@ def test_lookup_qq_format_collapses_multiline_application():
     result = LookupQqResult(qq="1179350197", total=1, records=[record])
     text = format_lookup_qq_result(result)
 
-    assert "原始申请：问题：姓名 学号/录取号 专业 答案：阈值自动拒绝测试" in text
+    assert "原始申请：\n问题：姓名 学号/录取号 专业\n答案：阈值自动拒绝测试" in text
+    assert "原始申请：问题：" not in text
