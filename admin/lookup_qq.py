@@ -43,6 +43,7 @@ class LookupQqRecord:
     admin_command: str | None = None
     blacklist_hit: bool = False
     exclusive_hit_group_ids: list[str] = field(default_factory=list)
+    application_comment: str = ""
 
 
 @dataclass
@@ -558,6 +559,7 @@ def _to_lookup_record(
         admin_command=admin_command,
         blacklist_hit=blacklist_hit or bool(parsed.get("_blacklist_hit")),
         exclusive_hit_group_ids=exclusive_ids or list(parsed.get("_undergrad_exclusive_group_ids") or []),
+        application_comment=str(getattr(req, "comment", "") or "").strip(),
     )
 
 

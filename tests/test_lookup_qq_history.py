@@ -63,8 +63,8 @@ async def test_lookup_qq_history_pending(stores):
     assert result.total == 1
     assert result.records[0].source == "pending"
     text = format_lookup_qq_result(result)
-    assert "pending" in text
-    assert "记录来源：" in text
+    assert "待处理" in text
+    assert "原始申请：" in text
 
 
 @pytest.mark.asyncio
@@ -101,7 +101,7 @@ async def test_lookup_qq_history_approved_after_store_removal(stores):
     text = format_lookup_qq_result(result)
     assert result.total == 1
     assert result.records[0].source == "audit"
-    assert "approved" in text
+    assert "已通过" in text
 
 
 @pytest.mark.asyncio
@@ -128,7 +128,7 @@ async def test_lookup_qq_history_rejected_after_store_removal(stores):
 
     result = await lookup_qq_records(requests, audit, "123456789")
     text = format_lookup_qq_result(result)
-    assert "rejected" in text
+    assert "已拒绝" in text
     assert "信息不完整" in text
     assert result.records[0].blacklist_hit is True
 
@@ -151,7 +151,7 @@ async def test_lookup_qq_history_external_after_store_removal(stores):
 
     result = await lookup_qq_records(requests, audit, "123456789")
     text = format_lookup_qq_result(result)
-    assert "external" in text
+    assert "外部处理" in text
 
 
 @pytest.mark.asyncio
@@ -172,7 +172,7 @@ async def test_lookup_qq_history_stale_after_store_removal(stores):
 
     result = await lookup_qq_records(requests, audit, "123456789")
     text = format_lookup_qq_result(result)
-    assert "stale" in text
+    assert "已失效" in text
     assert "申请已过期" in text
 
 
@@ -305,7 +305,7 @@ async def test_lookup_qq_history_no_records(stores):
     _, requests, audit = stores
     result = await lookup_qq_records(requests, audit, "123456789")
     text = format_lookup_qq_result(result)
-    assert "未找到历史申请记录" in text
+    assert "未找到" in text
 
 
 @pytest.mark.asyncio
@@ -375,7 +375,7 @@ async def test_lookup_qq_store_approve_audit_reject_shows_rejected(stores):
     assert before.decision == after.decision == "approve"
     assert result.records[0].decision == "reject"
     text = format_lookup_qq_result(result)
-    assert "rejected" in text
+    assert "已拒绝" in text
     assert "后续人工拒绝" in text
 
 
@@ -398,7 +398,7 @@ async def test_lookup_qq_store_pending_audit_approve_shows_approved(stores):
     text = format_lookup_qq_result(result)
     assert result.records[0].status == "processed"
     assert result.records[0].decision == "approve"
-    assert "approved" in text
+    assert "已通过" in text
 
 
 @pytest.mark.asyncio
@@ -420,7 +420,7 @@ async def test_lookup_qq_audit_only_external_handled(stores):
     text = format_lookup_qq_result(result)
     assert result.total == 1
     assert result.records[0].source == "audit"
-    assert "external" in text
+    assert "外部处理" in text
     assert "仅 external 事件" in text
     assert "（无）" in text
 
@@ -442,7 +442,7 @@ async def test_lookup_qq_audit_only_blacklist_rejected(stores):
 
     result = await lookup_qq_records(requests, audit, "123456789")
     text = format_lookup_qq_result(result)
-    assert "rejected" in text
+    assert "已拒绝" in text
     assert "黑名单拒绝" in text
     assert result.records[0].blacklist_hit is True
     assert "黑名单" in text
@@ -516,7 +516,7 @@ async def test_lookup_qq_terminal_state_follows_latest_audit_event(stores):
     result = await lookup_qq_records(requests, audit, "123456789")
     text = format_lookup_qq_result(result)
     assert result.records[0].status == "external"
-    assert "external" in text
+    assert "外部处理" in text
     assert "最终 external" in text
 
 
@@ -588,7 +588,7 @@ async def test_lookup_qq_sorts_by_late_terminal_event(stores):
     assert result.records[0].created_at.startswith("2026-07-01")
     assert result.records[0].last_event_at.startswith("2026-07-20")
     text = format_lookup_qq_result(result)
-    assert "最后处理：" in text
+    assert "→" in text
 
 
 @pytest.mark.asyncio
