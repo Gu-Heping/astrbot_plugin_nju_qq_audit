@@ -326,12 +326,40 @@ def test_match_major_code():
     assert match.strength == "strong"
 
 
-def test_match_conflicting_major_code_and_name_not_strong():
+def test_match_conflicting_major_code_and_name_releasable_but_not_auto():
     students = [_grad_student()]
     parsed = parse_graduate_comment("刘尚明 010101 中国哲学 硕")
     match = match_graduate(parsed, students)
-    assert match.strength != "strong"
-    assert "不匹配" in match.reason or match.strength in {"none", "weak"}
+    assert match.strength == "strong"
+    assert match.matched_student is not None
+    assert match.matched_student.major_name == "马克思主义哲学"
+    assert "专业/代码未匹配" in match.reason
+    from graduate.decision import apply_graduate_auto_approve_flag
+
+    decision = make_graduate_decision(parsed, match, is_target_group=True)
+    decision = apply_graduate_auto_approve_flag(decision, "auto", match)
+    assert decision.decision == "approve"
+    assert decision.should_auto_approve is False
+
+
+def test_match_long_numeric_major_text_releasable_but_not_auto():
+    students = [_grad_student(name="张测试", major_name="电子信息", major_code="085400")]
+    parsed = parse_graduate_comment("问题：姓名 专业 硕or博\n答案：张测试 999999999999 硕")
+    assert parsed.name == "张测试"
+    assert parsed.admission_type == "硕士"
+    assert parsed.major_text == "999999999999"
+    match = match_graduate(parsed, students)
+    assert match.strength == "strong"
+    assert match.matched_student is not None
+    assert match.matched_student.major_name == "电子信息"
+    assert match.matched_by == ["name", "admission_type"]
+    assert "专业/代码未匹配" in match.reason
+    from graduate.decision import apply_graduate_auto_approve_flag
+
+    decision = make_graduate_decision(parsed, match, is_target_group=True)
+    decision = apply_graduate_auto_approve_flag(decision, "auto", match)
+    assert decision.decision == "approve"
+    assert decision.should_auto_approve is False
 
 
 def test_match_shuo_bo_placeholder_not_strong():
@@ -346,8 +374,8 @@ def test_match_conflicting_major_codes_not_strong():
     students = [_grad_student()]
     parsed = parse_graduate_comment("刘尚明 010101 010102 硕")
     match = match_graduate(parsed, students)
-    assert match.strength != "strong"
-    assert "冲突" in match.reason
+    assert match.strength == "strong"
+    assert "专业/代码未匹配" in match.reason
 
 
 def test_match_phd_normalization():

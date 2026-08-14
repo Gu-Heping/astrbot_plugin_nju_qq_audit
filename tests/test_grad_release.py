@@ -153,9 +153,9 @@ def test_missing_major_from_applicant_but_table_major_ok():
     )
 
 
-def test_missing_table_major_not_releasable():
+def test_missing_table_major_still_releasable_by_name_type_unique():
     settings = _settings()
-    assert not is_grad_releasable(
+    assert is_grad_releasable(
         _grad_strong(
             parsed={"name": "张三", "admission_type": "博士"},
             match={"strength": "strong", "candidate_count": 1},

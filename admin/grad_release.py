@@ -65,14 +65,6 @@ def is_grad_releasable(
         return False
     if parsed.get("admission_type") not in {"硕士", "博士"}:
         return False
-    major_ok = bool(
-        parsed.get("major_text")
-        or parsed.get("major_code_candidates")
-        or match.get("major_name")
-    )
-    if not major_ok:
-        return False
-
     errors = parsed.get("parse_errors") or []
     if "ai_parse_merged" in errors and not settings.ai_parse_allow_auto_approve:
         return False

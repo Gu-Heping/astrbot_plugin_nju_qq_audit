@@ -92,21 +92,15 @@ def match_graduate(
                 candidate_count=len(pool),
             )
 
-    # Major / code filter
+    # Major / code evidence. It can enable auto-approve when it matches, but
+    # graduate release is intentionally based on unique name + admission type.
     unique_codes = list(dict.fromkeys(str(c).strip() for c in codes if str(c).strip()))
-    if len(unique_codes) > 1:
-        return GraduateMatchResult(
-            strength="none",
-            confidence=0.3,
-            reason="多个专业代码互相冲突，需人工复核",
-            candidate_count=len(pool),
-        )
-
-    major_hits: list[GraduateStudent] = []
-    if unique_codes:
+    major_code_hits: list[GraduateStudent] = []
+    if len(unique_codes) == 1:
         for s in pool:
             if any(major_code_match(c, s) for c in unique_codes):
-                major_hits.append(s)
+                major_code_hits.append(s)
+    major_hits: list[GraduateStudent] = list(major_code_hits)
     if major and not major_hits:
         major_hits = [s for s in pool if majors_fuzzy_match(major, s.major_name)]
     elif major and major_hits:
@@ -115,27 +109,7 @@ def match_graduate(
         both = [s for s in major_hits if majors_fuzzy_match(major, s.major_name)]
         major_hits = both
 
-    if unique_codes or major:
-        if not major_hits:
-            if name and adm:
-                return GraduateMatchResult(
-                    strength="none",
-                    confidence=0.35,
-                    reason="姓名+录取类型命中但专业/代码不匹配",
-                    candidate_count=len(pool),
-                )
-            if name:
-                return GraduateMatchResult(
-                    strength="none",
-                    confidence=0.3,
-                    reason="姓名命中但专业/代码不匹配",
-                    candidate_count=len(pool),
-                )
-            return GraduateMatchResult(
-                strength="none",
-                confidence=0.2,
-                reason="专业/代码有线索但无有效命中",
-            )
+    if (unique_codes or major) and major_hits:
         pool = major_hits
 
     # Decision ladder
@@ -154,33 +128,40 @@ def match_graduate(
             candidate_count=len(pool),
         )
 
-    # Strong: name + admission_type + major/code, unique
-    if adm and (major or unique_codes) and len(pool) == 1:
+    # Strong: name + admission_type, unique. Major/code only controls whether
+    # this can auto-approve; mismatch still enters release with admin notice.
+    if adm and len(pool) == 1:
         s = pool[0]
         matched_by = ["name", "admission_type"]
-        if unique_codes and any(major_code_match(c, s) for c in unique_codes):
-            matched_by.append("major_code")
-        if major and majors_fuzzy_match(major, s.major_name):
-            matched_by.append("major_name")
+        code_matches = len(unique_codes) == 1 and any(
+            major_code_match(c, s) for c in unique_codes
+        )
+        major_matches = bool(major and majors_fuzzy_match(major, s.major_name))
+        code_conflict = len(unique_codes) > 1
+        mixed_conflict = bool(unique_codes and major and not (code_matches and major_matches))
+        if not code_conflict and not mixed_conflict:
+            if code_matches:
+                matched_by.append("major_code")
+            if major_matches:
+                matched_by.append("major_name")
+        has_major_input = bool(unique_codes or major)
+        has_major_evidence = "major_code" in matched_by or "major_name" in matched_by
+        if has_major_evidence:
+            confidence = 0.95
+            reason = "姓名+录取类型+专业强匹配（唯一）"
+        elif has_major_input:
+            confidence = 0.75
+            reason = "姓名+录取类型强匹配（唯一，专业/代码未匹配，以名单为准，需管理员确认）"
+        else:
+            confidence = 0.8
+            reason = "姓名+录取类型强匹配（唯一，专业以名单为准，需管理员确认）"
         return GraduateMatchResult(
             strength="strong",
-            confidence=0.95,
-            reason="姓名+录取类型+专业强匹配（唯一）",
+            confidence=confidence,
+            reason=reason,
             matched_student_key=s.key,
             matched_student=s,
             matched_by=matched_by,
-            candidate_count=1,
-        )
-
-    if adm and not (major or unique_codes) and len(pool) == 1:
-        s = pool[0]
-        return GraduateMatchResult(
-            strength="strong",
-            confidence=0.8,
-            reason="姓名+录取类型强匹配（唯一，专业以名单为准，需管理员确认）",
-            matched_student_key=s.key,
-            matched_student=s,
-            matched_by=["name", "admission_type"],
             candidate_count=1,
         )
 
