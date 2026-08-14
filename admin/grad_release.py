@@ -194,11 +194,12 @@ def format_grad_release_help(count: int, settings: PluginSettings) -> str:
             "筛选条件（须同时满足）：",
             "- 研究生申请",
             "- 系统强匹配",
-            "- 姓名 + 专业/代码 + 硕或博 唯一匹配",
+            "- 姓名 + 硕或博 唯一命中名单；若填写专业/代码则不得冲突",
             "- 仍在 QQ 待处理队列中",
             "",
             "说明：",
             "- 不改变当前运行模式（不是长期自动审核）",
+            "- 仅姓名+硕/博命中的申请会通知管理员，通知里展示名单专业，可先 /audit ok/no 处理",
             "- 不处理本科；本科请用 /audit release / catchup",
             "- 别名：/audit grad-release …、/audit grad-catchup …",
         ]
@@ -222,12 +223,13 @@ def format_grad_catchup_help(settings: PluginSettings) -> str:
             "筛选条件（须同时满足）：",
             "- 研究生申请",
             "- 系统强匹配",
-            "- 姓名 + 专业/代码 + 硕或博 唯一匹配",
+            "- 姓名 + 硕或博 唯一命中名单；若填写专业/代码则不得冲突",
             "- 仍在 QQ 待处理队列中",
             "",
             "说明：",
             "- 同步失败时不会重算或放行",
             "- 不改变当前运行模式",
+            "- 仅姓名+硕/博命中的申请会通知管理员，通知里展示名单专业，可先 /audit ok/no 处理",
             "- 不处理本科；本科请用 /audit catchup",
         ]
     )
@@ -244,7 +246,7 @@ def format_grad_release_preview(preview: ReleasePreview, settings: PluginSetting
     lines.extend(
         [
             f"研究生强匹配批量放行（预览）：{preview.total_releasable} 条",
-            "筛选条件：研究生申请 · 系统强匹配 · 姓名+专业/代码+硕或博唯一匹配 · 仍在待处理队列中",
+            "筛选条件：研究生申请 · 系统强匹配 · 姓名+硕或博唯一命中 · 仍在待处理队列中",
             f"间隔：{settings.batch_approve_interval_ms / 1000:g} 秒",
             "",
         ]
@@ -283,7 +285,7 @@ def format_grad_release_result(result: ReleaseResult, settings: PluginSettings) 
         [
             prefix,
             f"间隔：{settings.batch_approve_interval_ms / 1000:g} 秒",
-            "筛选条件：研究生申请 · 系统强匹配 · 姓名+专业/代码+硕或博唯一匹配 · 仍在待处理队列中",
+            "筛选条件：研究生申请 · 系统强匹配 · 姓名+硕或博唯一命中 · 仍在待处理队列中",
             "",
         ]
     )

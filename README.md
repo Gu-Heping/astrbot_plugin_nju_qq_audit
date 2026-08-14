@@ -1,6 +1,6 @@
 # astrbot_plugin_nju_qq_audit
 
-南京大学 26 级新生 QQ 群入群审核 **AstrBot 插件**（非独立 Node 服务）。当前版本 **v0.4.8**。
+南京大学 26 级新生 QQ 群入群审核 **AstrBot 插件**（非独立 Node 服务）。当前版本 **v0.4.23**。
 
 支持 **本科** 与 **研究生** 两套独立审核通道（群号 / NJUTable / 缓存分离；共用事件接入与管理员命令）。
 
@@ -169,7 +169,8 @@
 
 - 配置：`grad_enabled`、`grad_target_group_ids`、独立 `grad_njutable_*`（勿与本科 token/表/群重叠）
 - 缓存：`grad_students.cache.json`、`grad_sync_state.json`
-- 强匹配：姓名 + 硕士/博士 + 专业名称（模糊）或专业代码，且唯一
+- 强匹配：姓名 + 硕士/博士 唯一命中名单即可；若填写专业名称（模糊）或专业代码，则必须与名单不冲突
+- 仅姓名+硕/博命中的申请会进入 release 队列但不自动通过，并继续通知管理员；通知展示名单专业，管理员可先 `/audit ok/no <n>` 处理
 - **不读取**「证件号码末三位」；不自动 reject
 - 命令：`/audit sync-grad`、`/audit list grad`
 
@@ -321,6 +322,12 @@ pytest tests/
 ## 升级注意
 
 - 升级后请 **完整重启 AstrBot**，勿仅热重载插件
+- **v0.4.23**：新增本科多群策略模式与 overflow 引导；release/catchup 增加 overflow preflight
+- **v0.4.22**：新增本科多群互斥检查，防止同一 QQ 加入多个本科目标群
+- **v0.4.21**：新增 QQ 黑名单与 `/audit reparse`；友好处理 QQ 侧 already agree/refuse 终态错误
+- **v0.4.20**：新增研究生 release/catchup 分批放行
+- **v0.4.19**：本科支持考生号识别、匹配、同步确认与 lookup
+- **v0.4.15-v0.4.17**：新增并完善可选 AI JSON parser fallback，默认关闭且默认不允许 AI 触发自动通过
 - **v0.4.8**：external 通知解析优先提取「答案」段，避免把问题模板当申请人
 - **v0.4.4**：管理员 list/view/回执/help 人话化；sweep/release/catchup 去英文黑话
 - **v0.4.3**：通知 QQ 行展示真实昵称（非申请姓名）；群名支持 get_group_info 回退

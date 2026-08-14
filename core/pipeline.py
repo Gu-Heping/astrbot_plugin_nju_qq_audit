@@ -137,6 +137,19 @@ def _is_blacklist_decision(decision, pending: PendingRequest | None = None) -> b
     return False
 
 
+def _graduate_release_needs_admin_notice(pending: PendingRequest, decision, match) -> bool:
+    if getattr(pending, "profile", None) != "graduate":
+        return False
+    if getattr(decision, "decision", None) != "approve":
+        return False
+    if getattr(match, "strength", None) != "strong":
+        return False
+    matched_by = set(getattr(match, "matched_by", None) or [])
+    return "admission_type" in matched_by and not matched_by.intersection(
+        {"major_code", "major_name"}
+    )
+
+
 def _parsed_to_dict(parsed, *, comment: str | None = None, profile: str | None = None) -> dict:
     if isinstance(parsed, GraduateParsedApplication):
         data = parsed.to_dict()
@@ -1844,11 +1857,18 @@ class AuditPipeline:
             )
             return
 
-        if mode in {"manual", "record-only"} or decision.decision == "manual_review":
+        grad_release_notice = _graduate_release_needs_admin_notice(
+            pending, decision, match
+        )
+        if (
+            mode in {"manual", "record-only"}
+            or decision.decision == "manual_review"
+            or grad_release_notice
+        ):
             if (
                 not notify_update
                 and self.settings.admin_notify
-                and decision.decision == "manual_review"
+                and (decision.decision == "manual_review" or grad_release_notice)
             ):
                 try:
                     notify_parsed = strip_internal_parsed_keys(pending.parsed or {})
@@ -1856,6 +1876,10 @@ class AuditPipeline:
                     match_dict = pending.match or {}
                     if match_dict.get("college") and not notify_parsed.get("college"):
                         notify_parsed["college"] = match_dict.get("college")
+                    if match_dict.get("major_name") and not notify_parsed.get(
+                        "matched_major_name"
+                    ):
+                        notify_parsed["matched_major_name"] = match_dict.get("major_name")
                     await self.notifier.notify_manual_review(
                         request_id=req_id,
                         group_id=event.group_id,

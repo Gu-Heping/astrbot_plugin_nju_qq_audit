@@ -37,7 +37,6 @@ def make_graduate_decision(
         and match.matched_student is not None
         and bool(parsed.name)
         and parsed.admission_type in {"硕士", "博士"}
-        and bool(parsed.major_text or parsed.major_code_candidates)
     )
     if can_approve:
         result = DecisionResult(
@@ -63,10 +62,13 @@ def make_graduate_decision(
 def apply_graduate_auto_approve_flag(
     result: DecisionResult, mode: str, match: GraduateMatchResult
 ) -> DecisionResult:
+    matched_by = set(match.matched_by or [])
+    has_major_evidence = bool(matched_by.intersection({"major_code", "major_name"}))
     result.should_auto_approve = (
         result.decision == "approve"
         and mode == "auto"
         and match.strength == "strong"
         and match.candidate_count == 1
+        and has_major_evidence
     )
     return result

@@ -280,12 +280,19 @@ def test_match_name_major_without_type_manual():
     assert decision.decision == "manual_review"
 
 
-def test_match_name_type_without_major_manual():
+def test_match_name_type_without_major_releasable_but_not_auto():
     students = [_grad_student()]
     parsed = parse_graduate_comment("刘尚明 硕")
     match = match_graduate(parsed, students)
-    assert match.strength == "weak"
-    assert make_graduate_decision(parsed, match, is_target_group=True).decision == "manual_review"
+    assert match.strength == "strong"
+    assert match.matched_student is not None
+    assert match.matched_student.major_name == "马克思主义哲学"
+    decision = make_graduate_decision(parsed, match, is_target_group=True)
+    assert decision.decision == "approve"
+    from graduate.decision import apply_graduate_auto_approve_flag
+
+    decision = apply_graduate_auto_approve_flag(decision, "auto", match)
+    assert decision.should_auto_approve is False
 
 
 def test_match_multi_candidate_manual():
@@ -426,6 +433,36 @@ async def test_pipeline_graduate_evaluator_and_profile(tmp_path):
     assert latest.status == "processed"
     assert "证件" not in str(latest.parsed)
     actions.set_group_add_request.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_graduate_name_type_queues_release_and_notifies(tmp_path):
+    pipe, requests, actions = _pipeline(tmp_path)
+    pipe.settings.admin_notify = True
+    pipe.notifier = MagicMock()
+    pipe.notifier.notify_manual_review = AsyncMock()
+    await pipe.runtime.set_mode("auto", "1")
+    event = GroupJoinRequest(
+        group_id="200",
+        user_id="u-grad-type",
+        comment="刘尚明 硕",
+        flag="f-g-type",
+        sub_type="add",
+        raw_event={"time": 1000},
+    )
+    await pipe.handle_group_request(event)
+    latest = await requests.get_by_flag("f-g-type")
+    assert latest is not None
+    assert latest.profile == "graduate"
+    assert latest.match_strength == "strong"
+    assert latest.decision == "approve"
+    assert latest.status == "pending"
+    assert latest.match["major_name"] == "马克思主义哲学"
+    actions.set_group_add_request.assert_not_awaited()
+    pipe.notifier.notify_manual_review.assert_awaited_once()
+    kwargs = pipe.notifier.notify_manual_review.await_args.kwargs
+    assert kwargs["parsed"]["matched_major_name"] == "马克思主义哲学"
+    assert kwargs["reason"] == latest.reason
 
 
 @pytest.mark.asyncio
@@ -610,4 +647,26 @@ def test_manual_review_notice_without_index_falls_back_to_list():
     assert "/audit view ?" not in text
     assert "/audit ok ?" not in text
     assert "/audit list" in text
+
+
+def test_graduate_notice_includes_table_major_when_applicant_omits_major():
+    from admin.ux_formatter import format_manual_review_notice
+
+    text = format_manual_review_notice(
+        index=1,
+        group_id="200",
+        user_id="u",
+        comment="刘尚明 硕",
+        judgement="姓名+录取类型强匹配（唯一，专业以名单为准，需管理员确认）",
+        profile="graduate",
+        parsed={
+            "name": "刘尚明",
+            "admission_type": "硕士",
+            "matched_major_name": "马克思主义哲学",
+            "college": "哲学学院",
+        },
+    )
+    assert "名单专业：马克思主义哲学" in text
+    assert "/audit ok 1" in text
+    assert "/audit no 1" in text
     assert "类型：研究生" in text

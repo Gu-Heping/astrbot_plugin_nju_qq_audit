@@ -973,6 +973,9 @@ def format_manual_review_notice(
         major = parsed.get("major_text") or parsed.get("major")
         if major:
             lines.append(f"专业：{major}")
+        table_major = parsed.get("matched_major_name") or parsed.get("table_major_name")
+        if table_major and table_major != major:
+            lines.append(f"名单专业：{table_major}")
         college = parsed.get("college")
         if college:
             lines.append(f"学院：{college}")

@@ -172,6 +172,18 @@ def match_graduate(
             candidate_count=1,
         )
 
+    if adm and not (major or unique_codes) and len(pool) == 1:
+        s = pool[0]
+        return GraduateMatchResult(
+            strength="strong",
+            confidence=0.8,
+            reason="姓名+录取类型强匹配（唯一，专业以名单为准，需管理员确认）",
+            matched_student_key=s.key,
+            matched_student=s,
+            matched_by=["name", "admission_type"],
+            candidate_count=1,
+        )
+
     if len(pool) > 1:
         return GraduateMatchResult(
             strength="weak",
@@ -182,16 +194,6 @@ def match_graduate(
 
     if len(pool) == 1:
         s = pool[0]
-        if adm and not (major or unique_codes):
-            return GraduateMatchResult(
-                strength="weak",
-                confidence=0.55,
-                reason="姓名+录取类型唯一，但未提供专业",
-                matched_student_key=s.key,
-                matched_student=s,
-                matched_by=["name", "admission_type"],
-                candidate_count=1,
-            )
         if (major or unique_codes) and not adm:
             return GraduateMatchResult(
                 strength="weak",
