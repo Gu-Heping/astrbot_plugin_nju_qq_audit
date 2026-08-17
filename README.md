@@ -170,7 +170,7 @@
 - 配置：`grad_enabled`、`grad_target_group_ids`、独立 `grad_njutable_*`（勿与本科 token/表/群重叠）
 - 缓存：`grad_students.cache.json`、`grad_sync_state.json`
 - 强匹配：姓名 + 硕士/博士 唯一命中名单即可；若填写专业名称（模糊）或专业代码，则必须与名单不冲突
-- 仅姓名+硕/博命中的申请会进入 release 队列但不自动通过，并继续通知管理员；通知展示名单专业，管理员可先 `/audit ok/no <n>` 处理
+- 仅姓名+硕/博命中的申请会默认进入 release 队列但不自动通过，并继续通知管理员；通知展示名单专业，管理员可在 release 前用 `/audit no <n>` 拒绝并移出队列
 - **不读取**「证件号码末三位」；不自动 reject
 - 命令：`/audit sync-grad`、`/audit list grad`
 

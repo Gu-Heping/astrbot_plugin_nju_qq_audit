@@ -191,7 +191,7 @@ def format_grad_release_help(count: int, settings: PluginSettings) -> str:
             "",
             "说明：",
             "- 不改变当前运行模式（不是长期自动审核）",
-            "- 仅姓名+硕/博命中的申请会通知管理员，通知里展示名单专业，可先 /audit ok/no 处理",
+            "- 仅姓名+硕/博命中的申请默认在 release 队列里；通知展示名单专业，管理员可在 release 前 /audit no 拒绝",
             "- 不处理本科；本科请用 /audit release / catchup",
             "- 别名：/audit grad-release …、/audit grad-catchup …",
         ]
@@ -221,7 +221,7 @@ def format_grad_catchup_help(settings: PluginSettings) -> str:
             "说明：",
             "- 同步失败时不会重算或放行",
             "- 不改变当前运行模式",
-            "- 仅姓名+硕/博命中的申请会通知管理员，通知里展示名单专业，可先 /audit ok/no 处理",
+            "- 仅姓名+硕/博命中的申请默认在 release 队列里；通知展示名单专业，管理员可在 release 前 /audit no 拒绝",
             "- 不处理本科；本科请用 /audit catchup",
         ]
     )

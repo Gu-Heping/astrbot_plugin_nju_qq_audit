@@ -691,7 +691,7 @@ def test_graduate_notice_includes_table_major_when_applicant_omits_major():
         group_id="200",
         user_id="u",
         comment="刘尚明 硕",
-        judgement="姓名+录取类型强匹配（唯一，专业以名单为准，需管理员确认）",
+        judgement="姓名+录取类型强匹配（唯一，专业以名单为准，默认进入release，管理员可提前拒绝）",
         profile="graduate",
         parsed={
             "name": "刘尚明",

@@ -11,7 +11,10 @@ from data_source.students import PendingRequest
 from graduate.decision import apply_graduate_auto_approve_flag, make_graduate_decision
 from graduate.matcher import match_graduate
 from graduate.parser import parse_graduate_comment
-from graduate.roster_parser import complete_graduate_parse_from_roster
+from graduate.roster_parser import (
+    build_graduate_roster_parse_context,
+    complete_graduate_parse_from_roster,
+)
 
 
 REASON_LABELS = (
@@ -91,7 +94,7 @@ class ReportData:
 
 GRAD_REVIEW_LABELS = {
     "would_auto_now": "现在可自动通过",
-    "release_only_needs_admin_notice": "现在可进 release（需管理员确认）",
+    "release_only_needs_admin_notice": "现在可进 release（管理员可提前拒绝）",
     "missing_name": "缺姓名",
     "missing_admission_type": "缺录取类型",
     "ambiguous_admission_type": "录取类型占位/歧义",
@@ -245,12 +248,21 @@ async def build_grad_review_data(
     counts: Counter[str] = Counter()
     samples: list[GradReviewItem] = []
     detail_limit = max(1, min(int(detail_limit or 10), 30))
+    roster_context = (
+        build_graduate_roster_parse_context(students)
+        if getattr(settings, "grad_roster_parse_enabled", True)
+        else None
+    )
 
     for req in targets:
         parsed = parse_graduate_comment(req.comment or "")
         raw_name = parsed.name
-        if getattr(settings, "grad_roster_parse_enabled", True):
-            parsed = complete_graduate_parse_from_roster(parsed, students)
+        if roster_context is not None:
+            parsed = complete_graduate_parse_from_roster(
+                parsed,
+                students,
+                context=roster_context,
+            )
         match = match_graduate(parsed, students)
         decision = make_graduate_decision(parsed, match, is_target_group=True)
         decision = apply_graduate_auto_approve_flag(decision, "auto", match)
@@ -422,7 +434,7 @@ def format_grad_review_report(data: GradReviewData) -> str:
         f"- 复盘样本：{data.total_reviewed}",
         f"- 按当前规则可进 release：{data.would_release_now}（{rate}）",
         f"- 其中可 auto 自动通过：{data.would_auto_now}",
-        f"- 其中需管理员确认：{data.release_only_needs_admin_notice}",
+        f"- 其中需管理员复核/可拒绝：{data.release_only_needs_admin_notice}",
         "",
         "分类：",
     ]

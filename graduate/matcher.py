@@ -161,10 +161,10 @@ def match_graduate(
             reason = "姓名+录取类型+专业强匹配（唯一）"
         elif has_major_input:
             confidence = 0.75
-            reason = "姓名+录取类型强匹配（唯一，专业/代码未匹配，以名单为准，需管理员确认）"
+            reason = "姓名+录取类型强匹配（唯一，专业/代码未匹配，以名单为准，默认进入release，管理员可提前拒绝）"
         else:
             confidence = 0.8
-            reason = "姓名+录取类型强匹配（唯一，专业以名单为准，需管理员确认）"
+            reason = "姓名+录取类型强匹配（唯一，专业以名单为准，默认进入release，管理员可提前拒绝）"
         return GraduateMatchResult(
             strength="strong",
             confidence=confidence,

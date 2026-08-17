@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 from core.normalize import normalize_name, normalize_whitespace
 from core.parser import extract_answer_segment
@@ -33,6 +34,13 @@ _TAIL_TYPE_TOKENS: list[tuple[str, str]] = sorted(
 )
 
 
+@dataclass(frozen=True)
+class GraduateRosterParseContext:
+    unique_names: list[str]
+    majors_by_name: dict[str, set[str]]
+    name_pattern: re.Pattern[str] | None = None
+
+
 def _compact_text(raw: str) -> str:
     segment = extract_answer_segment(raw)
     text = normalize_whitespace(segment or raw)
@@ -52,18 +60,29 @@ def _unique_roster_names(students: list[GraduateStudent]) -> list[str]:
     return names
 
 
-def _find_name_spans(text: str, unique_names: list[str]) -> list[tuple[str, int, int]]:
+def _find_name_spans(
+    text: str,
+    unique_names: list[str],
+    name_pattern: re.Pattern[str] | None = None,
+) -> list[tuple[str, int, int]]:
     candidates: list[tuple[str, int, int]] = []
-    for name in unique_names:
-        if not name:
-            continue
-        start = 0
-        while True:
-            idx = text.find(name, start)
-            if idx == -1:
-                break
-            candidates.append((name, idx, idx + len(name)))
-            start = idx + 1
+    if name_pattern is not None:
+        for match in name_pattern.finditer(text):
+            name = match.group(1)
+            if name:
+                start = match.start()
+                candidates.append((name, start, start + len(name)))
+    else:
+        for name in unique_names:
+            if not name:
+                continue
+            start = 0
+            while True:
+                idx = text.find(name, start)
+                if idx == -1:
+                    break
+                candidates.append((name, idx, idx + len(name)))
+                start = idx + 1
     candidates.sort(key=lambda item: (-(item[2] - item[1]), item[1]))
     selected: list[tuple[str, int, int]] = []
     occupied: set[int] = set()
@@ -78,12 +97,15 @@ def _find_name_spans(text: str, unique_names: list[str]) -> list[tuple[str, int,
 
 
 def _locate_name_span(
-    text: str, name: str, unique_names: list[str]
+    text: str,
+    name: str,
+    unique_names: list[str],
+    name_pattern: re.Pattern[str] | None = None,
 ) -> tuple[str, int, int] | None:
     target = normalize_name(name)
     if not target:
         return None
-    spans = _find_name_spans(text, unique_names)
+    spans = _find_name_spans(text, unique_names, name_pattern)
     for span_name, start, end in spans:
         if normalize_name(span_name) == target:
             return span_name, start, end
@@ -112,6 +134,32 @@ def _roster_major_names(students: list[GraduateStudent], name: str) -> set[str]:
         if major:
             majors.add(major)
     return majors
+
+
+def build_graduate_roster_parse_context(
+    students: list[GraduateStudent],
+) -> GraduateRosterParseContext:
+    majors_by_name: dict[str, set[str]] = {}
+    for student in students:
+        name = normalize_name(student.name)
+        if not name:
+            continue
+        major = normalize_whitespace(student.major_name).replace(" ", "").replace("　", "")
+        if major:
+            majors_by_name.setdefault(name, set()).add(major)
+        else:
+            majors_by_name.setdefault(name, set())
+    names = sorted(majors_by_name.keys(), key=len, reverse=True)
+    name_pattern = (
+        re.compile("(?=(" + "|".join(re.escape(name) for name in names) + "))")
+        if names
+        else None
+    )
+    return GraduateRosterParseContext(
+        unique_names=names,
+        majors_by_name=majors_by_name,
+        name_pattern=name_pattern,
+    )
 
 
 def _major_matches_roster(major: str, roster_majors: set[str]) -> bool:
@@ -191,6 +239,8 @@ def _should_replace_major_text(
 def complete_graduate_parse_from_roster(
     parsed: GraduateParsedApplication,
     students: list[GraduateStudent],
+    *,
+    context: GraduateRosterParseContext | None = None,
 ) -> GraduateParsedApplication:
     if not students:
         return parsed
@@ -199,11 +249,13 @@ def complete_graduate_parse_from_roster(
     if not text:
         return parsed
 
-    unique_names = _unique_roster_names(students)
+    if context is None:
+        context = build_graduate_roster_parse_context(students)
+    unique_names = context.unique_names
     if not unique_names:
         return parsed
 
-    spans = _find_name_spans(text, unique_names)
+    spans = _find_name_spans(text, unique_names, context.name_pattern)
     distinct = {name for name, _, _ in spans}
 
     if len(distinct) > 1:
@@ -222,13 +274,18 @@ def complete_graduate_parse_from_roster(
     if not parsed.name:
         return parsed
 
-    located = _locate_name_span(text, parsed.name, unique_names)
+    located = _locate_name_span(
+        text,
+        parsed.name,
+        unique_names,
+        context.name_pattern,
+    )
     if located is None:
         return parsed
 
     _, start, end = located
     remaining = (text[:start] + text[end:]).strip()
-    roster_majors = _roster_major_names(students, parsed.name)
+    roster_majors = context.majors_by_name.get(normalize_name(parsed.name), set())
     admission_type, admission_raw, major_text = _parse_tail_type(remaining, roster_majors)
 
     if not admission_type and remaining and len(remaining) >= 2:
