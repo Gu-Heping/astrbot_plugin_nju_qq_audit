@@ -123,7 +123,9 @@ class GradReviewData:
     would_release_now: int
     would_auto_now: int
     release_only_needs_admin_notice: int
+    multi_candidate_total: int = 0
     counts: dict[str, int] = field(default_factory=dict)
+    multi_candidate_counts: dict[int, int] = field(default_factory=dict)
     samples: list[GradReviewItem] = field(default_factory=list)
 
 
@@ -246,6 +248,7 @@ async def build_grad_review_data(
     targets.sort(key=lambda r: r.created_at, reverse=True)
 
     counts: Counter[str] = Counter()
+    multi_candidate_counts: Counter[int] = Counter()
     samples: list[GradReviewItem] = []
     detail_limit = max(1, min(int(detail_limit or 10), 30))
     roster_context = (
@@ -268,6 +271,8 @@ async def build_grad_review_data(
         decision = apply_graduate_auto_approve_flag(decision, "auto", match)
         category = _graduate_category(parsed, match, decision, raw_name=raw_name)
         counts[category] += 1
+        if category == "name_type_not_unique":
+            multi_candidate_counts[max(2, int(getattr(match, "candidate_count", 0) or 0))] += 1
 
         if len(samples) < detail_limit:
             match_dict = _grad_match_dict(match)
@@ -290,7 +295,9 @@ async def build_grad_review_data(
         would_release_now=would_auto + release_only,
         would_auto_now=would_auto,
         release_only_needs_admin_notice=release_only,
+        multi_candidate_total=sum(multi_candidate_counts.values()),
         counts=dict(counts),
+        multi_candidate_counts=dict(multi_candidate_counts),
         samples=samples,
     )
 
@@ -439,6 +446,20 @@ def format_grad_review_report(data: GradReviewData) -> str:
         "分类：",
     ]
     lines.extend(_format_grad_review_counts(data.counts))
+    if data.multi_candidate_total:
+        distribution = "，".join(
+            f"{count} 人候选：{total}"
+            for count, total in sorted(data.multi_candidate_counts.items())
+        )
+        lines.extend(
+            [
+                "",
+                "多候选分析：",
+                f"- 多候选样本：{data.multi_candidate_total}",
+                f"- 候选数分布：{distribution}",
+                "- 处理：不进入 release，需管理员手动 ok/no",
+            ]
+        )
     lines.extend(
         [
             "",

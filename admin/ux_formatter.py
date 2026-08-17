@@ -954,6 +954,7 @@ def format_manual_review_notice(
     user_label: str | None = None,
     group_labels: dict[str, str] | None = None,
     exclusive_hit_group_ids: list[str] | None = None,
+    release_status: str | None = None,
 ) -> str:
     parsed = parsed or {}
     ref = str(index) if index is not None else None
@@ -979,6 +980,11 @@ def format_manual_review_notice(
         college = parsed.get("college")
         if college:
             lines.append(f"学院：{college}")
+        if release_status == "in_queue":
+            suffix = f"；批量放行前可 /audit no {ref} 拒绝" if ref else "；批量放行前可拒绝"
+            lines.append(f"release 状态：已在 release 队列{suffix}")
+        elif release_status == "not_in_queue":
+            lines.append("release 状态：不在 release 队列，需管理员手动处理")
         lines.append("")
     elif applicant:
         lines.append(f"申请人：{applicant}")

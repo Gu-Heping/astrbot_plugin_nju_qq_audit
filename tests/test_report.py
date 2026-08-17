@@ -216,6 +216,12 @@ async def test_grad_review_blocked_categories(tmp_path):
     assert data.counts["missing_admission_type"] == 1
     assert data.counts["name_not_found"] == 1
     assert data.counts["name_type_not_unique"] == 1
+    assert data.multi_candidate_total == 1
+    assert data.multi_candidate_counts[2] == 1
+    text = format_grad_review_report(data)
+    assert "多候选分析" in text
+    assert "2 人候选：1" in text
+    assert "不进入 release" in text
 
 
 @pytest.mark.asyncio

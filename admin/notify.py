@@ -135,6 +135,7 @@ class AdminNotifier:
         group_label: str | None = None,
         user_label: str | None = None,
         exclusive_hit_group_ids: list[str] | None = None,
+        release_status: str | None = None,
     ) -> None:
         if not self.settings.admin_notify:
             logger.debug("[audit] manual_review notify skipped: admin_notify=false")
@@ -178,6 +179,7 @@ class AdminNotifier:
                 user_label=user_label,
                 group_labels=hit_group_labels,
                 exclusive_hit_group_ids=exclusive_hit_group_ids,
+                release_status=release_status,
             )
             if await self._send_to_admin(admin_id, message):
                 sent_count += 1

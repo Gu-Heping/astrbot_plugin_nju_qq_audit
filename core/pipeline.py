@@ -150,6 +150,22 @@ def _graduate_release_needs_admin_notice(pending: PendingRequest, decision, matc
     )
 
 
+def _graduate_notice_release_status(pending: PendingRequest) -> str | None:
+    if getattr(pending, "profile", None) != "graduate":
+        return None
+    if pending.status != "pending" or pending.processed_at:
+        return "not_in_queue"
+    if pending.decision != "approve" or pending.match_strength != "strong":
+        return "not_in_queue"
+    match = pending.match or {}
+    parsed = pending.parsed or {}
+    if match.get("candidate_count") != 1:
+        return "not_in_queue"
+    if not parsed.get("name") or parsed.get("admission_type") not in {"硕士", "博士"}:
+        return "not_in_queue"
+    return "in_queue"
+
+
 def _parsed_to_dict(parsed, *, comment: str | None = None, profile: str | None = None) -> dict:
     if isinstance(parsed, GraduateParsedApplication):
         data = parsed.to_dict()
@@ -1756,6 +1772,7 @@ class AuditPipeline:
                         exclusive_hit_group_ids=exclusive_hit_group_ids_from_parsed(
                             pending.parsed
                         ),
+                        release_status=_graduate_notice_release_status(pending),
                     )
                 except Exception:
                     logger.exception(
@@ -1890,6 +1907,7 @@ class AuditPipeline:
                         exclusive_hit_group_ids=exclusive_hit_group_ids_from_parsed(
                             pending.parsed
                         ),
+                        release_status=_graduate_notice_release_status(pending),
                     )
                 except Exception:
                     logger.exception(

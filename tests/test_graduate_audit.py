@@ -497,6 +497,46 @@ async def test_pipeline_graduate_name_type_queues_release_and_notifies(tmp_path)
     kwargs = pipe.notifier.notify_manual_review.await_args.kwargs
     assert kwargs["parsed"]["matched_major_name"] == "马克思主义哲学"
     assert kwargs["reason"] == latest.reason
+    assert kwargs["release_status"] == "in_queue"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_graduate_multi_candidate_notice_not_in_release(tmp_path):
+    pipe, requests, actions = _pipeline(tmp_path)
+    pipe.grad_cache.save_students(
+        [
+            _grad_student(),
+            _grad_student(
+                source_id="2",
+                key="2",
+                major_code="010102",
+                major_name="中国哲学",
+            ),
+        ]
+    )
+    pipe.settings.admin_notify = True
+    pipe.notifier = MagicMock()
+    pipe.notifier.notify_manual_review = AsyncMock()
+    await pipe.runtime.set_mode("auto", "1")
+    event = GroupJoinRequest(
+        group_id="200",
+        user_id="u-grad-multi",
+        comment="刘尚明 硕",
+        flag="f-g-multi",
+        sub_type="add",
+        raw_event={"time": 1000},
+    )
+    await pipe.handle_group_request(event)
+    latest = await requests.get_by_flag("f-g-multi")
+    assert latest is not None
+    assert latest.profile == "graduate"
+    assert latest.match_strength == "weak"
+    assert latest.decision == "manual_review"
+    assert latest.status == "pending"
+    actions.set_group_add_request.assert_not_awaited()
+    pipe.notifier.notify_manual_review.assert_awaited_once()
+    kwargs = pipe.notifier.notify_manual_review.await_args.kwargs
+    assert kwargs["release_status"] == "not_in_queue"
 
 
 @pytest.mark.asyncio
@@ -699,8 +739,29 @@ def test_graduate_notice_includes_table_major_when_applicant_omits_major():
             "matched_major_name": "马克思主义哲学",
             "college": "哲学学院",
         },
+        release_status="in_queue",
     )
     assert "名单专业：马克思主义哲学" in text
+    assert "release 状态：已在 release 队列" in text
+    assert "批量放行前可 /audit no 1 拒绝" in text
     assert "/audit ok 1" in text
     assert "/audit no 1" in text
     assert "类型：研究生" in text
+
+
+def test_graduate_notice_marks_multi_candidate_not_in_release():
+    from admin.ux_formatter import format_manual_review_notice
+
+    text = format_manual_review_notice(
+        index=5,
+        group_id="200",
+        user_id="u",
+        comment="刘尚明 硕",
+        judgement="多候选（2），需人工复核",
+        profile="graduate",
+        parsed={"name": "刘尚明", "admission_type": "硕士"},
+        release_status="not_in_queue",
+    )
+    assert "release 状态：不在 release 队列" in text
+    assert "/audit ok 5" in text
+    assert "/audit no 5" in text
