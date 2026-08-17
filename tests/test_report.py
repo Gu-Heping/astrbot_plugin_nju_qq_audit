@@ -1,9 +1,26 @@
+import sys
+from unittest.mock import MagicMock
+
 import pytest
 
-from admin.report import build_report_data, classify_manual_reason, format_report, format_unknown
+sys.modules.setdefault("astrbot", MagicMock())
+sys.modules.setdefault("astrbot.api", MagicMock())
+sys.modules["astrbot.api"].logger = MagicMock()
+
+from admin.report import (
+    build_grad_review_data,
+    build_report_data,
+    classify_manual_reason,
+    format_grad_review_detail,
+    format_grad_review_report,
+    format_report,
+    format_unknown,
+)
 from config import load_settings
 from data_source.student_cache import SyncState
-from data_source.students import PendingRequest
+from data_source.students import ActionResult, PendingRequest
+from graduate.cache import GraduateStudentCache
+from graduate.models import GraduateStudent
 from storage.requests_store import RequestsStore, new_request_id
 
 
@@ -29,6 +46,46 @@ def _req(**kwargs) -> PendingRequest:
         status="pending",
         created_at="2026-07-09T12:00:00+00:00",
         match_strength="weak",
+    )
+    defaults.update(kwargs)
+    return PendingRequest(**defaults)
+
+
+def _grad_student(**kwargs) -> GraduateStudent:
+    defaults = dict(
+        source_id="g1",
+        admission_type="硕士",
+        college="测试学院",
+        major_code="085400",
+        major_name="电子信息",
+        name="张测试",
+        key="g1",
+    )
+    defaults.update(kwargs)
+    return GraduateStudent(**defaults)
+
+
+def _grad_req(**kwargs) -> PendingRequest:
+    defaults = dict(
+        id=new_request_id(),
+        group_id="200",
+        user_id="1234567890",
+        comment="问题：姓名 专业 硕or博\n答案：张测试 999999999999 硕",
+        flag="grad-flag",
+        sub_type="add",
+        parsed={"name": "张测试", "admission_type": "硕士", "major_text": "旧专业"},
+        match={"strength": "weak"},
+        decision="approve",
+        confidence=0.4,
+        reason="历史管理员通过",
+        mode="record-only",
+        status="processed",
+        processed_at="2026-07-09T12:05:00+00:00",
+        action_result=ActionResult(ok=True, message="ok"),
+        admin_override=True,
+        created_at="2026-07-09T12:00:00+00:00",
+        match_strength="weak",
+        profile="graduate",
     )
     defaults.update(kwargs)
     return PendingRequest(**defaults)
@@ -76,3 +133,106 @@ async def test_list_since_skips_invalid_timestamp(tmp_path):
     records = await store.list_since(days=7)
     assert len(records) == 1
     assert records[0].created_at == recent
+
+
+@pytest.mark.asyncio
+async def test_grad_review_report_counts_approved_related(tmp_path):
+    settings = load_settings(
+        DummyConfig(
+            {
+                "target_group_ids": "100",
+                "grad_enabled": True,
+                "grad_target_group_ids": "200",
+            }
+        )
+    )
+    store = RequestsStore(tmp_path / "requests.json")
+    grad_cache = GraduateStudentCache(tmp_path)
+    grad_cache.save_students(
+        [
+            _grad_student(),
+            _grad_student(
+                source_id="g2",
+                key="g2",
+                name="李测试",
+                admission_type="博士",
+                major_code="010101",
+                major_name="哲学",
+            ),
+        ]
+    )
+    await store.upsert(_grad_req(id="REQ-release-only"))
+    await store.upsert(
+        _grad_req(
+            id="REQ-auto",
+            user_id="1112223334",
+            comment="李测试 010101 博",
+            parsed={"name": "李测试", "admission_type": "博士", "major_text": "哲学"},
+            status="external",
+            processed_at=None,
+        )
+    )
+    await store.upsert(
+        _grad_req(
+            id="REQ-pending-not-included",
+            status="pending",
+            decision="manual_review",
+        )
+    )
+    await store.upsert(_req(id="REQ-undergrad", status="processed", decision="approve"))
+
+    data = await build_grad_review_data(store, settings, grad_cache)
+    assert data.total_reviewed == 2
+    assert data.would_release_now == 2
+    assert data.would_auto_now == 1
+    assert data.release_only_needs_admin_notice == 1
+    assert data.counts["release_only_needs_admin_notice"] == 1
+    assert data.counts["would_auto_now"] == 1
+    text = format_grad_review_report(data)
+    assert "研究生审核历史复盘" in text
+    assert "复盘样本：2" in text
+    assert "现在可自动通过：1" in text
+
+
+@pytest.mark.asyncio
+async def test_grad_review_blocked_categories(tmp_path):
+    settings = load_settings(
+        DummyConfig({"grad_enabled": True, "grad_target_group_ids": "200"})
+    )
+    store = RequestsStore(tmp_path / "requests.json")
+    grad_cache = GraduateStudentCache(tmp_path)
+    grad_cache.save_students(
+        [
+            _grad_student(),
+            _grad_student(source_id="g2", key="g2", name="重名人", major_name="专业A"),
+            _grad_student(source_id="g3", key="g3", name="重名人", major_name="专业B"),
+        ]
+    )
+    await store.upsert(_grad_req(id="REQ-missing-type", comment="张测试 电子信息"))
+    await store.upsert(_grad_req(id="REQ-name-not-found", comment="赵测试 硕"))
+    await store.upsert(_grad_req(id="REQ-not-unique", comment="重名人 硕"))
+
+    data = await build_grad_review_data(store, settings, grad_cache)
+    assert data.counts["missing_admission_type"] == 1
+    assert data.counts["name_not_found"] == 1
+    assert data.counts["name_type_not_unique"] == 1
+
+
+@pytest.mark.asyncio
+async def test_grad_review_detail_redacts_sensitive_fields(tmp_path):
+    settings = load_settings(
+        DummyConfig({"grad_enabled": True, "grad_target_group_ids": "200"})
+    )
+    store = RequestsStore(tmp_path / "requests.json")
+    grad_cache = GraduateStudentCache(tmp_path)
+    grad_cache.save_students([_grad_student()])
+    await store.upsert(_grad_req())
+
+    data = await build_grad_review_data(store, settings, grad_cache, detail_limit=10)
+    text = format_grad_review_detail(data, limit=10)
+    assert "1234567890" not in text
+    assert "123****890" in text
+    assert "999999999999" not in text
+    assert "999****999" in text
+    assert "答案：张测试" not in text
+    assert "答案：某同学" in text

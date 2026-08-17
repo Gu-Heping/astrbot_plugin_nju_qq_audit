@@ -324,6 +324,12 @@ def test_match_major_code():
     parsed = parse_graduate_comment("刘尚明 010101 硕")
     match = match_graduate(parsed, students)
     assert match.strength == "strong"
+    assert "major_code" in match.matched_by
+    from graduate.decision import apply_graduate_auto_approve_flag
+
+    decision = make_graduate_decision(parsed, match, is_target_group=True)
+    decision = apply_graduate_auto_approve_flag(decision, "auto", match)
+    assert decision.should_auto_approve is True
 
 
 def test_match_conflicting_major_code_and_name_releasable_but_not_auto():

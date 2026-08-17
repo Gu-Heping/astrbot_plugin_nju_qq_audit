@@ -136,9 +136,19 @@ def match_graduate(
         code_matches = len(unique_codes) == 1 and any(
             major_code_match(c, s) for c in unique_codes
         )
-        major_matches = bool(major and majors_fuzzy_match(major, s.major_name))
+        major_is_code_value = bool(major and major in unique_codes)
+        major_matches = bool(
+            major
+            and not major_is_code_value
+            and majors_fuzzy_match(major, s.major_name)
+        )
         code_conflict = len(unique_codes) > 1
-        mixed_conflict = bool(unique_codes and major and not (code_matches and major_matches))
+        mixed_conflict = bool(
+            unique_codes
+            and major
+            and not major_is_code_value
+            and not (code_matches and major_matches)
+        )
         if not code_conflict and not mixed_conflict:
             if code_matches:
                 matched_by.append("major_code")

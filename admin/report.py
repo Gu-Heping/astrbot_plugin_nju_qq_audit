@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
+import re
 
 from admin.release import list_releasable
 from config import PluginSettings
 from data_source.student_cache import SyncState
 from data_source.students import PendingRequest
+from graduate.decision import apply_graduate_auto_approve_flag, make_graduate_decision
+from graduate.matcher import match_graduate
+from graduate.parser import parse_graduate_comment
+from graduate.roster_parser import complete_graduate_parse_from_roster
 
 
 REASON_LABELS = (
@@ -84,6 +89,41 @@ class ReportData:
     samples: list[PendingRequest] = field(default_factory=list)
 
 
+GRAD_REVIEW_LABELS = {
+    "would_auto_now": "现在可自动通过",
+    "release_only_needs_admin_notice": "现在可进 release（需管理员确认）",
+    "missing_name": "缺姓名",
+    "missing_admission_type": "缺录取类型",
+    "ambiguous_admission_type": "录取类型占位/歧义",
+    "name_not_found": "姓名未命中名单",
+    "name_type_not_unique": "姓名+录取类型不唯一",
+    "not_grad_profile_or_group": "非研究生通道",
+    "other_blocked": "其他阻塞",
+}
+
+
+@dataclass
+class GradReviewItem:
+    request: PendingRequest
+    category: str
+    parsed: dict
+    match: dict
+    decision: str
+    should_auto_approve: bool
+    table_major: str = ""
+    reason: str = ""
+
+
+@dataclass
+class GradReviewData:
+    total_reviewed: int
+    would_release_now: int
+    would_auto_now: int
+    release_only_needs_admin_notice: int
+    counts: dict[str, int] = field(default_factory=dict)
+    samples: list[GradReviewItem] = field(default_factory=list)
+
+
 async def build_report_data(
     requests_store,
     settings: PluginSettings,
@@ -116,6 +156,129 @@ async def build_report_data(
         external=stats.get("external", 0),
         releasable=len(releasable),
         reason_counts=dict(reason_counter),
+        samples=samples,
+    )
+
+
+def _audit_approved_request_ids(audit_log) -> set[str]:
+    if audit_log is None:
+        return set()
+    ids: set[str] = set()
+    try:
+        records = audit_log.read_all()
+    except Exception:
+        return ids
+    for record in records:
+        action = str(record.get("action") or "")
+        record_type = str(record.get("type") or "")
+        if action == "approve" and record.get("ok") is True:
+            req_id = record.get("request_id")
+            if req_id:
+                ids.add(str(req_id))
+        if record_type in {"external_approved", "external_join", "already_approved"}:
+            req_id = record.get("request_id")
+            if req_id:
+                ids.add(str(req_id))
+    return ids
+
+
+def _is_grad_review_target(req: PendingRequest, audit_approved_ids: set[str]) -> bool:
+    if getattr(req, "profile", "undergraduate") != "graduate":
+        return False
+    if req.status == "processed" and req.decision == "approve":
+        return True
+    if req.status == "external":
+        return True
+    return req.id in audit_approved_ids
+
+
+def _graduate_category(parsed, match, decision, *, raw_name: str | None = None) -> str:
+    raw_type = getattr(parsed, "admission_type_raw", None) or ""
+    if not getattr(parsed, "name", None):
+        if raw_name:
+            return "name_not_found"
+        return "missing_name"
+    if not getattr(parsed, "admission_type", None):
+        if any(token in raw_type for token in ("硕/博", "硕博", "硕or博", "硕或博")):
+            return "ambiguous_admission_type"
+        return "missing_admission_type"
+    if getattr(match, "strength", None) == "strong" and decision.decision == "approve":
+        if decision.should_auto_approve:
+            return "would_auto_now"
+        return "release_only_needs_admin_notice"
+    reason = getattr(match, "reason", "") or ""
+    if "姓名未命中" in reason:
+        return "name_not_found"
+    if getattr(match, "candidate_count", 0) > 1 or "多候选" in reason:
+        return "name_type_not_unique"
+    return "other_blocked"
+
+
+def _grad_match_dict(match) -> dict:
+    student = getattr(match, "matched_student", None)
+    return {
+        "strength": getattr(match, "strength", ""),
+        "candidate_count": getattr(match, "candidate_count", 0),
+        "matched_by": list(getattr(match, "matched_by", []) or []),
+        "major_name": getattr(student, "major_name", "") if student else "",
+        "college": getattr(student, "college", "") if student else "",
+    }
+
+
+async def build_grad_review_data(
+    requests_store,
+    settings: PluginSettings,
+    grad_cache,
+    *,
+    audit_log=None,
+    detail_limit: int = 10,
+) -> GradReviewData:
+    students = grad_cache.load_students() if grad_cache is not None else []
+    audit_approved_ids = _audit_approved_request_ids(audit_log)
+    targets = [
+        req
+        for req in await requests_store.list_all()
+        if _is_grad_review_target(req, audit_approved_ids)
+    ]
+    targets.sort(key=lambda r: r.created_at, reverse=True)
+
+    counts: Counter[str] = Counter()
+    samples: list[GradReviewItem] = []
+    detail_limit = max(1, min(int(detail_limit or 10), 30))
+
+    for req in targets:
+        parsed = parse_graduate_comment(req.comment or "")
+        raw_name = parsed.name
+        if getattr(settings, "grad_roster_parse_enabled", True):
+            parsed = complete_graduate_parse_from_roster(parsed, students)
+        match = match_graduate(parsed, students)
+        decision = make_graduate_decision(parsed, match, is_target_group=True)
+        decision = apply_graduate_auto_approve_flag(decision, "auto", match)
+        category = _graduate_category(parsed, match, decision, raw_name=raw_name)
+        counts[category] += 1
+
+        if len(samples) < detail_limit:
+            match_dict = _grad_match_dict(match)
+            item = GradReviewItem(
+                request=req,
+                category=category,
+                parsed=parsed.to_dict(),
+                match=match_dict,
+                decision=decision.decision,
+                should_auto_approve=decision.should_auto_approve,
+                table_major=str(match_dict.get("major_name") or ""),
+                reason=decision.reason or getattr(match, "reason", ""),
+            )
+            samples.append(item)
+
+    would_auto = counts.get("would_auto_now", 0)
+    release_only = counts.get("release_only_needs_admin_notice", 0)
+    return GradReviewData(
+        total_reviewed=len(targets),
+        would_release_now=would_auto + release_only,
+        would_auto_now=would_auto,
+        release_only_needs_admin_notice=release_only,
+        counts=dict(counts),
         samples=samples,
     )
 
@@ -213,3 +376,92 @@ def format_report(
             ]
         )
     return "\n".join(lines)
+
+
+def _mask_qq(value: str) -> str:
+    text = re.sub(r"\D", "", value or "")
+    if len(text) <= 6:
+        return "***" if text else "（未知）"
+    return f"{text[:3]}****{text[-3:]}"
+
+
+def _safe_comment(text: str, limit: int = 80) -> str:
+    value = re.sub(r"\d{9,}", lambda m: f"{m.group(0)[:3]}****{m.group(0)[-3:]}", text or "")
+    value = re.sub(r"(答案[:：]\s*)([\u4e00-\u9fa5·]{2,4})", r"\1某同学", value)
+    value = re.sub(r"(姓名[:：]\s*)([\u4e00-\u9fa5·]{2,4})", r"\1某同学", value)
+    value = re.sub(r"^([\u4e00-\u9fa5·]{2,4})(?=\s)", "某同学", value)
+    value = value.replace("\r", " ").replace("\n", " ").strip()
+    if len(value) > limit:
+        return value[:limit] + "…"
+    return value or "（空）"
+
+
+def _format_grad_review_counts(counts: dict[str, int]) -> list[str]:
+    lines: list[str] = []
+    for key, label in GRAD_REVIEW_LABELS.items():
+        count = counts.get(key, 0)
+        if count:
+            lines.append(f"- {label}：{count}")
+    if not lines:
+        lines.append("- （无）")
+    return lines
+
+
+def format_grad_review_report(data: GradReviewData) -> str:
+    rate = (
+        f"{data.would_release_now / data.total_reviewed:.0%}"
+        if data.total_reviewed
+        else "0%"
+    )
+    lines = [
+        "研究生审核历史复盘",
+        "",
+        "范围：研究生已通过相关申请（管理员通过 / QQ 侧已同意 / external）",
+        "",
+        "概览：",
+        f"- 复盘样本：{data.total_reviewed}",
+        f"- 按当前规则可进 release：{data.would_release_now}（{rate}）",
+        f"- 其中可 auto 自动通过：{data.would_auto_now}",
+        f"- 其中需管理员确认：{data.release_only_needs_admin_notice}",
+        "",
+        "分类：",
+    ]
+    lines.extend(_format_grad_review_counts(data.counts))
+    lines.extend(
+        [
+            "",
+            "查看脱敏明细：/audit report grad detail 10",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def format_grad_review_detail(data: GradReviewData, *, limit: int = 10) -> str:
+    limit = max(1, min(int(limit or 10), 30))
+    lines = [
+        "研究生审核历史复盘明细（脱敏）",
+        "",
+        f"展示：{min(limit, len(data.samples))}/{data.total_reviewed}",
+        "",
+    ]
+    if not data.samples:
+        lines.append("（无样例）")
+        return "\n".join(lines)
+    for idx, item in enumerate(data.samples[:limit], start=1):
+        req = item.request
+        label = GRAD_REVIEW_LABELS.get(item.category, item.category)
+        lines.extend(
+            [
+                f"[{idx}] {req.id[:8]}",
+                f"时间：{req.created_at}",
+                f"状态：{req.status} / {req.decision}",
+                f"QQ：{_mask_qq(req.user_id)}",
+                f"验证：{_safe_comment(req.comment)}",
+                f"原判断：{req.reason or req.match_strength or '（无）'}",
+                f"当前分类：{label}",
+                f"名单专业：{item.table_major or '（未命中）'}",
+                f"当前判断：{item.reason or '（无）'}",
+                "",
+            ]
+        )
+    return "\n".join(lines).rstrip()

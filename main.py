@@ -102,7 +102,14 @@ from admin.sweep import (
     parse_sweep_command,
     run_sweep,
 )
-from admin.report import build_report_data, format_report, format_unknown
+from admin.report import (
+    build_grad_review_data,
+    build_report_data,
+    format_grad_review_detail,
+    format_grad_review_report,
+    format_report,
+    format_unknown,
+)
 from admin.permissions import can_run_command
 from data_source.njutable_provider import load_students_for_audit
 from onebot.event_extract import (
@@ -1596,12 +1603,38 @@ class NjuQqAuditPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("report")
-    async def audit_report(self, event: AstrMessageEvent):
+    async def audit_report(
+        self,
+        event: AstrMessageEvent,
+        arg1: str = "",
+        arg2: str = "",
+        arg3: str = "",
+    ):
         allowed, message = can_run_command(self._settings(), "report", event)
         if not allowed:
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
+        token = (arg1 or "").strip().lower()
+        if token in {"grad", "graduate", "研究生"}:
+            mode = (arg2 or "").strip().lower()
+            limit = 10
+            if mode == "detail" and str(arg3 or "").isdigit():
+                limit = int(arg3)
+            data = await build_grad_review_data(
+                self.ctx.requests,
+                self._settings(),
+                self.ctx.grad_cache,
+                audit_log=self.ctx.audit,
+                detail_limit=limit,
+            )
+            if mode == "detail":
+                yield event.plain_result(
+                    format_grad_review_detail(data, limit=limit)
+                )
+                return
+            yield event.plain_result(format_grad_review_report(data))
+            return
         data = await build_report_data(self.ctx.requests, self._settings(), days=7)
         sync_state = self.ctx.cache.load_sync_state()
         yield event.plain_result(

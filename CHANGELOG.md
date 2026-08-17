@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 新增 `/audit report grad` 与 `/audit report grad detail [N]`，用于复盘研究生已通过相关申请按当前规则是否可 release / auto，并默认输出脱敏明细。
+
 ### 调整
 
 - 研究生审核放宽 release 门槛：姓名 + 硕士/博士 唯一命中名单即可进入 release 队列；若申请填写专业/代码则仍需与名单不冲突。
