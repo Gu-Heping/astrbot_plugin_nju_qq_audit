@@ -138,6 +138,23 @@ def test_missing_admission_type():
     )
 
 
+def test_missing_admission_type_releasable_when_name_major_unique():
+    settings = _settings()
+    assert is_grad_releasable(
+        _grad_strong(
+            parsed={"name": "张三", "major_text": "生物学"},
+            match={
+                "strength": "strong",
+                "candidate_count": 1,
+                "matched_by": ["name", "major_name"],
+                "admission_type": "博士",
+                "major_name": "生物学",
+            },
+        ),
+        settings,
+    )
+
+
 def test_missing_major_from_applicant_but_table_major_ok():
     settings = _settings()
     assert is_grad_releasable(

@@ -203,14 +203,14 @@ def _graduate_category(parsed, match, decision, *, raw_name: str | None = None) 
         if raw_name:
             return "name_not_found"
         return "missing_name"
-    if not getattr(parsed, "admission_type", None):
-        if any(token in raw_type for token in ("硕/博", "硕博", "硕or博", "硕或博")):
-            return "ambiguous_admission_type"
-        return "missing_admission_type"
     if getattr(match, "strength", None) == "strong" and decision.decision == "approve":
         if decision.should_auto_approve:
             return "would_auto_now"
         return "release_only_needs_admin_notice"
+    if not getattr(parsed, "admission_type", None):
+        if any(token in raw_type for token in ("硕/博", "硕博", "硕or博", "硕或博")):
+            return "ambiguous_admission_type"
+        return "missing_admission_type"
     reason = getattr(match, "reason", "") or ""
     if "姓名未命中" in reason:
         return "name_not_found"

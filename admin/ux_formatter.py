@@ -971,6 +971,11 @@ def format_manual_review_notice(
             lines.append(f"姓名：{parsed.get('name')}")
         if parsed.get("admission_type"):
             lines.append(f"录取类型：{parsed.get('admission_type')}")
+        table_admission_type = parsed.get("matched_admission_type") or parsed.get(
+            "table_admission_type"
+        )
+        if table_admission_type and table_admission_type != parsed.get("admission_type"):
+            lines.append(f"名单录取类型：{table_admission_type}")
         major = parsed.get("major_text") or parsed.get("major")
         if major:
             lines.append(f"专业：{major}")

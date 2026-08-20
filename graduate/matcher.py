@@ -186,13 +186,37 @@ def match_graduate(
     if len(pool) == 1:
         s = pool[0]
         if (major or unique_codes) and not adm:
+            code_matches = len(unique_codes) == 1 and any(
+                major_code_match(c, s) for c in unique_codes
+            )
+            major_is_code_value = bool(major and major in unique_codes)
+            major_matches = bool(
+                major
+                and not major_is_code_value
+                and majors_fuzzy_match(major, s.major_name)
+            )
+            matched_by = ["name"]
+            if code_matches:
+                matched_by.append("major_code")
+            if major_matches:
+                matched_by.append("major_name")
+            if code_matches or major_matches:
+                return GraduateMatchResult(
+                    strength="strong",
+                    confidence=0.85,
+                    reason="姓名+专业唯一，但未提供硕/博，默认进入release，管理员可提前拒绝",
+                    matched_student_key=s.key,
+                    matched_student=s,
+                    matched_by=matched_by,
+                    candidate_count=1,
+                )
             return GraduateMatchResult(
                 strength="weak",
-                confidence=0.55,
-                reason="姓名+专业唯一，但未提供硕/博",
+                confidence=0.45,
+                reason="姓名唯一但专业/代码未命中，且未提供硕/博",
                 matched_student_key=s.key,
                 matched_student=s,
-                matched_by=["name", "major"],
+                matched_by=["name"],
                 candidate_count=1,
             )
         return GraduateMatchResult(

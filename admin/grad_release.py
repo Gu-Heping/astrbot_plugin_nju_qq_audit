@@ -63,7 +63,13 @@ def is_grad_releasable(
     parsed = req.parsed or {}
     if not parsed.get("name"):
         return False
-    if parsed.get("admission_type") not in {"硕士", "博士"}:
+    matched_by = set(match.get("matched_by") or [])
+    has_admission_type = parsed.get("admission_type") in {"硕士", "博士"}
+    has_major_only_table_type = (
+        match.get("admission_type") in {"硕士", "博士"}
+        and bool(matched_by.intersection({"major_code", "major_name"}))
+    )
+    if not (has_admission_type or has_major_only_table_type):
         return False
     errors = parsed.get("parse_errors") or []
     if "ai_parse_merged" in errors and not settings.ai_parse_allow_auto_approve:
@@ -186,12 +192,12 @@ def format_grad_release_help(count: int, settings: PluginSettings) -> str:
             "筛选条件（须同时满足）：",
             "- 研究生申请",
             "- 系统强匹配",
-            "- 姓名 + 硕或博 唯一命中名单；若填写专业/代码则不得冲突",
+            "- 姓名+硕或博唯一命中，或姓名+专业/代码唯一命中；若两类信息都填写则不得冲突",
             "- 仍在 QQ 待处理队列中",
             "",
             "说明：",
             "- 不改变当前运行模式（不是长期自动审核）",
-            "- 仅姓名+硕/博命中的申请默认在 release 队列里；通知展示名单专业，管理员可在 release 前 /audit no 拒绝",
+            "- 仅姓名+硕/博、或姓名+专业/代码但缺硕/博命中的申请默认在 release 队列里；通知展示名单信息，管理员可在 release 前 /audit no 拒绝",
             "- 不处理本科；本科请用 /audit release / catchup",
             "- 别名：/audit grad-release …、/audit grad-catchup …",
         ]
@@ -215,13 +221,13 @@ def format_grad_catchup_help(settings: PluginSettings) -> str:
             "筛选条件（须同时满足）：",
             "- 研究生申请",
             "- 系统强匹配",
-            "- 姓名 + 硕或博 唯一命中名单；若填写专业/代码则不得冲突",
+            "- 姓名+硕或博唯一命中，或姓名+专业/代码唯一命中；若两类信息都填写则不得冲突",
             "- 仍在 QQ 待处理队列中",
             "",
             "说明：",
             "- 同步失败时不会重算或放行",
             "- 不改变当前运行模式",
-            "- 仅姓名+硕/博命中的申请默认在 release 队列里；通知展示名单专业，管理员可在 release 前 /audit no 拒绝",
+            "- 仅姓名+硕/博、或姓名+专业/代码但缺硕/博命中的申请默认在 release 队列里；通知展示名单信息，管理员可在 release 前 /audit no 拒绝",
             "- 不处理本科；本科请用 /audit catchup",
         ]
     )
@@ -238,7 +244,7 @@ def format_grad_release_preview(preview: ReleasePreview, settings: PluginSetting
     lines.extend(
         [
             f"研究生强匹配批量放行（预览）：{preview.total_releasable} 条",
-            "筛选条件：研究生申请 · 系统强匹配 · 姓名+硕或博唯一命中 · 仍在待处理队列中",
+            "筛选条件：研究生申请 · 系统强匹配 · 姓名+硕博或姓名+专业唯一命中 · 仍在待处理队列中",
             f"间隔：{settings.batch_approve_interval_ms / 1000:g} 秒",
             "",
         ]
@@ -277,7 +283,7 @@ def format_grad_release_result(result: ReleaseResult, settings: PluginSettings) 
         [
             prefix,
             f"间隔：{settings.batch_approve_interval_ms / 1000:g} 秒",
-            "筛选条件：研究生申请 · 系统强匹配 · 姓名+硕或博唯一命中 · 仍在待处理队列中",
+            "筛选条件：研究生申请 · 系统强匹配 · 姓名+硕博或姓名+专业唯一命中 · 仍在待处理队列中",
             "",
         ]
     )

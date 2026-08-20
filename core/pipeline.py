@@ -145,8 +145,9 @@ def _graduate_release_needs_admin_notice(pending: PendingRequest, decision, matc
     if getattr(match, "strength", None) != "strong":
         return False
     matched_by = set(getattr(match, "matched_by", None) or [])
-    return "admission_type" in matched_by and not matched_by.intersection(
-        {"major_code", "major_name"}
+    return not (
+        "admission_type" in matched_by
+        and matched_by.intersection({"major_code", "major_name"})
     )
 
 
@@ -161,7 +162,13 @@ def _graduate_notice_release_status(pending: PendingRequest) -> str | None:
     parsed = pending.parsed or {}
     if match.get("candidate_count") != 1:
         return "not_in_queue"
-    if not parsed.get("name") or parsed.get("admission_type") not in {"硕士", "博士"}:
+    matched_by = set(match.get("matched_by") or [])
+    has_admission_type = parsed.get("admission_type") in {"硕士", "博士"}
+    has_major_only_table_type = (
+        match.get("admission_type") in {"硕士", "博士"}
+        and bool(matched_by.intersection({"major_code", "major_name"}))
+    )
+    if not parsed.get("name") or not (has_admission_type or has_major_only_table_type):
         return "not_in_queue"
     return "in_queue"
 
@@ -1893,6 +1900,12 @@ class AuditPipeline:
                     match_dict = pending.match or {}
                     if match_dict.get("college") and not notify_parsed.get("college"):
                         notify_parsed["college"] = match_dict.get("college")
+                    if match_dict.get("admission_type") and not notify_parsed.get(
+                        "matched_admission_type"
+                    ):
+                        notify_parsed["matched_admission_type"] = match_dict.get(
+                            "admission_type"
+                        )
                     if match_dict.get("major_name") and not notify_parsed.get(
                         "matched_major_name"
                     ):

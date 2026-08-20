@@ -31,12 +31,17 @@ def make_graduate_decision(
     if not is_target_group:
         return DecisionResult(decision="ignored", confidence=0, reason="非目标群，忽略")
 
+    matched_by = set(match.matched_by or [])
+    has_major_evidence = bool(matched_by.intersection({"major_code", "major_name"}))
     can_approve = (
         match.strength == "strong"
         and match.candidate_count == 1
         and match.matched_student is not None
         and bool(parsed.name)
-        and parsed.admission_type in {"硕士", "博士"}
+        and (
+            parsed.admission_type in {"硕士", "博士"}
+            or (has_major_evidence and not parsed.admission_type)
+        )
     )
     if can_approve:
         result = DecisionResult(
@@ -64,11 +69,13 @@ def apply_graduate_auto_approve_flag(
 ) -> DecisionResult:
     matched_by = set(match.matched_by or [])
     has_major_evidence = bool(matched_by.intersection({"major_code", "major_name"}))
+    has_admission_type_evidence = "admission_type" in matched_by
     result.should_auto_approve = (
         result.decision == "approve"
         and mode == "auto"
         and match.strength == "strong"
         and match.candidate_count == 1
         and has_major_evidence
+        and has_admission_type_evidence
     )
     return result

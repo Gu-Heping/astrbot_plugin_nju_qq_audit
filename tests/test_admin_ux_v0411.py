@@ -12,7 +12,7 @@ def test_help_advanced_mode_is_global():
     assert "自动通过强匹配申请（本科/研究生都会生效）" in text
     assert "本科：强匹配且通过 26 级检查" in text
     assert "研究生 auto：姓名 + 专业/代码 + 硕或博 唯一匹配" in text
-    assert "研究生 release：姓名 + 硕或博 唯一命中即可" in text
+    assert "研究生 release：姓名+硕或博唯一命中，或姓名+专业/代码唯一命中即可" in text
     assert "release/catchup 不是 mode：本科命令只处理本科" in text
     assert "release/catchup grad 只处理研究生" in text
     assert "/audit mode                 查看当前全局模式" in text

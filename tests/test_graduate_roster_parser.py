@@ -121,7 +121,10 @@ def test_wang_bo_name_not_doctor_type():
     assert parsed.name == "王博"
     assert parsed.admission_type is None
     match = match_graduate(parsed, _fixture_students())
-    assert match.strength != "strong"
+    assert match.strength == "strong"
+    assert "major_name" in match.matched_by
+    decision = make_graduate_decision(parsed, match, is_target_group=True)
+    assert decision.decision == "approve"
 
 
 def test_li_ming_yang_longest_name_match():

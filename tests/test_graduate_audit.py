@@ -271,11 +271,29 @@ def test_match_strong_name_major_master_unique():
     assert decision.decision == "approve"
 
 
-def test_match_name_major_without_type_manual():
+def test_match_name_major_without_type_releasable_but_not_auto():
     students = [_grad_student()]
     parsed = parse_graduate_comment("刘尚明 马克思主义哲学")
     match = match_graduate(parsed, students)
+    assert match.strength == "strong"
+    assert match.matched_student is not None
+    assert match.matched_student.admission_type == "硕士"
+    assert "major_name" in match.matched_by
+    decision = make_graduate_decision(parsed, match, is_target_group=True)
+    assert decision.decision == "approve"
+    from graduate.decision import apply_graduate_auto_approve_flag
+
+    decision = apply_graduate_auto_approve_flag(decision, "auto", match)
+    assert decision.should_auto_approve is False
+
+
+def test_match_name_wrong_major_without_type_not_releasable():
+    students = [_grad_student()]
+    parsed = parse_graduate_comment("刘尚明 中国哲学")
+    match = match_graduate(parsed, students)
     assert match.strength == "weak"
+    assert match.matched_by == ["name"]
+    assert "专业/代码未命中" in match.reason
     decision = make_graduate_decision(parsed, match, is_target_group=True)
     assert decision.decision == "manual_review"
 
@@ -368,12 +386,19 @@ def test_match_long_numeric_major_text_releasable_but_not_auto():
     assert decision.should_auto_approve is False
 
 
-def test_match_shuo_bo_placeholder_not_strong():
+def test_match_shuo_bo_placeholder_major_unique_releasable_but_not_auto():
     students = [_grad_student()]
     parsed = parse_graduate_comment("刘尚明 马克思主义哲学 硕/博")
     match = match_graduate(parsed, students)
     assert parsed.admission_type is None
-    assert match.strength != "strong"
+    assert match.strength == "strong"
+    assert "major_name" in match.matched_by
+    from graduate.decision import apply_graduate_auto_approve_flag
+
+    decision = make_graduate_decision(parsed, match, is_target_group=True)
+    decision = apply_graduate_auto_approve_flag(decision, "auto", match)
+    assert decision.decision == "approve"
+    assert decision.should_auto_approve is False
 
 
 def test_match_conflicting_major_codes_not_strong():
@@ -497,6 +522,38 @@ async def test_pipeline_graduate_name_type_queues_release_and_notifies(tmp_path)
     kwargs = pipe.notifier.notify_manual_review.await_args.kwargs
     assert kwargs["parsed"]["matched_major_name"] == "马克思主义哲学"
     assert kwargs["reason"] == latest.reason
+    assert kwargs["release_status"] == "in_queue"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_graduate_name_major_without_type_queues_release(tmp_path):
+    pipe, requests, actions = _pipeline(tmp_path)
+    pipe.settings.admin_notify = True
+    pipe.notifier = MagicMock()
+    pipe.notifier.notify_manual_review = AsyncMock()
+    await pipe.runtime.set_mode("auto", "1")
+    event = GroupJoinRequest(
+        group_id="200",
+        user_id="u-grad-major-only",
+        comment="刘尚明 马克思主义哲学",
+        flag="f-g-major-only",
+        sub_type="add",
+        raw_event={"time": 1000},
+    )
+    await pipe.handle_group_request(event)
+    latest = await requests.get_by_flag("f-g-major-only")
+    assert latest is not None
+    assert latest.profile == "graduate"
+    assert latest.match_strength == "strong"
+    assert latest.decision == "approve"
+    assert latest.status == "pending"
+    assert latest.parsed.get("admission_type") is None
+    assert latest.match["admission_type"] == "硕士"
+    assert "major_name" in latest.match["matched_by"]
+    actions.set_group_add_request.assert_not_awaited()
+    pipe.notifier.notify_manual_review.assert_awaited_once()
+    kwargs = pipe.notifier.notify_manual_review.await_args.kwargs
+    assert kwargs["parsed"]["matched_admission_type"] == "硕士"
     assert kwargs["release_status"] == "in_queue"
 
 
@@ -737,16 +794,40 @@ def test_graduate_notice_includes_table_major_when_applicant_omits_major():
             "name": "刘尚明",
             "admission_type": "硕士",
             "matched_major_name": "马克思主义哲学",
+            "matched_admission_type": "硕士",
             "college": "哲学学院",
         },
         release_status="in_queue",
     )
+    assert "名单录取类型" not in text
     assert "名单专业：马克思主义哲学" in text
     assert "release 状态：已在 release 队列" in text
     assert "批量放行前可 /audit no 1 拒绝" in text
     assert "/audit ok 1" in text
     assert "/audit no 1" in text
     assert "类型：研究生" in text
+
+
+def test_graduate_notice_includes_table_admission_type_when_applicant_omits_type():
+    from admin.ux_formatter import format_manual_review_notice
+
+    text = format_manual_review_notice(
+        index=1,
+        group_id="200",
+        user_id="u",
+        comment="刘尚明 马克思主义哲学",
+        judgement="姓名+专业唯一，但未提供硕/博，默认进入release，管理员可提前拒绝",
+        profile="graduate",
+        parsed={
+            "name": "刘尚明",
+            "major_text": "马克思主义哲学",
+            "matched_admission_type": "硕士",
+            "matched_major_name": "马克思主义哲学",
+        },
+        release_status="in_queue",
+    )
+    assert "名单录取类型：硕士" in text
+    assert "release 状态：已在 release 队列" in text
 
 
 def test_graduate_notice_marks_multi_candidate_not_in_release():

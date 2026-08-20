@@ -208,11 +208,13 @@ async def test_grad_review_blocked_categories(tmp_path):
             _grad_student(source_id="g3", key="g3", name="重名人", major_name="专业B"),
         ]
     )
-    await store.upsert(_grad_req(id="REQ-missing-type", comment="张测试 电子信息"))
+    await store.upsert(_grad_req(id="REQ-name-major-no-type", comment="张测试 电子信息"))
+    await store.upsert(_grad_req(id="REQ-missing-type", comment="张测试"))
     await store.upsert(_grad_req(id="REQ-name-not-found", comment="赵测试 硕"))
     await store.upsert(_grad_req(id="REQ-not-unique", comment="重名人 硕"))
 
     data = await build_grad_review_data(store, settings, grad_cache)
+    assert data.counts["release_only_needs_admin_notice"] == 1
     assert data.counts["missing_admission_type"] == 1
     assert data.counts["name_not_found"] == 1
     assert data.counts["name_type_not_unique"] == 1
