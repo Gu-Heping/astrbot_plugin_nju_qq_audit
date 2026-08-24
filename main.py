@@ -739,15 +739,20 @@ class NjuQqAuditPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("ok")
-    async def audit_ok(self, event: AstrMessageEvent, ref: str):
+    async def audit_ok(self, event: AstrMessageEvent, ref: str, arg2: str = ""):
         allowed, message = can_run_command(self._settings(), "ok", event)
         if not allowed:
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
+        resolved_ref = (
+            f"qq {arg2.strip()}"
+            if (ref or "").strip().lower() == "qq" and (arg2 or "").strip()
+            else ref
+        )
         resolved = await resolve_request_ref(
             event.get_sender_id(),
-            ref,
+            resolved_ref,
             list_cache=self.ctx.list_cache,
             requests=self.ctx.requests,
         )
@@ -778,16 +783,29 @@ class NjuQqAuditPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @audit.command("no")
-    async def audit_no(self, event: AstrMessageEvent, ref: str, reason: str = ""):
+    async def audit_no(
+        self,
+        event: AstrMessageEvent,
+        ref: str,
+        arg2: str = "",
+        reason: str = "",
+    ):
         allowed, message = can_run_command(self._settings(), "no", event)
         if not allowed:
             yield event.plain_result(message)
             return
         await self._record_admin_session(event)
-        reject_reason = reason.strip() or parse_no_command_reason(event.message_str or "", ref)
+        resolved_ref = (
+            f"qq {arg2.strip()}"
+            if (ref or "").strip().lower() == "qq" and (arg2 or "").strip()
+            else ref
+        )
+        reject_reason = parse_no_command_reason(event.message_str or "", resolved_ref)
+        if not (event.message_str or "").strip():
+            reject_reason = reason.strip() or reject_reason
         resolved = await resolve_request_ref(
             event.get_sender_id(),
-            ref,
+            resolved_ref,
             list_cache=self.ctx.list_cache,
             requests=self.ctx.requests,
         )

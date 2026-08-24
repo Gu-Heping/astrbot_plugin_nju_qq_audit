@@ -58,6 +58,17 @@ def sanitize_action_message(message: str | None) -> str:
     return text[:200]
 
 
+def _normalize_qq_ref(ref: str) -> str | None:
+    text = (ref or "").strip()
+    if not text:
+        return None
+    parts = text.split(maxsplit=1)
+    if len(parts) != 2 or parts[0].lower() != "qq":
+        return None
+    digits = "".join(ch for ch in parts[1] if ch.isdigit())
+    return digits or None
+
+
 @dataclass
 class ResolveResult:
     request: PendingRequest | None = None
@@ -124,8 +135,39 @@ async def resolve_request_ref(
 
     index: int | None = None
     request: PendingRequest | None = None
+    qq_ref = _normalize_qq_ref(ref)
 
-    if ref.isdigit():
+    if qq_ref:
+        matches = [
+            req
+            for req in await requests.list_all()
+            if req.user_id == qq_ref
+            and (req.status == "pending" or req.status == "failed")
+        ]
+        if not matches:
+            return ResolveResult(
+                error="not_found",
+                detail_message=(
+                    f"未找到 QQ {qq_ref} 的待处理入群申请。"
+                    "请检查 QQ 号，或先发送 /audit list。"
+                ),
+            )
+        if len(matches) > 1:
+            matches.sort(key=lambda r: r.created_at, reverse=True)
+            return ResolveResult(
+                error="not_found",
+                detail_message=(
+                    f"QQ {qq_ref} 当前有 {len(matches)} 条待处理申请，"
+                    "请先发送 /audit list 后按编号处理。"
+                ),
+            )
+        request = matches[0]
+        for ns in (list_namespace, "stale", None):
+            key = list_cache_key(admin_id, ns)
+            index = list_cache.find_index(key, request.id)
+            if index is not None:
+                break
+    elif ref.isdigit():
         index = int(ref)
         cache_keys: list[str] = []
         if list_namespace:
@@ -205,7 +247,7 @@ def normalize_reject_reason(reason: str) -> str:
 def parse_no_command_reason(message_str: str, ref: str) -> str:
     text = (message_str or "").strip()
     prefix = f"/audit no {ref}".strip()
-    if not text.startswith(prefix):
+    if not text.lower().startswith(prefix.lower()):
         return DEFAULT_REJECT_REASON
     rest = text[len(prefix) :].strip()
     if not rest:

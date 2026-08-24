@@ -43,8 +43,8 @@
 | `/audit list [n]` | 待处理列表（带短编号；列出前自动对账 QQ 侧） |
 | `/audit view <n>` | 查看第 n 条详情（含 QQ 匹配状态） |
 | `/audit lookup <姓名> <学号> [专业]` | 用当前缓存校对表查询匹配（strong/weak/none），不改 pending |
-| `/audit ok <n>` | 同意第 n 条（无需 confirm） |
-| `/audit no <n> [理由]` | 向 QQ 发起拒绝，可附理由 |
+| `/audit ok <n>` / `/audit ok qq <QQ号>` | 同意申请（无需 confirm）；QQ 号入口用于编号过期时兜底 |
+| `/audit no <n> [理由]` / `/audit no qq <QQ号> [理由]` | 向 QQ 发起拒绝，可附理由 |
 | `/audit dismiss <n> confirm <原因>` | **本地**关闭无效申请（不调 QQ）；原因必填 |
 | `/audit sweep preview` | 预览将本地关闭的**非 strong** pending（先 rematch，保留 strong） |
 | `/audit sweep confirm <原因>` | 一键 dismiss 全部非 strong（不调 QQ） |

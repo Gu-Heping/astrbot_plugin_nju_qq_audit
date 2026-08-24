@@ -13,8 +13,8 @@ from storage.list_cache import AdminListCacheStore
 from storage.requests_store import RequestsStore, new_request_id
 
 
-def _pending(req_id: str, *, status="pending", processed_at=None) -> PendingRequest:
-    return PendingRequest(
+def _pending(req_id: str, *, status="pending", processed_at=None, **kwargs) -> PendingRequest:
+    defaults = dict(
         id=req_id,
         group_id="796836121",
         user_id="2492835361",
@@ -31,6 +31,8 @@ def _pending(req_id: str, *, status="pending", processed_at=None) -> PendingRequ
         created_at="2026-07-09T00:00:00+00:00",
         processed_at=processed_at,
     )
+    defaults.update(kwargs)
+    return PendingRequest(**defaults)
 
 
 async def _setup(tmp_path, req_id: str, **kwargs):
@@ -59,6 +61,39 @@ async def test_resolve_by_req_prefix(tmp_path):
     result = await resolve_request_ref("111", req_id[:8], list_cache=cache, requests=requests)
     assert result.ok
     assert result.request.id == req_id
+
+
+@pytest.mark.asyncio
+async def test_resolve_by_qq_when_index_expired(tmp_path):
+    req_id = new_request_id()
+    requests = RequestsStore(tmp_path / "requests.json")
+    await requests.upsert(_pending(req_id, user_id="123456789"))
+    cache = AdminListCacheStore(tmp_path / "list_cache.json")
+    result = await resolve_request_ref(
+        "111",
+        "qq 123456789",
+        list_cache=cache,
+        requests=requests,
+    )
+    assert result.ok
+    assert result.request.id == req_id
+    assert result.index is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_by_qq_rejects_multiple_pending(tmp_path):
+    requests = RequestsStore(tmp_path / "requests.json")
+    await requests.upsert(_pending("REQ-one", user_id="123456789"))
+    await requests.upsert(_pending("REQ-two", user_id="123456789"))
+    cache = AdminListCacheStore(tmp_path / "list_cache.json")
+    result = await resolve_request_ref(
+        "111",
+        "qq 123456789",
+        list_cache=cache,
+        requests=requests,
+    )
+    assert not result.ok
+    assert "2 条待处理申请" in result.message
 
 
 @pytest.mark.asyncio
@@ -134,6 +169,14 @@ def test_parse_no_command_reason_confirm_before_reason():
 def test_parse_no_command_default_reason():
     reason = parse_no_command_reason("/audit no 2", "2")
     assert "学号" in reason
+
+
+def test_parse_no_command_reason_with_qq_ref():
+    reason = parse_no_command_reason(
+        "/audit no qq 123456789 信息不完整，请重填",
+        "qq 123456789",
+    )
+    assert reason == "信息不完整，请重填"
 
 
 def test_parse_dismiss_command():
