@@ -549,6 +549,13 @@ def format_release_result(result: ReleaseResult, settings: PluginSettings) -> st
     lines.extend(
         [
             "完成：",
+            *(
+                [
+                    f"本次已成功放行：{result.success}；因群满暂缓：{result.group_full_count}",
+                ]
+                if result.group_full_count
+                else []
+            ),
             f"成功：{result.success}",
             f"已同意：{result.already_approved_count}",
             f"已拒绝/已关闭：{result.dismissed_count}",

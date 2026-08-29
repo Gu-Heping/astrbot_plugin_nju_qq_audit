@@ -284,6 +284,7 @@ async def test_release_group_full_deferred_not_failed(tmp_path):
     assert updated.status == "pending"
     text = format_release_result(result, settings)
     assert "群已满，暂缓进群" in text
+    assert "本次已成功放行：0；因群满暂缓：1" in text
     assert "暂缓进群：1" in text
 
 
@@ -349,4 +350,5 @@ async def test_grad_release_group_full_deferred_not_failed(tmp_path):
     assert updated.status == "pending"
     text = format_grad_release_result(result, settings)
     assert "群已满，暂缓进群" in text
+    assert "本次已成功放行：0；因群满暂缓：1" in text
     assert "暂缓进群：1" in text
