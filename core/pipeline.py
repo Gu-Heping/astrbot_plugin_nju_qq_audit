@@ -2034,6 +2034,29 @@ class AuditPipeline:
                 admin_user_id=admin_user_id,
                 admin_command=admin_command,
             )
+        if classified.kind == "GROUP_FULL":
+            await self.requests.update_by_id(
+                req.id,
+                {
+                    "status": "pending",
+                    "processed_at": None,
+                    "last_action_result": payload,
+                    "last_action_at": now,
+                },
+            )
+            await self.audit.append(
+                {
+                    "type": "action_group_full_deferred",
+                    "request_id": req.id,
+                    "group_id": req.group_id,
+                    "user_id": req.user_id,
+                    "admin_user_id": admin_user_id,
+                    "admin_command": admin_command,
+                    "reason": (classified.message or result.message or "")[:200],
+                    "status": "pending",
+                }
+            )
+            return "pending"
 
         await self.requests.update_by_id(
             req.id,

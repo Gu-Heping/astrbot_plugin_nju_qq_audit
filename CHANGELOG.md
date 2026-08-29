@@ -16,6 +16,7 @@
 - 研究生人工通知新增 release 状态提示，明确申请是否已在 release 队列；`/audit report grad` 增加多候选分布分析。
 - 研究生 release 规则继续放宽：姓名 + 专业/代码 唯一命中时，即使申请未填写硕/博，也进入 release 队列但不 auto。
 - 新增 `/audit ok qq <QQ号>` 与 `/audit no qq <QQ号> [理由]`，用于管理员列表编号过期时按申请 QQ 号处理唯一待处理申请。
+- release/catchup 遇到 QQ 返回群已满时改为“暂缓进群”：申请保留在 release 队列，清出名额后可重新放行。
 
 ## [v0.4.23] - 2026-07-27
 

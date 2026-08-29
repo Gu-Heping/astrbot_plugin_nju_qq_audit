@@ -124,6 +124,8 @@
 | `batch_approve_interval_ms` | 3000 | 每条间隔（毫秒），防 QQ 频控 |
 | `batch_approve_max_count` | 20 | `release all` / catchup 单次上限 |
 
+release/catchup 执行过程中若 QQ 返回“群已满”，申请会暂缓进群并继续保留在 release 队列；管理员清出名额后重新执行 release/catchup 即可继续放行。
+
 ## 再申请与 debounce
 
 - **`processed`(approve/reject)**、**`external`**：同 flag 允许新建 attempt（`reapply_of` / `attempt_no`），旧记录保留
@@ -171,6 +173,7 @@
 - 缓存：`grad_students.cache.json`、`grad_sync_state.json`
 - 强匹配/release：姓名 + 硕士/博士 唯一命中，或姓名 + 专业/代码唯一命中；若同时填写硕/博和专业/代码，则不得冲突
 - 仅姓名+硕/博、或姓名+专业/代码但缺硕/博命中的申请会默认进入 release 队列但不自动通过，并继续通知管理员；通知展示名单专业/录取类型，管理员可在 release 前用 `/audit no <n>` 拒绝并移出队列
+- release/catchup grad 执行时若 QQ 返回“群已满”，会暂缓进群并保留在 release 队列，清出名额后重新执行即可
 - **不读取**「证件号码末三位」；不自动 reject
 - 命令：`/audit sync-grad`、`/audit list grad`
 

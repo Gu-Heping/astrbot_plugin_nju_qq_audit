@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
+from admin.action_error import classify_action_failure
 from admin.labels import applicant_summary
 from config import PluginSettings
 from core.normalize import (
@@ -64,6 +65,7 @@ class ReleaseResult:
     skipped_count: int = 0
     dismissed_count: int = 0
     already_approved_count: int = 0
+    group_full_count: int = 0
     lines: list[ReleaseLineResult] = field(default_factory=list)
     cancelled: bool = False
     rematch: RematchSummary | None = None
@@ -422,6 +424,7 @@ def format_release_help(count: int, settings: PluginSettings) -> str:
         "- 不改变当前运行模式（不是长期自动审核）",
         "- 建议先发欢迎消息，再分批执行",
         "- 校对表更新后优先使用 /audit catchup preview",
+        "- 若 QQ 返回群已满，会暂缓进群并保留在 release 队列；清出名额后重新 release",
         "",
         "本科路由策略（release/catchup）：",
         "- 多群互斥命中：不会在批量流程里自动拒绝，只移出放行队列并转人工确认。",
@@ -454,6 +457,7 @@ def format_catchup_help(settings: PluginSettings) -> str:
         "说明：",
         "- 同步失败时不会重算或放行",
         "- 不改变当前运行模式",
+        "- 若 QQ 返回群已满，会暂缓进群并保留在 release 队列；清出名额后重新 catchup/release",
         "",
         "本科路由策略（release/catchup）：",
         "- 多群互斥命中：不会在批量流程里自动拒绝，只移出放行队列并转人工确认。",
@@ -530,6 +534,8 @@ def format_release_result(result: ReleaseResult, settings: PluginSettings) -> st
                 status = "QQ 侧已拒绝，已移出队列"
             elif line.final_status == "already_approved":
                 status = "QQ 侧已同意，已移出队列"
+            elif line.final_status == "group_full":
+                status = "群已满，暂缓进群；仍在 release 队列"
             elif line.final_status == "blacklist":
                 status = f"命中黑名单，已关闭：{line.message}"
             elif line.final_status == "skipped":
@@ -548,6 +554,7 @@ def format_release_result(result: ReleaseResult, settings: PluginSettings) -> st
             f"已拒绝/已关闭：{result.dismissed_count}",
             f"已失效：{result.stale_count}",
             f"外部已入群：{result.external_count}",
+            f"暂缓进群：{result.group_full_count}",
             f"失败：{result.failed}",
             f"剩余可通过：{result.remaining}",
         ]
@@ -641,6 +648,7 @@ def format_catchup_result(result: CatchupResult, settings: PluginSettings) -> st
         skipped_count=result.release.skipped_count,
         dismissed_count=result.release.dismissed_count,
         already_approved_count=result.release.already_approved_count,
+        group_full_count=result.release.group_full_count,
         lines=result.release.lines,
         cancelled=result.release.cancelled,
         rematch=None,
@@ -1049,6 +1057,16 @@ class ReleaseService:
                 final_status = "already_approved"
                 line_ok = True
                 message = "QQ 侧已同意，已移出队列"
+            elif (
+                not action.ok
+                and classify_action_failure(action.message, action.retcode).kind
+                == "GROUP_FULL"
+                and latest is not None
+                and latest.status == "pending"
+            ):
+                final_status = "group_full"
+                line_ok = True
+                message = "群已满，暂缓进群；申请仍保留在 release 队列"
             elif action.ok and latest is not None and latest.status == "processed":
                 final_status = "success"
                 line_ok = True
@@ -1072,6 +1090,8 @@ class ReleaseService:
                 result.dismissed_count += 1
             elif final_status == "already_approved":
                 result.already_approved_count += 1
+            elif final_status == "group_full":
+                result.group_full_count += 1
             elif action.ok:
                 result.success += 1
             else:

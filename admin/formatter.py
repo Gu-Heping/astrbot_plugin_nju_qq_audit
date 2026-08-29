@@ -314,6 +314,7 @@ def _format_help_grad() -> str:
             "",
             "说明：",
             "本科 release/catchup 只处理本科；研究生用 release/catchup grad。",
+            "若 QQ 返回群已满，会暂缓进群并保留在 release 队列；清出名额后可重新 release。",
         ]
     )
 
@@ -355,6 +356,7 @@ def _format_help_batch(
         "说明：",
         "- 不改变当前运行模式",
         "- 校对表刚更新时优先 catchup",
+        "- 若 QQ 返回群已满，会暂缓进群并保留在 release 队列；清出名额后可重新 release",
         "- 本科 release/catchup 只处理本科；研究生用 release/catchup grad",
         "- 别名：/audit batch strong N confirm、/audit temp N confirm",
         "",
@@ -536,6 +538,7 @@ def _format_help_advanced(
             "- 弱匹配、非 26 级、QQ 辅助不会自动通过",
             "- release：用当前本地名单重算待处理后分批通过",
             "- catchup：先同步校对表，再重算待处理并补放新强匹配",
+            "- 群已满：暂缓进群，申请仍保留在 release 队列，清出名额后重试即可",
             "- lookup：用姓名/学号/通知书/考生号直接查当前缓存是否能匹配",
             "- sweep：本地批量关闭非强匹配（不调 QQ；适合 QQ 侧已拒但未上报）",
             "- blacklist：按 QQ 号阻止入群申请与批量放行",

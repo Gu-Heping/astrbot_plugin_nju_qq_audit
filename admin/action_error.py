@@ -10,6 +10,7 @@ ActionFailureKind = Literal[
     "STALE",
     "ALREADY_APPROVED",
     "ALREADY_REFUSED",
+    "GROUP_FULL",
     "UNKNOWN",
 ]
 
@@ -33,6 +34,17 @@ _ALREADY_REFUSED_MARKERS = (
     "120162003",
     "已拒绝",
     "已经拒绝",
+)
+
+_GROUP_FULL_MARKERS = (
+    "group is full",
+    "120162000",
+    "群满",
+    "群已满",
+    "群人数已满",
+    "人数已满",
+    "成员已满",
+    "满员",
 )
 
 _STALE_MARKERS = (
@@ -86,6 +98,8 @@ def classify_action_failure(message: str | None, retcode: int | None = None) -> 
         return ClassifiedFailure("ALREADY_APPROVED", message or "")
     if any(m in text for m in _ALREADY_REFUSED_MARKERS):
         return ClassifiedFailure("ALREADY_REFUSED", message or "")
+    if any(m in text for m in _GROUP_FULL_MARKERS):
+        return ClassifiedFailure("GROUP_FULL", message or "")
     if any(m in text for m in _STALE_MARKERS):
         return ClassifiedFailure("STALE", message or "")
     if any(m in text for m in _PERMISSION_MARKERS):
@@ -106,6 +120,8 @@ def user_message_for_failure(kind: ActionFailureKind, *, became_external: bool =
         return "QQ 侧显示该申请已被同意，已从待放行队列移出。"
     if kind == "ALREADY_REFUSED":
         return "QQ 侧显示该申请已被拒绝，已从待放行队列移出。"
+    if kind == "GROUP_FULL":
+        return "审批失败：群已满，申请仍保留在 release 队列；清出名额后可重新 release。"
     if kind == "STALE":
         return (
             "QQ 侧已找不到这条申请，可能已被处理、撤回或过期。"

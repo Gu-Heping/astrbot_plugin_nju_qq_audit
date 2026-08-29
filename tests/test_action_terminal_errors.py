@@ -42,6 +42,11 @@ def test_classify_already_refuse():
     assert classify_action_failure(msg, 100).kind == "ALREADY_REFUSED"
 
 
+def test_classify_group_full():
+    msg = "OIDB error 120162000 on 0x10c8_1: group is full"
+    assert classify_action_failure(msg, 100).kind == "GROUP_FULL"
+
+
 def _pipeline(tmp_path, *, actions=None, settings=None):
     settings = settings or load_settings(
         DummyConfig(
@@ -192,6 +197,31 @@ async def test_admin_approve_already_refuse_dismissed(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_admin_approve_group_full_keeps_pending_without_retry(tmp_path):
+    actions = MagicMock()
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(
+            ok=False,
+            retcode=100,
+            message="OIDB error 120162000 on 0x10c8_1: group is full",
+        )
+    )
+    actions.get_group_system_msg = AsyncMock(side_effect=Exception("skip"))
+    pipe, requests, audit, _, _settings = _pipeline(tmp_path, actions=actions)
+    req = _strong_under(retry_count=2)
+    await requests.upsert(req)
+
+    result = await pipe.admin_approve(req, "admin")
+    assert result.ok is False
+    updated = await requests.get_by_id(req.id)
+    assert updated.status == "pending"
+    assert updated.processed_at is None
+    assert updated.retry_count == 2
+    assert updated.last_action_result.ok is False
+    assert any(r.get("type") == "action_group_full_deferred" for r in audit.read_all())
+
+
+@pytest.mark.asyncio
 async def test_release_counts_already_refuse_as_dismissed_not_failed(tmp_path):
     actions = MagicMock()
     actions.set_group_add_request = AsyncMock(
@@ -223,6 +253,41 @@ async def test_release_counts_already_refuse_as_dismissed_not_failed(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_release_group_full_deferred_not_failed(tmp_path):
+    actions = MagicMock()
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(
+            ok=False,
+            retcode=100,
+            message="OIDB error 120162000 on 0x10c8_1: group is full",
+        )
+    )
+    actions.get_group_system_msg = AsyncMock(side_effect=Exception("skip"))
+    pipe, requests, audit, _, settings = _pipeline(tmp_path, actions=actions)
+    await requests.upsert(_strong_under())
+
+    result = await ReleaseService().run_batch(
+        requests_store=requests,
+        pipeline=pipe,
+        settings=settings,
+        admin_user_id="admin",
+        count=1,
+        audit_log=audit,
+        skip_rematch=True,
+    )
+    assert result is not None
+    assert result.group_full_count == 1
+    assert result.failed == 0
+    assert result.success == 0
+    assert result.remaining == 1
+    updated = await requests.get_by_id("REQ-u1")
+    assert updated.status == "pending"
+    text = format_release_result(result, settings)
+    assert "群已满，暂缓进群" in text
+    assert "暂缓进群：1" in text
+
+
+@pytest.mark.asyncio
 async def test_grad_release_handles_already_approved(tmp_path):
     actions = MagicMock()
     actions.set_group_add_request = AsyncMock(
@@ -250,3 +315,38 @@ async def test_grad_release_handles_already_approved(tmp_path):
     assert result.already_approved_count == 1 or result.success == 0
     text = format_grad_release_result(result, settings)
     assert "已同意" in text or "QQ 侧已同意" in text
+
+
+@pytest.mark.asyncio
+async def test_grad_release_group_full_deferred_not_failed(tmp_path):
+    actions = MagicMock()
+    actions.set_group_add_request = AsyncMock(
+        return_value=ActionResult(
+            ok=False,
+            retcode=100,
+            message="OIDB error 120162000 on 0x10c8_1: group is full",
+        )
+    )
+    actions.get_group_system_msg = AsyncMock(side_effect=Exception("skip"))
+    pipe, requests, audit, _, settings = _pipeline(tmp_path, actions=actions)
+    await requests.upsert(_strong_grad())
+
+    result = await GradReleaseService().run_batch(
+        requests_store=requests,
+        pipeline=pipe,
+        settings=settings,
+        admin_user_id="admin",
+        count=1,
+        audit_log=audit,
+        skip_rematch=True,
+    )
+    assert result is not None
+    assert result.group_full_count == 1
+    assert result.failed == 0
+    assert result.success == 0
+    assert result.remaining == 1
+    updated = await requests.get_by_id("REQ-g1")
+    assert updated.status == "pending"
+    text = format_grad_release_result(result, settings)
+    assert "群已满，暂缓进群" in text
+    assert "暂缓进群：1" in text

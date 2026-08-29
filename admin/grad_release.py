@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Awaitable, Callable
 
+from admin.action_error import classify_action_failure
 from admin.labels import applicant_summary
 from admin.release import (
     CatchupPreview,
@@ -198,6 +199,7 @@ def format_grad_release_help(count: int, settings: PluginSettings) -> str:
             "说明：",
             "- 不改变当前运行模式（不是长期自动审核）",
             "- 仅姓名+硕/博、或姓名+专业/代码但缺硕/博命中的申请默认在 release 队列里；通知展示名单信息，管理员可在 release 前 /audit no 拒绝",
+            "- 若 QQ 返回群已满，会暂缓进群并保留在 release 队列；清出名额后重新 release grad",
             "- 不处理本科；本科请用 /audit release / catchup",
             "- 别名：/audit grad-release …、/audit grad-catchup …",
         ]
@@ -228,6 +230,7 @@ def format_grad_catchup_help(settings: PluginSettings) -> str:
             "- 同步失败时不会重算或放行",
             "- 不改变当前运行模式",
             "- 仅姓名+硕/博、或姓名+专业/代码但缺硕/博命中的申请默认在 release 队列里；通知展示名单信息，管理员可在 release 前 /audit no 拒绝",
+            "- 若 QQ 返回群已满，会暂缓进群并保留在 release 队列；清出名额后重新 catchup/release grad",
             "- 不处理本科；本科请用 /audit catchup",
         ]
     )
@@ -299,6 +302,8 @@ def format_grad_release_result(result: ReleaseResult, settings: PluginSettings) 
                 status = "QQ 侧已拒绝，已移出队列"
             elif line.final_status == "already_approved":
                 status = "QQ 侧已同意，已移出队列"
+            elif line.final_status == "group_full":
+                status = "群已满，暂缓进群；仍在 release 队列"
             elif line.final_status == "blacklist":
                 status = f"命中黑名单，已关闭：{line.message}"
             elif line.final_status == "skipped":
@@ -313,6 +318,7 @@ def format_grad_release_result(result: ReleaseResult, settings: PluginSettings) 
             f"已拒绝/已关闭：{result.dismissed_count}",
             f"已失效：{result.stale_count}",
             f"外部已入群：{result.external_count}",
+            f"暂缓进群：{result.group_full_count}",
             f"失败：{result.failed}",
             f"剩余可通过：{result.remaining}",
             "",
@@ -380,6 +386,7 @@ def format_grad_catchup_result(result: CatchupResult, settings: PluginSettings) 
         skipped_count=result.release.skipped_count,
         dismissed_count=result.release.dismissed_count,
         already_approved_count=result.release.already_approved_count,
+        group_full_count=result.release.group_full_count,
         lines=result.release.lines,
         cancelled=result.release.cancelled,
         rematch=None,
@@ -751,6 +758,16 @@ class GradReleaseService:
                 final_status = "already_approved"
                 line_ok = True
                 message = "QQ 侧已同意，已移出队列"
+            elif (
+                not action.ok
+                and classify_action_failure(action.message, action.retcode).kind
+                == "GROUP_FULL"
+                and latest is not None
+                and latest.status == "pending"
+            ):
+                final_status = "group_full"
+                line_ok = True
+                message = "群已满，暂缓进群；申请仍保留在 release 队列"
             result.processed += 1
             line = ReleaseLineResult(
                 index=idx,
@@ -771,6 +788,8 @@ class GradReleaseService:
                 result.dismissed_count += 1
             elif final_status == "already_approved":
                 result.already_approved_count += 1
+            elif final_status == "group_full":
+                result.group_full_count += 1
             elif action.ok:
                 result.success += 1
             else:
